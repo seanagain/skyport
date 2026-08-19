@@ -628,15 +628,18 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // Keep any clearance we hold alive. Going quiet is what lets another
         // plane reclaim it, so a flight that ends abruptly can't lock a field.
         registry.heartbeat(planeId(), serverLevel.getGameTime());
-        if (isGroundState()) {
-            registry.clearAirborne(planeId());
+        // Report whether airborne or not: a plane taxiing is still traffic
+        // the tower should be able to see. Separation, though, stays an
+        // airborne-only concern - see separationOffset.
+        boolean airborne = !isGroundState();
+        registry.reportAirborne(new TrafficReport(
+                planeId(), callsign(), state.name(), simulatedPosition,
+                destinationLabel(registry), airborne));
+
+        if (!airborne) {
             currentSeparationOffset = 0;
-        } else {
-            registry.reportAirborne(new TrafficReport(
-                    planeId(), callsign(), state.name(), simulatedPosition, destinationLabel(registry)));
-            if (tickCounter % SEPARATION_CHECK_INTERVAL_TICKS == 0) {
-                currentSeparationOffset = separationOffset(serverLevel);
-            }
+        } else if (tickCounter % SEPARATION_CHECK_INTERVAL_TICKS == 0) {
+            currentSeparationOffset = separationOffset(serverLevel);
         }
 
         // Drag the loaded-chunk bubble along with the plane, so it doesn't
@@ -1123,6 +1126,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         int stacked = 0;
         for (Map.Entry<UUID, TrafficReport> other : AirportRegistry.get(serverLevel).airborneTraffic().entrySet()) {
             if (other.getKey().equals(planeId)) continue;
+            // Planes on the ground aren't a separation problem - they're
+            // handled by the taxiway and runway clearances instead.
+            if (!other.getValue().airborne()) continue;
             Vec3 pos = other.getValue().position();
             double dx = pos.x - simulatedPosition.x;
             double dz = pos.z - simulatedPosition.z;

@@ -14,7 +14,10 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
+import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
+
+import java.util.List;
 
 /**
  * Registers every custom C2S/S2C payload this addon uses. NeoForge scans
@@ -57,6 +60,16 @@ public class ModNetworking {
                 SaveSchedulePayload.STREAM_CODEC,
                 ModNetworking::handleSaveSchedule);
 
+        registrar.playToServer(
+                AtcTrafficPayload.Request.TYPE,
+                AtcTrafficPayload.Request.STREAM_CODEC,
+                ModNetworking::handleAtcTrafficRequest);
+
+        registrar.playToClient(
+                AtcTrafficPayload.TYPE,
+                AtcTrafficPayload.STREAM_CODEC,
+                ModNetworking::handleAtcTraffic);
+
         registrar.playToClient(
                 OpenAirportMapPayload.TYPE,
                 OpenAirportMapPayload.STREAM_CODEC,
@@ -92,6 +105,23 @@ public class ModNetworking {
             ServerPlayer player = (ServerPlayer) context.player();
             if (player.level().getBlockEntity(payload.pos()) instanceof AutopilotBlockEntity autopilot) {
                 autopilot.disengage();
+            }
+        });
+    }
+
+    private static void handleAtcTrafficRequest(AtcTrafficPayload.Request payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            ServerPlayer player = (ServerPlayer) context.player();
+            var registry = com.skyport.data.AirportRegistry.get(player.serverLevel());
+            PacketDistributor.sendToPlayer(player,
+                    new AtcTrafficPayload(List.copyOf(registry.airborneTraffic().values())));
+        });
+    }
+
+    private static void handleAtcTraffic(AtcTrafficPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (Minecraft.getInstance().screen instanceof AtcScreen atc) {
+                atc.updateTraffic(payload.traffic());
             }
         });
     }

@@ -3,6 +3,8 @@ package com.skyport.client.gui;
 import com.skyport.data.AirportLayout;
 import com.skyport.data.TrafficReport;
 import com.skyport.data.Waypoint;
+import com.skyport.client.TerrainMemory;
+import com.skyport.network.AtcTrafficPayload;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -12,6 +14,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.material.MapColor;
+import net.neoforged.neoforge.network.PacketDistributor;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -40,14 +43,23 @@ public class AtcScreen extends Screen {
     private static final int COLOR_HOLD_SHORT = 0xFFD64550;
     private static final int COLOR_LABEL = 0xFF5AD7E0;
     private static final int COLOR_AIRCRAFT = 0xFFE0812F;
+    /** Taxiing aircraft, dimmer so they read as "on the ground" against the
+     *  airport lines they sit on top of. */
+    private static final int COLOR_AIRCRAFT_GROUND = 0xFF9E6636;
     private static final int COLOR_ATC = 0xFFE33A3A;
     private static final int COLOR_GRID = 0xFF2A2A2A;
     private static final int MARGIN_BLOCKS = 120;
     private static final int TERRAIN_CELL = 3;
+    /** How often to ask the server for fresh aircraft positions. */
+    private static final long REFRESH_INTERVAL_MS = 500;
 
     private final BlockPos atcPos;
     private final List<AirportLayout> airports;
-    private final List<TrafficReport> traffic;
+    /** Replaced wholesale by each refresh, so aircraft move while you watch. */
+    private List<TrafficReport> traffic;
+    private long lastRefreshMs;
+    /** Set once the view has been dragged, so refreshes stop re-fitting it. */
+    private boolean panned;
 
     private int mapX, mapY, mapW, mapH;
     private int listX, listW;
@@ -87,15 +99,40 @@ public class AtcScreen extends Screen {
         zoomButton.active = false;
         addRenderableWidget(Button.builder(Component.literal("+"), b -> zoom(1 / 1.6))
                 .bounds(mapX + 94, mapY + mapH + 16, 20, rowH).build());
-        addRenderableWidget(Button.builder(Component.literal("Fit"), b -> { fitToContents(); refreshZoom(); })
+        addRenderableWidget(Button.builder(Component.literal("Fit"),
+                        b -> { panned = false; fitToContents(); refreshZoom(); })
                 .bounds(mapX + 118, mapY + mapH + 16, 34, rowH).build());
 
         addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose())
                 .bounds(listX + listW - 60, mapY + mapH + 16, 60, rowH)
                 .build());
 
-        fitToContents();
+        // init() runs again on window resize, so don't yank a view the player
+        // has deliberately dragged somewhere.
+        if (!panned) fitToContents();
         sampleTerrain();
+    }
+
+    /**
+     * Swap in fresh traffic from the server.
+     *
+     * Selection follows the aircraft rather than the row index: the list is
+     * rebuilt each refresh and planes drop out of it when they park, so a
+     * remembered index would quietly start describing a different aeroplane.
+     */
+    public void updateTraffic(List<TrafficReport> updated) {
+        java.util.UUID selectedId = (selected >= 0 && selected < traffic.size())
+                ? traffic.get(selected).planeId() : null;
+        this.traffic = updated;
+        selected = -1;
+        if (selectedId != null) {
+            for (int i = 0; i < updated.size(); i++) {
+                if (updated.get(i).planeId().equals(selectedId)) {
+                    selected = i;
+                    break;
+                }
+            }
+        }
     }
 
     private Component zoomLabel() {
@@ -116,11 +153,29 @@ public class AtcScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        if (mouseX >= mapX && mouseX < mapX + mapW && mouseY >= mapY && mouseY < mapY + mapH) {
+        if (overMap(mouseX, mouseY)) {
             zoom(scrollY > 0 ? 1 / 1.6 : 1.6);
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+    }
+
+    private boolean overMap(double x, double y) {
+        return x >= mapX && x < mapX + mapW && y >= mapY && y < mapY + mapH;
+    }
+
+    /** Drag the map around. Panning turns off auto-fit, or the next refresh
+     *  would snap the view straight back and undo the drag. */
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (button == 0 && overMap(mouseX, mouseY)) {
+            centreX -= (int) Math.round(dragX * blocksPerPixel);
+            centreZ -= (int) Math.round(dragY * blocksPerPixel);
+            panned = true;
+            sampleTerrain();
+            return true;
+        }
+        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
     }
 
     /**
@@ -147,23 +202,10 @@ public class AtcScreen extends Screen {
     }
 
     private static int sampleTerrainColor(@Nullable Level level, BlockPos column) {
-        if (level == null || !level.hasChunkAt(column)) return 0;
-        int surfaceY = level.getHeight(Heightmap.Types.WORLD_SURFACE, column.getX(), column.getZ());
-        BlockPos surface = new BlockPos(column.getX(), surfaceY - 1, column.getZ());
-        MapColor mapColor = level.getBlockState(surface).getMapColor(level, surface);
-        if (mapColor == MapColor.NONE) return 0;
-
-        int northY = level.getHeight(Heightmap.Types.WORLD_SURFACE, column.getX(), column.getZ() - 1);
-        int step = Integer.compare(surfaceY, northY);
-        MapColor.Brightness brightness = switch (step) {
-            case 1 -> MapColor.Brightness.HIGH;
-            case -1 -> MapColor.Brightness.LOW;
-            default -> MapColor.Brightness.NORMAL;
-        };
-        // MapColor packs ABGR; GuiGraphics wants ARGB - see AirportMapScreen.
-        int abgr = mapColor.calculateRGBColor(brightness);
-        int r = abgr & 0xFF, g = (abgr >> 8) & 0xFF, b = (abgr >> 16) & 0xFF;
+        int color = TerrainMemory.colorAt(level, column.getX(), column.getZ());
+        if (color == 0) return 0;
         // Dimmed: this is a backdrop for the layout, not the subject.
+        int r = (color >> 16) & 0xFF, g = (color >> 8) & 0xFF, b = color & 0xFF;
         return 0xFF000000 | ((r * 2 / 3) << 16) | ((g * 2 / 3) << 8) | (b * 2 / 3);
     }
 
@@ -248,6 +290,17 @@ public class AtcScreen extends Screen {
         // Screen#render draws the background itself, so ours goes after it.
         super.render(guiGraphics, mouseX, mouseY, partialTick);
 
+        // Poll for moving traffic while the screen is open. Only while open -
+        // a flight nobody is watching costs nothing.
+        long now = System.currentTimeMillis();
+        if (now - lastRefreshMs > REFRESH_INTERVAL_MS) {
+            lastRefreshMs = now;
+            PacketDistributor.sendToServer(new AtcTrafficPayload.Request());
+            // Terrain fills in as chunks load around the player, so re-sample
+            // on the same beat rather than only when the view changes.
+            sampleTerrain();
+        }
+
         guiGraphics.fill(mapX, mapY, mapX + mapW, mapY + mapH, 0xFF111820);
         for (int cx = 0; cx < terrain.length; cx++) {
             for (int cy = 0; cy < terrain[cx].length; cy++) {
@@ -277,9 +330,10 @@ public class AtcScreen extends Screen {
             TrafficReport report = traffic.get(i);
             int x = worldToScreenX(report.position().x);
             int y = worldToScreenY(report.position().z);
-            guiGraphics.fill(x - 2, y - 2, x + 3, y + 3, COLOR_AIRCRAFT);
+            int color = report.airborne() ? COLOR_AIRCRAFT : COLOR_AIRCRAFT_GROUND;
+            guiGraphics.fill(x - 2, y - 2, x + 3, y + 3, color);
             if (i == selected) drawBorder(guiGraphics, x - 5, y - 5, 11, 11, 0xFFFFFFFF);
-            guiGraphics.drawString(font, report.callsign(), x + 5, y + 3, COLOR_AIRCRAFT);
+            guiGraphics.drawString(font, report.callsign(), x + 5, y + 3, color);
         }
 
         drawAircraftList(guiGraphics);
