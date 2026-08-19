@@ -100,6 +100,14 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** Taxi speed - slower, so the craft actually settles on tightly spaced
      *  ground waypoints instead of sailing past them and turning back. */
     private static final double CRAFT_TAXI_SPEED = 4.0;
+    /** Rotation speed, reached by half the runway's length. */
+    private static final double CRAFT_TAKEOFF_SPEED = 14.0;
+    /** Climb-out angle. Shallower than the 30-degree structural cap because
+     *  a departure that steep looks like a rocket, not a plane. */
+    private static final double CLIMB_PITCH_DEGREES = 20.0;
+    /** Start turning into the holding pattern this far out, so the plane
+     *  banks into it rather than reaching the entry point and pivoting. */
+    private static final double HOLDING_ENTRY_LEAD_BLOCKS = 20.0;
     /** Fraction of the velocity error corrected per physics tick. Low on
      *  purpose: a heavy contraption yanked to a new velocity looks wrong. */
     private static final double CRAFT_STEER_GAIN = 0.25;
@@ -141,6 +149,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     // simulatedPosition below.
     @org.jetbrains.annotations.Nullable
     private BlockPos joinPoint;
+    /** Where the takeoff roll began, to measure how far down the runway the
+     *  plane has got. Transient, like the rest of the in-flight values. */
+    @org.jetbrains.annotations.Nullable
+    private Vec3 takeoffStart;
 
     private FlightState state = FlightState.IDLE;
     private int currentWaypointIndex = 0;
@@ -290,6 +302,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         controllingPlayerId = null;
         originAirportId = null;
         joinPoint = null;
+        takeoffStart = null;
         pitchDegrees = 0;
         waitTicksRemaining = 0;
         setChanged();
@@ -378,20 +391,34 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 if (origin != null) path.addAll(groundTaxiPath(origin, false));
                 followWaypoints(path, () -> setState(FlightState.TAKEOFF_ROLL));
             }
+            // Accelerate along the runway centreline, reaching rotation speed
+            // by the halfway point, then pitch up and fly.
             case TAKEOFF_ROLL -> {
                 AirportLayout origin = originLayout(serverLevel);
                 List<BlockPos> runway = origin != null ? positionsOf(origin, Waypoint.Type.RUNWAY) : List.of();
-                followWaypoints(runway, () -> setState(FlightState.CLIMB));
+                if (runway.size() < 2) {
+                    setState(FlightState.CLIMB);
+                } else {
+                    runTakeoffRoll(runway);
+                }
             }
-            // Climb toward where we're going, not straight up: the pitch cap
-            // in applyMotionTowards limits how fast altitude comes, so this
-            // covers ground on the way up the way a real departure does.
-            // Straight up would have zero horizontal distance to pitch
-            // against, which the cap can't express as an angle at all.
+            // Hold a fixed climb angle along the current heading.
+            //
+            // This used to chase a point above the holding pattern, which
+            // meant that once the plane arrived over that x/z there was no
+            // horizontal distance left - it hovered there climbing straight
+            // up. A departure is "keep flying forward, nose up", not "fly to
+            // a spot", so that's what this does now.
             case CLIMB -> {
-                applyMotionTowards(climbTarget(destination));
-                if (simulatedPosition.y >= SAFE_CRUISE_ALTITUDE - 1) setState(FlightState.CRUISE);
+                Vec3 forward = climbHeading(destination);
+                double climbY = Math.sin(Math.toRadians(CLIMB_PITCH_DEGREES));
+                double climbXZ = Math.cos(Math.toRadians(CLIMB_PITCH_DEGREES));
+                flyHeading(new Vec3(forward.x * climbXZ, climbY, forward.z * climbXZ), CRAFT_CRUISE_SPEED);
+                if (simulatedPosition.y >= cruiseAltitude() - 2) setState(FlightState.CRUISE);
             }
+            // Level flight toward the nearest holding-pattern point, handing
+            // over to HOLDING early enough to turn into the pattern rather
+            // than arriving at a point and pivoting on the spot.
             case CRUISE -> {
                 List<BlockPos> loop = positionsOf(destination, Waypoint.Type.HOLDING_PATTERN);
                 if (loop.isEmpty()) {
@@ -399,7 +426,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 } else {
                     if (holdingEntryIndex < 0) holdingEntryIndex = nearestIndex(loop, simulatedPosition);
                     BlockPos entry = withY(loop.get(holdingEntryIndex), destination.holdingPatternHeight());
-                    if (applyMotionTowards(entry)) setState(FlightState.HOLDING);
+                    applyMotionTowards(entry);
+                    if (horizontalDistance(entry, BlockPos.containing(simulatedPosition)) <= HOLDING_ENTRY_LEAD_BLOCKS) {
+                        setState(FlightState.HOLDING);
+                    }
                 }
             }
             // One full lap of the holding pattern starting at the point CRUISE
@@ -756,6 +786,85 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * Overflying the airport while climbing is fine and realistic - CRUISE
      * turns it back toward the holding pattern.
      */
+    private int cruiseAltitude() {
+        return schedule.cruiseAltitude();
+    }
+
+    /**
+     * The takeoff roll: accelerate down the runway centreline, hitting
+     * rotation speed by the halfway point, and rotate at the far end.
+     *
+     * Speed is ramped by how far along the runway the plane is rather than
+     * by a timer, so it works the same on a short strip or a long one.
+     */
+    private void runTakeoffRoll(List<BlockPos> runway) {
+        BlockPos start = runway.get(0);
+        BlockPos end = runway.get(1);
+        if (takeoffStart == null) takeoffStart = simulatedPosition;
+
+        double runwayLength = horizontalDistance(start, end);
+        double rolled = Math.sqrt(
+                Math.pow(simulatedPosition.x - takeoffStart.x, 2)
+                        + Math.pow(simulatedPosition.z - takeoffStart.z, 2));
+
+        // Full speed by half the runway, then hold it to the end.
+        double ramp = runwayLength <= 1 ? 1 : Math.min(1.0, rolled / (runwayLength * 0.5));
+        double speed = CRAFT_TAXI_SPEED + (CRAFT_TAKEOFF_SPEED - CRAFT_TAXI_SPEED) * ramp;
+
+        double dx = end.getX() - start.getX();
+        double dz = end.getZ() - start.getZ();
+        double len = Math.sqrt(dx * dx + dz * dz);
+        Vec3 along = len < 1.0e-6 ? new Vec3(1, 0, 0) : new Vec3(dx / len, 0, dz / len);
+        flyHeading(along, speed);
+
+        boolean atRotationSpeed = ramp >= 1.0;
+        boolean nearRunwayEnd = horizontalDistance(end, BlockPos.containing(simulatedPosition)) <= CRAFT_ARRIVAL_RADIUS;
+        if (atRotationSpeed && nearRunwayEnd) {
+            takeoffStart = null;
+            setState(FlightState.CLIMB);
+        }
+    }
+
+    /** Which way to climb out: toward the destination's holding pattern if
+     *  there is one, otherwise straight ahead on the current heading. */
+    private Vec3 climbHeading(AirportLayout destination) {
+        List<BlockPos> loop = positionsOf(destination, Waypoint.Type.HOLDING_PATTERN);
+        if (!loop.isEmpty()) {
+            BlockPos entry = loop.get(nearestIndex(loop, simulatedPosition));
+            double dx = entry.getX() - simulatedPosition.x;
+            double dz = entry.getZ() - simulatedPosition.z;
+            double len = Math.sqrt(dx * dx + dz * dz);
+            if (len > 1.0) return new Vec3(dx / len, 0, dz / len);
+        }
+        if (activeBody != null) {
+            Vector3dc v = activeBody.getLinearVelocity();
+            double len = Math.sqrt(v.x() * v.x() + v.z() * v.z());
+            if (len > 0.1) return new Vec3(v.x() / len, 0, v.z() / len);
+        }
+        return new Vec3(1, 0, 0);
+    }
+
+    /**
+     * Fly a heading at a speed, rather than toward a point. Used where the
+     * plane should keep going in a direction - the takeoff roll and the climb
+     * out - instead of converging on a spot and stopping.
+     */
+    private void flyHeading(Vec3 direction, double speed) {
+        if (activeBody == null) {
+            // Simulation fallback: same motion, no physics body to push.
+            simulatedPosition = simulatedPosition.add(direction.scale(speed / 20.0));
+            pitchDegrees = (float) Math.toDegrees(Math.asin(Math.max(-1, Math.min(1, direction.y))));
+            return;
+        }
+        Vec3 desired = direction.scale(speed);
+        Vector3dc v = activeBody.getLinearVelocity();
+        Vec3 correction = desired.subtract(new Vec3(v.x(), v.y(), v.z())).scale(CRAFT_STEER_GAIN);
+        activeBody.addLinearAndAngularVelocity(
+                new Vector3d(correction.x, correction.y, correction.z),
+                angularCorrectionTowards(direction));
+        pitchDegrees = (float) Math.toDegrees(Math.asin(Math.max(-1, Math.min(1, direction.y))));
+    }
+
     private BlockPos climbTarget(AirportLayout destination) {
         List<BlockPos> loop = positionsOf(destination, Waypoint.Type.HOLDING_PATTERN);
         double dirX = 1, dirZ = 0;
@@ -901,11 +1010,27 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return best;
     }
 
-    /** Final leg (holding pattern side -> runway far end) then the runway
-     *  itself down to the gate end, ready for TAXI_IN. */
+    /**
+     * The descent: join the final leg at pattern altitude, then fly down it
+     * so the plane is at runway height by the time it reaches the threshold -
+     * a glide slope, rather than arriving high and dropping.
+     *
+     * The leg's own two points are drawn flat on the map, so the altitudes
+     * are supplied here: start at the holding pattern's height, finish at the
+     * runway's. After touchdown it rolls out to the runway's gate end.
+     */
     private static List<BlockPos> approachPath(AirportLayout destination) {
-        List<BlockPos> path = new ArrayList<>(positionsOf(destination, Waypoint.Type.FINAL_LEG));
+        List<BlockPos> leg = positionsOf(destination, Waypoint.Type.FINAL_LEG);
         List<BlockPos> runway = positionsOf(destination, Waypoint.Type.RUNWAY);
+        List<BlockPos> path = new ArrayList<>();
+
+        if (leg.size() == 2) {
+            int runwayY = runway.isEmpty() ? leg.get(1).getY() : runway.get(1).getY();
+            path.add(withY(leg.get(0), destination.holdingPatternHeight()));
+            path.add(withY(leg.get(1), runwayY));
+        } else {
+            path.addAll(leg);
+        }
         if (runway.size() == 2) path.add(runway.get(0));
         return path;
     }

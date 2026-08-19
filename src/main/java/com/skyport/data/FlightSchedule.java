@@ -18,6 +18,8 @@ public class FlightSchedule {
 
     private final List<ScheduleEntry> entries = new ArrayList<>();
     private boolean loop = true;
+    /** Y level the plane levels out at between airports. */
+    private int cruiseAltitude = 150;
 
     public List<ScheduleEntry> entries() {
         return entries;
@@ -29,6 +31,14 @@ public class FlightSchedule {
 
     public void setLoop(boolean loop) {
         this.loop = loop;
+    }
+
+    public int cruiseAltitude() {
+        return cruiseAltitude;
+    }
+
+    public void setCruiseAltitude(int cruiseAltitude) {
+        this.cruiseAltitude = cruiseAltitude;
     }
 
     public boolean isEmpty() {
@@ -53,6 +63,7 @@ public class FlightSchedule {
         for (ScheduleEntry entry : entries) list.add(entry.save());
         tag.put("entries", list);
         tag.putBoolean("loop", loop);
+        tag.putInt("cruiseAltitude", cruiseAltitude);
         return tag;
     }
 
@@ -63,6 +74,7 @@ public class FlightSchedule {
             schedule.entries.add(ScheduleEntry.load(list.getCompound(i)));
         }
         schedule.loop = tag.getBoolean("loop");
+        if (tag.contains("cruiseAltitude")) schedule.cruiseAltitude = tag.getInt("cruiseAltitude");
         return schedule;
     }
 
@@ -70,6 +82,7 @@ public class FlightSchedule {
         buf.writeVarInt(entries.size());
         for (ScheduleEntry entry : entries) entry.write(buf);
         buf.writeBoolean(loop);
+        buf.writeVarInt(cruiseAltitude);
     }
 
     public static FlightSchedule read(FriendlyByteBuf buf) {
@@ -77,6 +90,7 @@ public class FlightSchedule {
         int count = buf.readVarInt();
         for (int i = 0; i < count; i++) schedule.entries.add(ScheduleEntry.read(buf));
         schedule.loop = buf.readBoolean();
+        schedule.cruiseAltitude = buf.readVarInt();
         return schedule;
     }
 }

@@ -46,6 +46,7 @@ public class AutopilotScreen extends Screen {
     private Button conditionButton;
     private Button waitButton;
     private Button loopButton;
+    private Button altitudeButton;
     private Button engageButton;
     private Button removeButton;
 
@@ -92,9 +93,20 @@ public class AutopilotScreen extends Screen {
                             onClose();
                         })
                 .bounds(left + half + 4, top + 72, half, 20).build());
+
+        // Cruise altitude: the one setting that's about the flight rather
+        // than about a particular stop.
+        addRenderableWidget(Button.builder(Component.literal("-"), b -> adjustCruiseAltitude(-10))
+                .bounds(left, top + 96, 24, 20).build());
+        altitudeButton = addRenderableWidget(Button.builder(altitudeLabel(), b -> { })
+                .bounds(left + 26, top + 96, panelW - 52, 20).build());
+        altitudeButton.active = false;
+        addRenderableWidget(Button.builder(Component.literal("+"), b -> adjustCruiseAltitude(10))
+                .bounds(left + panelW - 24, top + 96, 24, 20).build());
+
         engageButton = addRenderableWidget(Button.builder(Component.translatable("gui.skyport.autopilot.engage"),
                         b -> engage())
-                .bounds(left, top + 96, panelW, 20).build());
+                .bounds(left, top + 120, panelW, 20).build());
 
         // Seed with one stop so there's something to edit immediately - an
         // empty schedule with every control disabled is a confusing landing.
@@ -220,6 +232,15 @@ public class AutopilotScreen extends Screen {
         return Component.literal(schedule.loop() ? "Loop: on" : "Loop: off");
     }
 
+    private Component altitudeLabel() {
+        return Component.literal("Cruise altitude: Y " + schedule.cruiseAltitude());
+    }
+
+    private void adjustCruiseAltitude(int delta) {
+        schedule.setCruiseAltitude(Math.max(0, Math.min(400, schedule.cruiseAltitude() + delta)));
+        refresh();
+    }
+
     /** Re-syncs every control with the currently selected stop. */
     private void refresh() {
         boolean sel = hasSelection();
@@ -228,6 +249,7 @@ public class AutopilotScreen extends Screen {
         conditionButton.setMessage(conditionLabel());
         waitButton.setMessage(waitLabel());
         loopButton.setMessage(loopLabel());
+        altitudeButton.setMessage(altitudeLabel());
 
         airportButton.active = sel && airports.size() > 1;
         gateButton.active = sel && airportOf(entry().airportId()).gateNames().size() > 1;
