@@ -140,6 +140,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private static final double TURN_ANTICIPATION_SECONDS = 1.5;
     /** How often to move the force-loaded bubble; every tick would churn. */
     private static final int CHUNK_FOLLOW_INTERVAL_TICKS = 20;
+    /** Traffic within this horizontal distance and altitude band counts as a
+     *  conflict; the giving-way plane climbs by the altitude figure. */
+    private static final double SEPARATION_RADIUS = 96.0;
+    private static final int SEPARATION_ALTITUDE = 24;
+    private static final int SEPARATION_CHECK_INTERVAL_TICKS = 10;
     /** How far above the terrain still counts as "on the ground" rather than airborne. */
     private static final int GROUND_HEIGHT_TOLERANCE = 6;
 
@@ -183,6 +188,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** Chunks this plane is currently force-loading. Transient: tickets do
      *  not survive a restart, and neither should our record of them. */
     private final transient Set<ChunkPos> heldChunks = new HashSet<>();
+    /** Extra altitude currently being flown to stay clear of other traffic. */
+    private transient int currentSeparationOffset = 0;
 
     private FlightState state = FlightState.IDLE;
     private int currentWaypointIndex = 0;
@@ -418,22 +425,20 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // every plane currently taxis the whole network, not just its
             // own branch. Fine for one or two gates; revisit with a real
             // graph if that gets confusing with more.
+            // Don't leave the gate at all until the airport is ours. On a
+            // field where the taxiway and runway are the same strip there is
+            // nowhere to pass or hold short, so the decision has to be made
+            // before pushback rather than at the runway threshold.
             case TAXI_OUT -> {
                 AirportLayout origin = originLayout(serverLevel);
+                if (origin != null && !claimTraffic(serverLevel, origin)) {
+                    if (tickCounter % 100 == 0) message("Holding at the gate - airport busy.");
+                    break;
+                }
                 List<BlockPos> path = new ArrayList<>();
                 if (joinPoint != null) path.add(joinPoint);
                 if (origin != null) path.addAll(groundTaxiPath(origin, false));
-                // Hold short: the runway is one shared resource, and a plane
-                // taxiing onto it while another is landing is the collision
-                // that's hardest to recover from. Same clearance the arrival
-                // takes, so the two can't both hold it.
-                followWaypoints(path, () -> {
-                    if (origin == null || claimApproach(serverLevel, origin)) {
-                        setState(FlightState.TAKEOFF_ROLL);
-                    } else if (tickCounter % 60 == 0) {
-                        message("Holding short - runway in use.");
-                    }
-                });
+                followWaypoints(path, () -> setState(FlightState.TAKEOFF_ROLL));
             }
             // Accelerate along the runway centreline, reaching rotation speed
             // by the halfway point, then pitch up and fly.
@@ -479,10 +484,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                     beginApproach(serverLevel, destination);
                 } else {
                     if (holdingEntryIndex < 0) holdingEntryIndex = nearestIndex(loop, simulatedPosition);
-                    BlockPos entry = withY(loop.get(holdingEntryIndex), destination.holdingPatternHeight());
+                    BlockPos entry = withY(loop.get(holdingEntryIndex), holdingAltitude(destination));
                     applyMotionTowards(entry);
                     if (horizontalDistance(entry, BlockPos.containing(simulatedPosition)) <= HOLDING_ENTRY_LEAD_BLOCKS) {
-                        if (claimApproach(serverLevel, destination)) {
+                        if (claimTraffic(serverLevel, destination)) {
                             message("Runway clear - straight in.");
                             setState(FlightState.APPROACH);
                         } else {
@@ -496,7 +501,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // cleared to land - no real ATC/queueing yet (see DESIGN.md).
             // Circle until the runway frees up, re-asking each lap.
             case HOLDING -> followWaypoints(holdingLap(destination), () -> {
-                if (claimApproach(serverLevel, destination)) {
+                if (claimTraffic(serverLevel, destination)) {
                     setState(FlightState.APPROACH);
                 } else {
                     // Still occupied - go round again rather than landing on
@@ -507,13 +512,24 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // Final leg (holding pattern -> runway far end, descending), then
             // roll down the runway to the gate end, ready to taxi in.
             case APPROACH -> followWaypoints(approachPath(destination), () -> setState(FlightState.TAXI_IN));
-            // Off the runway now - hand the clearance back so anyone holding
-            // overhead can come down, without waiting for us to reach a gate.
-            case TAXI_IN -> {
-                releaseApproach();
-                followWaypoints(groundTaxiPath(destination, true), this::arrive);
-            }
+            // Keep the clearance all the way to the gate: still rolling down
+            // the shared strip, so the airport isn't actually free yet. It's
+            // released in arrive().
+            case TAXI_IN -> followWaypoints(groundTaxiPath(destination, true), this::arrive);
             default -> { }
+        }
+
+        // Publish our position for other planes' separation checks, and work
+        // out whether we're the one that has to give way.
+        AirportRegistry registry = AirportRegistry.get(serverLevel);
+        if (isGroundState()) {
+            registry.clearAirborne(planeId());
+            currentSeparationOffset = 0;
+        } else {
+            registry.reportAirborne(planeId(), simulatedPosition);
+            if (tickCounter % SEPARATION_CHECK_INTERVAL_TICKS == 0) {
+                currentSeparationOffset = separationOffset(serverLevel);
+            }
         }
 
         // Drag the loaded-chunk bubble along with the plane, so it doesn't
@@ -531,6 +547,12 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private void arrive() {
         ScheduleEntry entry = currentEntry();
         message("Arrived at " + (entry == null ? "gate" : entry.gateName()) + ".");
+        // Parked and out of everyone's way - the airport is free now, and
+        // this plane is no longer traffic to be separated from.
+        releaseApproach();
+        if (level instanceof ServerLevel serverLevel && planeId != null) {
+            AirportRegistry.get(serverLevel).clearAirborne(planeId);
+        }
 
         if (entry == null) {
             disengage();
@@ -933,14 +955,45 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return planeId;
     }
 
-    private boolean claimApproach(ServerLevel level, AirportLayout destination) {
-        return AirportRegistry.get(level).tryClaimApproach(destination.id(), planeId());
+    /**
+     * How far above this plane's normal altitude to fly to stay clear of
+     * other traffic - 0 when there's nobody to avoid.
+     *
+     * Altitude separation rather than steering around each other, which is
+     * how real ATC does it and for the same reason: if both aircraft turn,
+     * they can turn into each other, and a dodge that depends on predicting
+     * the other's dodge is unstable. Here only ONE plane ever moves - the one
+     * with the higher id, compared directly - and it moves along an axis the
+     * other isn't using. No negotiation, no oscillation, and it resolves the
+     * same way no matter which plane runs its tick first.
+     */
+    private int separationOffset(ServerLevel serverLevel) {
+        if (simulatedPosition == null || planeId == null) return 0;
+
+        int stacked = 0;
+        for (Map.Entry<UUID, Vec3> other : AirportRegistry.get(serverLevel).airborneTraffic().entrySet()) {
+            if (other.getKey().equals(planeId)) continue;
+            Vec3 pos = other.getValue();
+            double dx = pos.x - simulatedPosition.x;
+            double dz = pos.z - simulatedPosition.z;
+            if (dx * dx + dz * dz > SEPARATION_RADIUS * SEPARATION_RADIUS) continue;
+            if (Math.abs(pos.y - simulatedPosition.y) > SEPARATION_ALTITUDE) continue;
+            // Only the higher id gives way, so the pair never both move.
+            if (planeId.compareTo(other.getKey()) > 0) stacked++;
+        }
+        return stacked * SEPARATION_ALTITUDE;
+    }
+
+    /** Ask for the run of an airport - covers taxiing, the runway and final
+     *  approach, since on a small field they are the same strip. */
+    private boolean claimTraffic(ServerLevel level, AirportLayout destination) {
+        return AirportRegistry.get(level).tryClaimTraffic(destination.id(), planeId());
     }
 
     /** Take the clearance if it's going, then start down regardless - used
      *  where there's no holding pattern to wait in. */
     private void beginApproach(ServerLevel level, AirportLayout destination) {
-        claimApproach(level, destination);
+        claimTraffic(level, destination);
         setState(FlightState.APPROACH);
     }
 
@@ -967,7 +1020,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** Give the departure airport's runway back once safely airborne. */
     private void releaseOriginRunway(ServerLevel serverLevel) {
         if (originAirportId == null || planeId == null) return;
-        AirportRegistry.get(serverLevel).releaseApproach(originAirportId, planeId);
+        AirportRegistry.get(serverLevel).releaseTraffic(originAirportId, planeId);
         originAirportId = null;
     }
 
@@ -983,12 +1036,23 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         AirportRegistry registry = AirportRegistry.get(serverLevel);
         UUID destinationId = destinationAirportId();
-        if (destinationId != null) registry.releaseApproach(destinationId, planeId);
-        if (originAirportId != null) registry.releaseApproach(originAirportId, planeId);
+        if (destinationId != null) registry.releaseTraffic(destinationId, planeId);
+        if (originAirportId != null) registry.releaseTraffic(originAirportId, planeId);
+        // Stop advertising as traffic too, or everyone else keeps dodging a
+        // plane that is no longer flying anywhere.
+        registry.clearAirborne(planeId);
     }
 
+    /** Cruise altitude including any separation offset - so a plane giving
+     *  way climbs above the traffic rather than through it. */
     private int cruiseAltitude() {
-        return schedule.cruiseAltitude();
+        return schedule.cruiseAltitude() + currentSeparationOffset;
+    }
+
+    /** The destination's holding altitude, likewise offset - two planes in
+     *  the same pattern need to be at different heights, not the same one. */
+    private int holdingAltitude(AirportLayout destination) {
+        return destination.holdingPatternHeight() + currentSeparationOffset;
     }
 
     private double cruiseSpeed() {
@@ -1101,7 +1165,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         List<BlockPos> lap = new ArrayList<>(n + 1);
         for (int i = 0; i <= n; i++) {
             int at = Math.floorMod(start + i * step, n);
-            lap.add(withY(loop.get(at), destination.holdingPatternHeight()));
+            lap.add(withY(loop.get(at), holdingAltitude(destination)));
         }
         return lap;
     }

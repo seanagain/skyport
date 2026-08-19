@@ -6,6 +6,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.saveddata.SavedData;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.Collection;
 import java.util.HashMap;
@@ -61,30 +62,57 @@ public class AirportRegistry extends SavedData {
     }
 
     /**
-     * Which plane currently holds the approach clearance at each airport -
-     * the smallest thing that counts as air traffic control.
+     * Which plane currently has the run of each airport - the smallest thing
+     * that counts as air traffic control.
      *
-     * Deliberately NOT persisted: it describes planes in flight right now,
-     * and a clearance surviving a restart would block an airport forever
-     * with no plane to release it.
+     * One clearance covers the whole airport, not the runway alone, because
+     * at a small field the taxiway and runway are often the same strip: two
+     * planes on it cannot pass each other, so letting one taxi while another
+     * lands just moves the collision. A departure holds this from pushback
+     * until it is airborne; an arrival holds it from final approach until it
+     * is parked at the gate. Between those, at the gate, it is free.
+     *
+     * Deliberately NOT persisted: it describes planes moving right now, and
+     * a clearance surviving a restart would block an airport forever with no
+     * plane left to release it.
      */
-    private final transient Map<UUID, UUID> approachClearances = new HashMap<>();
+    private final transient Map<UUID, UUID> trafficClearances = new HashMap<>();
 
     /**
-     * Ask to fly a straight-in approach. Granted if nobody else is on final
-     * or on the runway, or if this plane already holds it (so re-asking each
-     * tick is harmless). A refusal means "go and hold".
+     * Ask for the run of an airport. Granted if nobody else holds it, or if
+     * this plane already does (so re-asking every tick is harmless). A
+     * refusal means wait - hold overhead if airborne, stay at the gate if not.
      */
-    public boolean tryClaimApproach(UUID airportId, UUID planeId) {
-        UUID holder = approachClearances.get(airportId);
+    public boolean tryClaimTraffic(UUID airportId, UUID planeId) {
+        UUID holder = trafficClearances.get(airportId);
         if (holder != null && !holder.equals(planeId)) return false;
-        approachClearances.put(airportId, planeId);
+        trafficClearances.put(airportId, planeId);
         return true;
     }
 
-    /** Give up the clearance - on landing, on disengaging, or on giving up. */
-    public void releaseApproach(UUID airportId, UUID planeId) {
-        approachClearances.remove(airportId, planeId);
+    /** Give the airport back - parked at a gate, safely airborne, or disengaged. */
+    public void releaseTraffic(UUID airportId, UUID planeId) {
+        trafficClearances.remove(airportId, planeId);
+    }
+
+    /**
+     * Where every airborne plane currently is, for separation checks.
+     *
+     * Transient for the same reason as the clearances: a stale position from
+     * before a restart would have live aircraft dodging a ghost.
+     */
+    private final transient Map<UUID, Vec3> airborneTraffic = new HashMap<>();
+
+    public void reportAirborne(UUID planeId, Vec3 position) {
+        airborneTraffic.put(planeId, position);
+    }
+
+    public void clearAirborne(UUID planeId) {
+        airborneTraffic.remove(planeId);
+    }
+
+    public Map<UUID, Vec3> airborneTraffic() {
+        return airborneTraffic;
     }
 
     @Override
