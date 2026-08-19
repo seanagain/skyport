@@ -73,6 +73,34 @@ neoForge {
 
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 
+// Create Aeronautics and Sable ship as "bundle" jars: the actual code is
+// nested inside under META-INF/jarjar/ (NeoForge's jar-in-jar mechanism), so
+// depending on the published artifact alone puts ZERO of their classes on the
+// compile classpath - which is why nothing here could reference a contraption
+// or a physics body. Unpacking the nested jars makes the real API visible.
+//
+// Notably this is where Sable's physics API lives (RigidBodyHandle,
+// BlockEntitySubLevelActor, and the companion math types like Pose3dc), which
+// is what actually moves a plane - Create Aeronautics itself delegates to it.
+configurations {
+    modBundles
+}
+
+def extractedModsDir = layout.buildDirectory.dir('extracted-mods')
+
+tasks.register('extractBundledMods', Copy) {
+    description = 'Unpacks jar-in-jar mod code so it can be compiled against.'
+    from {
+        configurations.modBundles.collect {
+            zipTree(it).matching { include 'META-INF/jarjar/*.jar' }
+        }
+    }
+    into extractedModsDir
+    eachFile { it.path = it.name } // flatten out of META-INF/jarjar/
+    includeEmptyDirs = false
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
 dependencies {
     // --- Create -------------------------------------------------------
     // compileOnly because Create itself is NOT bundled in our jar - the
@@ -90,6 +118,12 @@ dependencies {
     // without shipping copies of them ourselves.
     compileOnly "maven.modrinth:create-aeronautics:${create_aeronautics_version}"
     compileOnly "maven.modrinth:sable:${sable_version}"
+
+    // The same two artifacts again, as bundles to unpack (see above) - this
+    // is what actually exposes their classes to javac.
+    modBundles "maven.modrinth:create-aeronautics:${create_aeronautics_version}"
+    modBundles "maven.modrinth:sable:${sable_version}"
+    compileOnly fileTree(dir: extractedModsDir, include: '*.jar').builtBy('extractBundledMods')
 
     // --- Runtime-only copies for local testing (runClient/runServer) --
     // None of the above are on the actual run classpath - compileOnly

@@ -61,6 +61,9 @@ public class AutopilotBlockEntity extends BlockEntity {
 
     /** Y level CLIMB aims for before CRUISE starts covering ground distance. */
     private static final int SAFE_CRUISE_ALTITUDE = 200;
+    /** How far ahead CLIMB keeps its target, so there's always ground
+     *  distance left to pitch against. See {@link #climbTarget}. */
+    private static final int CLIMB_LOOKAHEAD_BLOCKS = 300;
     /**
      * How far to either side of a gate/runway/taxiway line still counts as
      * "parked there" - a buffer along the line, not a radius around its
@@ -273,11 +276,7 @@ public class AutopilotBlockEntity extends BlockEntity {
             // Straight up would have zero horizontal distance to pitch
             // against, which the cap can't express as an angle at all.
             case CLIMB -> {
-                List<BlockPos> loop = positionsOf(destination, Waypoint.Type.HOLDING_PATTERN);
-                BlockPos ahead = loop.isEmpty()
-                        ? new BlockPos((int) Math.round(simulatedPosition.x) + 200, SAFE_CRUISE_ALTITUDE, (int) Math.round(simulatedPosition.z))
-                        : withY(loop.get(nearestIndex(loop, simulatedPosition)), SAFE_CRUISE_ALTITUDE);
-                applyMotionTowards(ahead);
+                applyMotionTowards(climbTarget(destination));
                 if (simulatedPosition.y >= SAFE_CRUISE_ALTITUDE - 1) setState(FlightState.CRUISE);
             }
             case CRUISE -> {
@@ -424,19 +423,29 @@ public class AutopilotBlockEntity extends BlockEntity {
 
         Vec3 step = delta.normalize().scale(Math.min(SIMULATED_SPEED_BLOCKS_PER_TICK, distance));
 
-        // Cap how steeply the plane climbs or descends. A plane can't gain
-        // altitude vertically - it noses up and covers ground while doing it,
-        // so the vertical part of each step is limited to what
-        // MAX_PITCH_DEGREES allows for the horizontal distance travelled.
-        double horizontal = Math.sqrt(step.x * step.x + step.z * step.z);
-        double maxVertical = horizontal * MAX_PITCH_TANGENT;
-        if (horizontal > 1.0e-4 && Math.abs(step.y) > maxVertical) {
-            step = new Vec3(step.x, Math.copySign(maxVertical, step.y), step.z);
+        // Cap how steeply the plane climbs or descends: a plane gains
+        // altitude by nosing up and covering ground, not by rising
+        // vertically, so the vertical part of each step is limited to what
+        // MAX_PITCH_DEGREES allows for the ground distance covered.
+        //
+        // Only while there is ground left to cover, though. Capping against
+        // the step's own horizontal component deadlocks: as the plane closes
+        // on a target that is mostly above or below it, the horizontal
+        // component shrinks, which shrinks the allowed climb rate, which
+        // leaves it hovering just short of altitude forever. Once it's
+        // effectively over the target, let it close the remaining height.
+        double horizontalToTarget = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
+        double stepHorizontal = Math.sqrt(step.x * step.x + step.z * step.z);
+        if (horizontalToTarget > 1.0) {
+            double maxVertical = stepHorizontal * MAX_PITCH_TANGENT;
+            if (Math.abs(step.y) > maxVertical) {
+                step = new Vec3(step.x, Math.copySign(maxVertical, step.y), step.z);
+            }
         }
 
         simulatedPosition = simulatedPosition.add(step);
-        pitchDegrees = horizontal > 1.0e-4
-                ? (float) Math.toDegrees(Math.atan2(step.y, horizontal))
+        pitchDegrees = stepHorizontal > 1.0e-4
+                ? (float) Math.toDegrees(Math.atan2(step.y, stepHorizontal))
                 : (float) Math.copySign(90, step.y);
         return false;
     }
@@ -460,6 +469,36 @@ public class AutopilotBlockEntity extends BlockEntity {
             }
         }
         return best;
+    }
+
+    /**
+     * A point well ahead of the plane, at cruise altitude, in the direction
+     * of the destination - recomputed every tick so it stays ahead.
+     *
+     * Deliberately not "the holding pattern entry at cruise altitude": a
+     * fixed target the plane can arrive underneath leaves it with no ground
+     * distance left to pitch against, so it stops climbing short of altitude.
+     * Chasing a receding point keeps a real climb-out angle the whole way up.
+     * Overflying the airport while climbing is fine and realistic - CRUISE
+     * turns it back toward the holding pattern.
+     */
+    private BlockPos climbTarget(AirportLayout destination) {
+        List<BlockPos> loop = positionsOf(destination, Waypoint.Type.HOLDING_PATTERN);
+        double dirX = 1, dirZ = 0;
+        if (!loop.isEmpty()) {
+            BlockPos entry = loop.get(nearestIndex(loop, simulatedPosition));
+            double dx = entry.getX() - simulatedPosition.x;
+            double dz = entry.getZ() - simulatedPosition.z;
+            double len = Math.sqrt(dx * dx + dz * dz);
+            if (len > 1.0e-3) {
+                dirX = dx / len;
+                dirZ = dz / len;
+            }
+        }
+        return new BlockPos(
+                (int) Math.round(simulatedPosition.x + dirX * CLIMB_LOOKAHEAD_BLOCKS),
+                SAFE_CRUISE_ALTITUDE,
+                (int) Math.round(simulatedPosition.z + dirZ * CLIMB_LOOKAHEAD_BLOCKS));
     }
 
     /** One lap of the holding pattern starting at holdingEntryIndex, in the
