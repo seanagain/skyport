@@ -68,7 +68,7 @@ import java.util.UUID;
 public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubLevelActor {
 
     public enum FlightState {
-        IDLE, TAXI_OUT, TAKEOFF_ROLL, CLIMB, CRUISE, HOLDING, APPROACH, TAXI_IN, WAITING
+        IDLE, PUSHBACK, TAXI_OUT, TAKEOFF_ROLL, CLIMB, CRUISE, HOLDING, APPROACH, TAXI_IN, WAITING
     }
 
     /** How near a player counts as "boarded" for WaitCondition.PLAYER. */
@@ -328,8 +328,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // Turn onto the line before following it, so parking anywhere
             // within the buffer alongside a taxiway is good enough.
             this.joinPoint = nearestPointOnGroundPath(origin, reference);
-            setState(FlightState.TAXI_OUT);
-            message(player, "Autopilot engaged - joining the taxiway, then out to the runway.");
+            setState(FlightState.PUSHBACK);
+            message(player, "Autopilot engaged - pushing back.");
         } else {
             this.originAirportId = null;
             setState(FlightState.CLIMB);
@@ -433,12 +433,42 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // field where the taxiway and runway are the same strip there is
             // nowhere to pass or hold short, so the decision has to be made
             // before pushback rather than at the runway threshold.
+            /*
+             * Reverse off the stand before taxiing, the way a real departure
+             * does - a plane parked at a gate can't drive forwards out of it.
+             *
+             * Only when the gate's spur actually has a node between it and the
+             * runway: if the gate sits on the runway or its taxiway runs
+             * straight there, there's nothing to back away from and the plane
+             * just rotates and goes. Attitude is deliberately left alone here
+             * (see PUSHBACK in steerCraftTowards) so it tracks backwards
+             * rather than swinging its nose round on the stand; the turn onto
+             * the taxiway happens once it's clear, in TAXI_OUT.
+             */
+            case PUSHBACK -> {
+                AirportLayout origin = originLayout(serverLevel);
+                BlockPos back = origin == null ? null : pushbackTarget(origin);
+                if (back == null) {
+                    setState(FlightState.TAXI_OUT);
+                } else if (applyMotionTowards(back)) {
+                    message("Pushback complete.");
+                    setState(FlightState.TAXI_OUT);
+                }
+            }
             // Taxi out to the hold point without needing clearance, then wait
             // there for the runway. If no hold point is drawn there's nowhere
             // safe to wait, so the whole airport has to be claimed up front.
             case TAXI_OUT -> {
                 AirportLayout origin = originLayout(serverLevel);
                 BlockPos holdShort = origin == null ? null : holdShortPoint(origin);
+
+                // Nobody leaves a gate while another plane is on the taxiway,
+                // hold point included - there's nowhere to pass, so a second
+                // plane pushing back would just queue into the first.
+                if (origin != null && !claimTaxiway(serverLevel, origin)) {
+                    if (tickCounter % 100 == 0) message("Holding at the gate - taxiway occupied.");
+                    break;
+                }
 
                 if (holdShort == null) {
                     if (origin != null && !claimTraffic(serverLevel, origin)) {
@@ -455,6 +485,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                         if (claimTraffic(serverLevel, origin)) {
                             clearedPastHoldShort = true;
                             currentWaypointIndex = 0;
+                            // Off the taxiway and onto the runway - the next
+                            // aircraft can start taxiing out behind us.
+                            releaseTaxiway(serverLevel, origin);
                             message("Cleared to line up.");
                         } else if (tickCounter % 100 == 0) {
                             message("Holding short - runway in use.");
@@ -515,7 +548,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                     BlockPos entry = withY(loop.get(holdingEntryIndex), holdingAltitude(destination));
                     applyMotionTowards(entry);
                     if (horizontalDistance(entry, BlockPos.containing(simulatedPosition)) <= HOLDING_ENTRY_LEAD_BLOCKS) {
-                        if (claimTraffic(serverLevel, destination)) {
+                        if (claimArrival(serverLevel, destination)) {
                             message("Runway clear - straight in.");
                             setState(FlightState.APPROACH);
                         } else {
@@ -529,7 +562,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // cleared to land - no real ATC/queueing yet (see DESIGN.md).
             // Circle until the runway frees up, re-asking each lap.
             case HOLDING -> followWaypoints(holdingLap(destination), () -> {
-                if (claimTraffic(serverLevel, destination)) {
+                if (claimArrival(serverLevel, destination)) {
                     setState(FlightState.APPROACH);
                 } else {
                     // Still occupied - go round again rather than landing on
@@ -667,6 +700,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         }
         setChanged();
         message(switch (newState) {
+            case PUSHBACK -> "Pushing back from the gate.";
             case TAKEOFF_ROLL -> "On the runway, taking off.";
             case CLIMB -> "Climbing to cruising altitude.";
             case CRUISE -> "Airborne, cruising toward destination.";
@@ -788,9 +822,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         Vector3dc v = activeBody.getLinearVelocity();
         Vec3 correction = desired.subtract(new Vec3(v.x(), v.y(), v.z())).scale(CRAFT_STEER_GAIN);
 
+        // Pushing back: keep the nose where it is and roll backwards. Steering
+        // toward the heading would have the plane pirouette on the stand.
+        Vector3d spin = state == FlightState.PUSHBACK
+                ? levelOnlyCorrection()
+                : angularCorrectionTowards(heading);
         activeBody.addLinearAndAngularVelocity(
-                new Vector3d(correction.x, correction.y, correction.z),
-                angularCorrectionTowards(heading));
+                new Vector3d(correction.x, correction.y, correction.z), spin);
 
         double headingHorizontal = Math.sqrt(heading.x * heading.x + heading.z * heading.z);
         pitchDegrees = headingHorizontal > 1.0e-4
@@ -831,8 +869,25 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return Math.max(MIN_MISALIGNED_THROTTLE, dot);
     }
 
+    /** Hold the current heading, just keep the craft level and stop it
+     *  spinning - used while reversing off a stand. */
+    private Vector3d levelOnlyCorrection() {
+        if (activeSubLevel == null || activeBody == null) return new Vector3d();
+        Quaterniondc orientation = activeSubLevel.logicalPose().orientation();
+        Direction facing = getBlockState().hasProperty(AutopilotBlock.FACING)
+                ? getBlockState().getValue(AutopilotBlock.FACING)
+                : Direction.NORTH;
+        Vector3d nose = orientation.transform(
+                new Vector3d(facing.getStepX(), facing.getStepY(), facing.getStepZ()));
+        Vector3d up = orientation.transform(new Vector3d(0, 1, 0));
+        // Target heading == current heading, so only the roll/pitch levelling
+        // terms do anything.
+        return attitudeCorrection(nose, up, new Vector3d(nose), true);
+    }
+
     private boolean isGroundState() {
-        return state == FlightState.TAXI_OUT
+        return state == FlightState.PUSHBACK
+                || state == FlightState.TAXI_OUT
                 || state == FlightState.TAKEOFF_ROLL
                 || state == FlightState.TAXI_IN
                 || state == FlightState.WAITING;
@@ -1029,6 +1084,23 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return stacked * SEPARATION_ALTITUDE;
     }
 
+    /**
+     * Where to reverse to when leaving a stand: the next node along the route
+     * out, but only if that node isn't already the runway.
+     *
+     * Returns null when the gate connects straight to the runway - there's
+     * nothing to back out of, so the plane just turns and goes.
+     */
+    @org.jetbrains.annotations.Nullable
+    private BlockPos pushbackTarget(AirportLayout origin) {
+        List<BlockPos> route = groundTaxiPath(origin, false);
+        if (route.size() < 2) return null; // straight onto the runway
+        BlockPos first = route.get(0);
+        List<BlockPos> runway = positionsOf(origin, Waypoint.Type.RUNWAY);
+        if (!runway.isEmpty() && first.equals(runway.get(0))) return null;
+        return first;
+    }
+
     /** The airport's hold-short point, if one is drawn. */
     @org.jetbrains.annotations.Nullable
     private static BlockPos holdShortPoint(AirportLayout layout) {
@@ -1049,6 +1121,20 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      *  committed to it, bounded by the hold-short point where one is drawn. */
     private boolean claimTraffic(ServerLevel level, AirportLayout destination) {
         return AirportRegistry.get(level).tryClaimTraffic(destination.id(), planeId());
+    }
+
+    private boolean claimTaxiway(ServerLevel level, AirportLayout airport) {
+        return AirportRegistry.get(level).tryClaimTaxiway(airport.id(), planeId());
+    }
+
+    private void releaseTaxiway(ServerLevel level, AirportLayout airport) {
+        if (planeId != null) AirportRegistry.get(level).releaseTaxiway(airport.id(), planeId);
+    }
+
+    /** Arrivals take runway and taxiway together - see tryClaimArrival for
+     *  why splitting them deadlocks against departures. */
+    private boolean claimArrival(ServerLevel level, AirportLayout destination) {
+        return AirportRegistry.get(level).tryClaimArrival(destination.id(), planeId());
     }
 
     /** Take the clearance if it's going, then start down regardless - used
@@ -1097,8 +1183,14 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         AirportRegistry registry = AirportRegistry.get(serverLevel);
         UUID destinationId = destinationAirportId();
-        if (destinationId != null) registry.releaseTraffic(destinationId, planeId);
-        if (originAirportId != null) registry.releaseTraffic(originAirportId, planeId);
+        if (destinationId != null) {
+            registry.releaseTraffic(destinationId, planeId);
+            registry.releaseTaxiway(destinationId, planeId);
+        }
+        if (originAirportId != null) {
+            registry.releaseTraffic(originAirportId, planeId);
+            registry.releaseTaxiway(originAirportId, planeId);
+        }
         // Stop advertising as traffic too, or everyone else keeps dodging a
         // plane that is no longer flying anywhere.
         registry.clearAirborne(planeId);
@@ -1170,6 +1262,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (atRotationSpeed) {
             takeoffStart = null;
             takeoffHoldTicks = 0;
+            // Climb out along the runway heading. Locking it here rather than
+            // letting CLIMB work it out is the point: CLIMB used to take its
+            // heading from the bearing to the destination, so the plane
+            // rotated and immediately struck off across the airfield - often
+            // perpendicular to the strip it had just used. Departures fly the
+            // runway heading out, then turn once they're up.
+            climbHeadingLocked = centreline;
             setState(FlightState.CLIMB);
         }
     }

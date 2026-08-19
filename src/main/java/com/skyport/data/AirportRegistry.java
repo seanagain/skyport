@@ -96,6 +96,46 @@ public class AirportRegistry extends SavedData {
     }
 
     /**
+     * Who is on the taxiway - the stretch between the gates and the hold
+     * point. Separate from the runway clearance so a plane can be waiting at
+     * the hold line while another is taking off, but still only one plane at
+     * a time, because a shared strip has nowhere to pass.
+     */
+    private final transient Map<UUID, UUID> taxiwayClearances = new HashMap<>();
+
+    public boolean tryClaimTaxiway(UUID airportId, UUID planeId) {
+        UUID holder = taxiwayClearances.get(airportId);
+        if (holder != null && !holder.equals(planeId)) return false;
+        taxiwayClearances.put(airportId, planeId);
+        return true;
+    }
+
+    public void releaseTaxiway(UUID airportId, UUID planeId) {
+        taxiwayClearances.remove(airportId, planeId);
+    }
+
+    /**
+     * Take the runway and the taxiway together, or neither.
+     *
+     * Arrivals have to claim both up front, and this is a deadlock fix, not
+     * caution: a departure takes the taxiway then wants the runway, so an
+     * arrival taking them in the opposite order - runway first, then the
+     * taxiway to reach a gate - is the classic cycle where each holds what
+     * the other needs. Grabbing both atomically means an arrival that cannot
+     * have the whole path simply stays in the pattern, holding nothing.
+     */
+    public boolean tryClaimArrival(UUID airportId, UUID planeId) {
+        UUID runwayHolder = trafficClearances.get(airportId);
+        UUID taxiHolder = taxiwayClearances.get(airportId);
+        boolean runwayFree = runwayHolder == null || runwayHolder.equals(planeId);
+        boolean taxiFree = taxiHolder == null || taxiHolder.equals(planeId);
+        if (!runwayFree || !taxiFree) return false;
+        trafficClearances.put(airportId, planeId);
+        taxiwayClearances.put(airportId, planeId);
+        return true;
+    }
+
+    /**
      * Where every airborne plane currently is, for separation checks.
      *
      * Transient for the same reason as the clearances: a stale position from
