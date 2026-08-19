@@ -21,9 +21,14 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.minecraft.world.phys.Vec3;
 
+import com.skyport.block.AutopilotBlock;
 import dev.ryanhcode.sable.api.block.BlockEntitySubLevelActor;
 import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
+import net.minecraft.core.Direction;
+import org.joml.AxisAngle4d;
+import org.joml.Quaterniond;
+import org.joml.Quaterniondc;
 import org.joml.Vector3d;
 import org.joml.Vector3dc;
 
@@ -96,6 +101,14 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private static final double CRAFT_APPROACH_GAIN = 0.6;
     /** Planes are big; "arrived" has to be looser than for a point. */
     private static final double CRAFT_ARRIVAL_RADIUS = 6.0;
+    /** How hard the craft turns toward its heading, and the ceiling on how
+     *  fast it may rotate (radians/second) - a contraption spinning to face a
+     *  new waypoint instantly looks wrong. */
+    private static final double TURN_GAIN = 1.5;
+    private static final double MAX_TURN_RATE_RAD_PER_SEC = 0.9;
+    /** Fraction of the rotation error corrected per tick; damped so the craft
+     *  settles on a heading instead of oscillating around it. */
+    private static final double TURN_DAMPING = 0.3;
     /** How far above the terrain still counts as "on the ground" rather than airborne. */
     private static final int GROUND_HEIGHT_TOLERANCE = 6;
 
@@ -551,12 +564,70 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         activeBody.addLinearAndAngularVelocity(
                 new Vector3d(correction.x, correction.y, correction.z),
-                new Vector3d());
+                angularCorrectionTowards(heading));
 
         pitchDegrees = horizontal > 1.0e-4
                 ? (float) Math.toDegrees(Math.atan2(heading.y, horizontal))
                 : 0;
         return false;
+    }
+
+    /**
+     * Turns the craft to point where it's going, and keeps its wings level.
+     *
+     * Without this the autopilot was only ever pushing the craft around,
+     * leaving it to fly sideways in whatever attitude it happened to hold.
+     *
+     * Two corrections, combined into one angular-velocity nudge:
+     *  - yaw/pitch: rotate the nose (which is whichever way the Autopilot
+     *    block faces - a contraption has no inherent front) onto the heading.
+     *  - roll: rotate the craft's own up-vector back to world up. Planes bank
+     *    in reality, but on the ground they only yaw, and a contraption that
+     *    rolls while taxiing just looks broken - so roll is always driven to
+     *    zero and the ground case additionally flattens the target heading.
+     */
+    private Vector3d angularCorrectionTowards(Vec3 heading) {
+        if (activeSubLevel == null) return new Vector3d();
+
+        Quaterniondc orientation = activeSubLevel.logicalPose().orientation();
+        Direction facing = getBlockState().hasProperty(AutopilotBlock.FACING)
+                ? getBlockState().getValue(AutopilotBlock.FACING)
+                : Direction.NORTH;
+
+        Vector3d nose = orientation.transform(
+                new Vector3d(facing.getStepX(), facing.getStepY(), facing.getStepZ()));
+        Vector3d up = orientation.transform(new Vector3d(0, 1, 0));
+
+        // On the ground a plane yaws flat; it doesn't pitch its nose down to
+        // chase a waypoint that happens to sit below it.
+        boolean onGround = state == FlightState.TAXI_OUT
+                || state == FlightState.TAKEOFF_ROLL
+                || state == FlightState.TAXI_IN
+                || state == FlightState.WAITING;
+        Vector3d target = new Vector3d(heading.x, onGround ? 0 : heading.y, heading.z);
+        if (target.lengthSquared() < 1.0e-8) return new Vector3d();
+        target.normalize();
+
+        // Nose onto the heading...
+        Quaterniond align = new Quaterniond().rotationTo(nose, target);
+        // ...then take the roll out of whatever that leaves.
+        Vector3d upAfterAlign = align.transform(new Vector3d(up));
+        Vector3d worldUp = new Vector3d(0, 1, 0);
+        Vector3d levelUp = new Vector3d(worldUp).sub(new Vector3d(target).mul(worldUp.dot(target)));
+        Quaterniond level = levelUp.lengthSquared() < 1.0e-8
+                ? new Quaterniond()
+                : new Quaterniond().rotationTo(upAfterAlign, levelUp.normalize());
+
+        AxisAngle4d error = new AxisAngle4d().set(level.mul(align, new Quaterniond()));
+        if (!Double.isFinite(error.angle) || error.angle < 1.0e-4) return new Vector3d();
+
+        // Desired angular velocity: turn through the error at a bounded rate,
+        // then correct only part of the difference from the current spin, so
+        // it converges instead of oscillating.
+        double rate = Math.min(error.angle * TURN_GAIN, MAX_TURN_RATE_RAD_PER_SEC);
+        Vector3d desiredSpin = new Vector3d(error.x, error.y, error.z).normalize().mul(rate);
+        Vector3dc current = activeBody.getAngularVelocity();
+        return desiredSpin.sub(current.x(), current.y(), current.z()).mul(TURN_DAMPING);
     }
 
     private boolean advanceSimulatedTowards(BlockPos target) {

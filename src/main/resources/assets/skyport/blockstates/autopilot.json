@@ -1,5 +1,8 @@
 {
   "variants": {
-    "": { "model": "skyport:block/autopilot" }
+    "facing=north": { "model": "skyport:block/autopilot" },
+    "facing=east":  { "model": "skyport:block/autopilot", "y": 90 },
+    "facing=south": { "model": "skyport:block/autopilot", "y": 180 },
+    "facing=west":  { "model": "skyport:block/autopilot", "y": 270 }
   }
 }
