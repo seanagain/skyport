@@ -67,6 +67,7 @@ public class AirportMapScreen extends Screen {
     private static final int COLOR_HOLDING = 0xFF4F8FE0;
     private static final int COLOR_FINAL_LEG = 0xFF7FD1E0;
     private static final int COLOR_GATE = 0xFFE0812F;
+    private static final int COLOR_PLAYER = 0xFFE33A3A;
 
     private final BlockPos stationPos;
     private final AirportLayout layout;
@@ -344,6 +345,8 @@ public class AirportMapScreen extends Screen {
             guiGraphics.fill(gx - 2, gy - 2, gx + 2, gy + 2, COLOR_GATE);
         }
 
+        drawPlayerMarker(guiGraphics);
+
         // Crosshair on the snapped position the next click would land on.
         if (isInsideMap(mouseX, mouseY)) {
             BlockPos hovered = screenToWorld(mouseX, mouseY);
@@ -358,6 +361,23 @@ public class AirportMapScreen extends Screen {
         guiGraphics.drawString(font, mode.label + " - " + hint(), mapX + 2, 3, 0xFFAAAAAA);
         guiGraphics.drawString(font, layout.displayName(),
                 mapX + mapW - font.width(layout.displayName()) - 2, 3, 0xFFFFFFFF);
+    }
+
+    /**
+     * Where the player is standing, as a red cross. Nothing marks any of the
+     * drawn layout in the actual world, so without this there's no way to
+     * relate a line on the map to somewhere you can walk to - which makes
+     * "tow the plane onto the taxiway" impossible to act on. Drawn even when
+     * off-map, clamped to the edge, so it still points the right way.
+     */
+    private void drawPlayerMarker(GuiGraphics guiGraphics) {
+        var player = Minecraft.getInstance().player;
+        if (player == null) return;
+        BlockPos at = player.blockPosition();
+        int px = Math.max(mapX + 1, Math.min(mapX + mapW - 2, worldToScreenX(at)));
+        int py = Math.max(mapY + 1, Math.min(mapY + mapH - 2, worldToScreenY(at)));
+        guiGraphics.fill(px - 3, py, px + 4, py + 1, COLOR_PLAYER);
+        guiGraphics.fill(px, py - 3, px + 1, py + 4, COLOR_PLAYER);
     }
 
     /** One line telling you what clicking actually does in the current mode -

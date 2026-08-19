@@ -56,8 +56,15 @@ public class AutopilotBlockEntity extends BlockEntity {
 
     /** Y level CLIMB aims for before CRUISE starts covering ground distance. */
     private static final int SAFE_CRUISE_ALTITUDE = 200;
-    /** How close (horizontally) to a gate/runway/taxiway line counts as "parked there". */
-    private static final double GROUND_PATH_RADIUS = 4.0;
+    /**
+     * How close (horizontally) to a gate/runway/taxiway line counts as
+     * "parked there". Generous on purpose: the map editor draws at 4 blocks
+     * per screen pixel and snaps to 8, so a pixel of mouse imprecision is
+     * already 4 blocks of world error, and nothing marks these positions in
+     * the world for the player to line up against. A tight radius here just
+     * produces a refusal the player has no way to act on.
+     */
+    private static final double GROUND_PATH_RADIUS = 16.0;
     /** How far above the terrain still counts as "on the ground" rather than airborne. */
     private static final int GROUND_HEIGHT_TOLERANCE = 6;
 
@@ -108,9 +115,19 @@ public class AutopilotBlockEntity extends BlockEntity {
         this.simulatedPosition = getBlockPos().getCenter();
 
         if (isOnGround(serverLevel)) {
-            AirportLayout origin = findGroundOrigin(AirportRegistry.get(serverLevel));
+            AirportRegistry registry = AirportRegistry.get(serverLevel);
+            AirportLayout origin = findGroundOrigin(registry);
             if (origin == null) {
-                message(player, "Can't engage here - not parked on a taxiway or at a gate. Tow this plane onto marked airport ground infrastructure first.");
+                message(player, "Can't engage here - not parked on a taxiway or at a gate.");
+                // Nothing marks these positions in the world, so a bare
+                // refusal is a dead end - name somewhere concrete to tow to.
+                NearestGround nearest = findNearestGround(registry);
+                if (nearest == null) {
+                    message(player, "No airport has any runway, taxiway or gate drawn yet. Draw one at an Airport Station first.");
+                } else {
+                    message(player, String.format("Nearest is %s at %d, %d (%.0f blocks away) - tow the plane there.",
+                            nearest.description(), nearest.pos().getX(), nearest.pos().getZ(), nearest.distance()));
+                }
                 return;
             }
             this.originAirportId = origin.id();
@@ -333,6 +350,44 @@ public class AutopilotBlockEntity extends BlockEntity {
             if (isNearGroundPath(candidate, pos)) return candidate;
         }
         return null;
+    }
+
+    /** The closest piece of drawn ground infrastructure to this block, across
+     *  every registered airport, for the "tow it here" hint. */
+    private record NearestGround(String description, BlockPos pos, double distance) { }
+
+    @org.jetbrains.annotations.Nullable
+    private NearestGround findNearestGround(AirportRegistry registry) {
+        BlockPos from = getBlockPos();
+        NearestGround best = null;
+        for (AirportLayout layout : registry.all()) {
+            for (var gate : layout.gates().entrySet()) {
+                best = closer(best, new NearestGround(
+                        layout.displayName() + " " + gate.getKey(), gate.getValue(),
+                        horizontalDistance(gate.getValue(), from)));
+            }
+            best = closer(best, nearestOnPoints(layout, Waypoint.Type.RUNWAY, "runway", from));
+            best = closer(best, nearestOnPoints(layout, Waypoint.Type.TAXIWAY, "taxiway", from));
+        }
+        return best;
+    }
+
+    @org.jetbrains.annotations.Nullable
+    private static NearestGround nearestOnPoints(AirportLayout layout, Waypoint.Type type, String label, BlockPos from) {
+        NearestGround best = null;
+        for (BlockPos point : positionsOf(layout, type)) {
+            best = closer(best, new NearestGround(
+                    layout.displayName() + " " + label, point, horizontalDistance(point, from)));
+        }
+        return best;
+    }
+
+    @org.jetbrains.annotations.Nullable
+    private static NearestGround closer(@org.jetbrains.annotations.Nullable NearestGround a,
+                                        @org.jetbrains.annotations.Nullable NearestGround b) {
+        if (a == null) return b;
+        if (b == null) return a;
+        return b.distance() < a.distance() ? b : a;
     }
 
     private static boolean isNearGroundPath(AirportLayout layout, BlockPos pos) {

@@ -5,6 +5,7 @@ import com.skyport.blockentity.AirportStationBlockEntity;
 import com.skyport.blockentity.AutopilotBlockEntity;
 import com.skyport.client.gui.AirportStationScreen;
 import com.skyport.client.gui.AutopilotScreen;
+import com.skyport.data.Waypoint;
 import net.minecraft.network.chat.Component;
 import net.minecraft.client.Minecraft;
 import net.minecraft.server.level.ServerPlayer;
@@ -91,9 +92,18 @@ public class ModNetworking {
                 station.saveLayout(payload.layout());
                 // Explicit confirmation so "did that actually register" isn't
                 // a guessing game - the Autopilot's airport picker only ever
-                // sees whatever was last saved here.
-                player.sendSystemMessage(Component.literal("[Skyport] Saved airport '" + payload.layout().displayName()
-                        + "' (" + payload.layout().gates().size() + " gate(s))."));
+                // sees whatever was last saved here. Reports every element,
+                // not just gates: a layout can look drawn but be missing the
+                // runway or taxiway the autopilot actually needs.
+                var layout = payload.layout();
+                player.sendSystemMessage(Component.literal(String.format(
+                        "[Skyport] Saved '%s' - runway %d/2, taxiway %d, holding %d, final %d, gates %d.",
+                        layout.displayName(),
+                        layout.waypoints(Waypoint.Type.RUNWAY).size(),
+                        layout.waypoints(Waypoint.Type.TAXIWAY).size(),
+                        layout.waypoints(Waypoint.Type.HOLDING_PATTERN).size(),
+                        layout.waypoints(Waypoint.Type.FINAL_LEG).size(),
+                        layout.gates().size())));
             }
         });
     }
