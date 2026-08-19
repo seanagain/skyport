@@ -21,14 +21,20 @@ import java.util.List;
 /**
  * The airport layout editor, opened from {@link AirportStationScreen}.
  *
- * The background is a real (if coarse) top-down terrain snapshot sampled
- * from the loaded world around the station - the same MapColor system
- * vanilla maps use, baked into a cached grid and re-sampled once a second
- * so chunks streaming in fill themselves out while the screen is open.
- * Deliberately not a full minimap: no player dot, no zoom - just "what
- * does the ground actually look like here". Only loaded chunks resolve to
+ * The background is a top-down terrain snapshot sampled from the loaded
+ * world around the station, using the same MapColor system vanilla maps do,
+ * with relief shading from the height step to the north. It's baked into a
+ * cached grid and re-sampled once a second, so chunks streaming in fill
+ * themselves out while the screen is open. Only loaded chunks resolve to
  * real colors; unloaded ones stay a flat blue-gray, the same spirit as an
- * unexplored vanilla map.
+ * unexplored vanilla map. Zoom runs 1-16 blocks per pixel, by button or
+ * scroll wheel.
+ *
+ * Sampling deliberately uses {@link #screenToWorldRaw} rather than the
+ * snapped {@link #screenToWorld}: snapping is for placing waypoints on a
+ * tidy grid, and applying it to sample positions collapsed neighbouring
+ * pixels onto the same block, which is what made the map bear no
+ * resemblance to the actual ground.
  *
  * Drawing rules, per element:
  * - Runway and Final Leg: exactly 2 points each (one straight line). A 3rd
@@ -53,8 +59,9 @@ public class AirportMapScreen extends Screen {
         EditMode(String label) { this.label = label; }
     }
 
-    private static final int BLOCKS_PER_PIXEL = 4;
-    private static final int TERRAIN_CELL_SIZE = 4; // screen px per sampled terrain cell
+    /** Zoom levels, in world blocks per screen pixel. */
+    private static final int[] ZOOM_LEVELS = { 1, 2, 4, 8, 16 };
+    private static final int TERRAIN_CELL_SIZE = 2; // screen px per sampled terrain cell
     private static final int SNAP_GRID = 8;         // world blocks a clicked point snaps to
     private static final int NODE_SNAP_BLOCKS = 24; // pull onto an existing node within this
     private static final long REJECTION_VISIBLE_MS = 4000;
@@ -79,8 +86,12 @@ public class AirportMapScreen extends Screen {
     private int[][] terrainColors = new int[0][0];
     private long lastTerrainSampleMs;
 
+    /** Index into ZOOM_LEVELS; starts at 4 blocks/pixel. */
+    private int zoomIndex = 2;
+
     private Button heightValueButton;
     private Button directionButton;
+    private Button zoomButton;
 
     @Nullable
     private String rejection;
@@ -154,18 +165,54 @@ public class AirportMapScreen extends Screen {
                 .bounds(btnX, row2Y, dirW, rowH)
                 .build());
 
-        // --- footer: clear current element, and done ---
+        // --- footer: clear, zoom, and done ---
         int footerY = mapY + mapH + 12;
-        int footerW = Math.max(70, mapW / 3 - 4);
+        int footerW = Math.max(60, mapW / 4 - 4);
         addRenderableWidget(Button.builder(Component.translatable("gui.skyport.airport_map.clear"), b -> clearCurrent())
                 .bounds(mapX, footerY, footerW, rowH)
                 .build());
+
+        int zoomX = mapX + footerW + 6;
+        addRenderableWidget(Button.builder(Component.literal("-"), b -> zoom(1))
+                .bounds(zoomX, footerY, 20, rowH)
+                .build());
+        zoomButton = addRenderableWidget(Button.builder(zoomLabel(), b -> { })
+                .bounds(zoomX + 22, footerY, 62, rowH)
+                .build());
+        zoomButton.active = false;
+        addRenderableWidget(Button.builder(Component.literal("+"), b -> zoom(-1))
+                .bounds(zoomX + 86, footerY, 20, rowH)
+                .build());
+
         addRenderableWidget(Button.builder(Component.translatable("gui.skyport.airport_map.save"), b -> saveAndClose())
                 .bounds(mapX + mapW - footerW, footerY, footerW, rowH)
                 .build());
 
         sampleTerrain();
         lastTerrainSampleMs = System.currentTimeMillis();
+    }
+
+    private Component zoomLabel() {
+        return Component.literal(blocksPerPixel() + " blk/px");
+    }
+
+    /** Positive `delta` zooms out (more blocks per pixel). */
+    private void zoom(int delta) {
+        int next = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, zoomIndex + delta));
+        if (next == zoomIndex) return;
+        zoomIndex = next;
+        zoomButton.setMessage(zoomLabel());
+        sampleTerrain(); // the whole grid means something different now
+        lastTerrainSampleMs = System.currentTimeMillis();
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (isInsideMap(mouseX, mouseY)) {
+            zoom(scrollY > 0 ? -1 : 1);
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
     private Component heightLabel() {
@@ -373,10 +420,24 @@ public class AirportMapScreen extends Screen {
         return mouseX >= mapX && mouseX < mapX + mapW && mouseY >= mapY && mouseY < mapY + mapH;
     }
 
+    /** Where a screen pixel actually is in the world - no snapping. Terrain
+     *  sampling has to use this: snapping sample points to the placement grid
+     *  collapses neighbouring pixels onto the same block, which is what made
+     *  the map bear no resemblance to the ground. */
+    private BlockPos screenToWorldRaw(int screenX, int screenY) {
+        int dx = (screenX - mapX - mapW / 2) * blocksPerPixel();
+        int dz = (screenY - mapY - mapH / 2) * blocksPerPixel();
+        return new BlockPos(stationPos.getX() + dx, stationPos.getY(), stationPos.getZ() + dz);
+    }
+
+    /** As above, but snapped to the placement grid - for clicks only. */
     private BlockPos screenToWorld(int screenX, int screenY) {
-        int dx = (screenX - mapX - mapW / 2) * BLOCKS_PER_PIXEL;
-        int dz = (screenY - mapY - mapH / 2) * BLOCKS_PER_PIXEL;
-        return new BlockPos(snap(stationPos.getX() + dx), stationPos.getY(), snap(stationPos.getZ() + dz));
+        BlockPos raw = screenToWorldRaw(screenX, screenY);
+        return new BlockPos(snap(raw.getX()), raw.getY(), snap(raw.getZ()));
+    }
+
+    private int blocksPerPixel() {
+        return ZOOM_LEVELS[zoomIndex];
     }
 
     /** Snaps a world coordinate to the nearest SNAP_GRID multiple, so points
@@ -386,11 +447,11 @@ public class AirportMapScreen extends Screen {
     }
 
     private int worldToScreenX(BlockPos pos) {
-        return mapX + mapW / 2 + (pos.getX() - stationPos.getX()) / BLOCKS_PER_PIXEL;
+        return mapX + mapW / 2 + (pos.getX() - stationPos.getX()) / blocksPerPixel();
     }
 
     private int worldToScreenY(BlockPos pos) {
-        return mapY + mapH / 2 + (pos.getZ() - stationPos.getZ()) / BLOCKS_PER_PIXEL;
+        return mapY + mapH / 2 + (pos.getZ() - stationPos.getZ()) / blocksPerPixel();
     }
 
     /** Samples real terrain colors into a coarse cached grid - called on open
@@ -404,19 +465,37 @@ public class AirportMapScreen extends Screen {
             for (int cy = 0; cy < rows; cy++) {
                 int screenX = mapX + cx * TERRAIN_CELL_SIZE + TERRAIN_CELL_SIZE / 2;
                 int screenY = mapY + cy * TERRAIN_CELL_SIZE + TERRAIN_CELL_SIZE / 2;
-                sampled[cx][cy] = sampleTerrainColor(level, screenToWorld(screenX, screenY));
+                sampled[cx][cy] = sampleTerrainColor(level, screenToWorldRaw(screenX, screenY));
             }
         }
         terrainColors = sampled;
     }
 
+    /**
+     * One terrain pixel, coloured the way a vanilla map does it: the surface
+     * block's own MapColor, shaded lighter or darker depending on whether the
+     * ground steps up or down going north.
+     *
+     * That relief shading is what turns a flat wash of green into something
+     * you can actually read hills and valleys off - which matters here, since
+     * the whole point is picking somewhere flat enough for a runway.
+     */
     private static int sampleTerrainColor(@Nullable Level level, BlockPos column) {
         if (level == null || !level.hasChunkAt(column)) return FALLBACK_TERRAIN_COLOR;
+
         int surfaceY = level.getHeight(Heightmap.Types.WORLD_SURFACE, column.getX(), column.getZ());
         BlockPos surface = new BlockPos(column.getX(), surfaceY - 1, column.getZ());
         MapColor mapColor = level.getBlockState(surface).getMapColor(level, surface);
         if (mapColor == MapColor.NONE) return FALLBACK_TERRAIN_COLOR;
-        return 0xFF000000 | (mapColor.calculateRGBColor(MapColor.Brightness.NORMAL) & 0xFFFFFF);
+
+        int northY = level.getHeight(Heightmap.Types.WORLD_SURFACE, column.getX(), column.getZ() - 1);
+        int step = Integer.compare(surfaceY, northY);
+        MapColor.Brightness brightness = switch (step) {
+            case 1 -> MapColor.Brightness.HIGH;   // rising away from us
+            case -1 -> MapColor.Brightness.LOW;   // falling away
+            default -> MapColor.Brightness.NORMAL;
+        };
+        return 0xFF000000 | (mapColor.calculateRGBColor(brightness) & 0xFFFFFF);
     }
 
     /**

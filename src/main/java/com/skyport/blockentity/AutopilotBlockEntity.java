@@ -128,6 +128,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      *  back in, so a gentle correction loses to it. */
     private static final double GROUND_LEVEL_GAIN = 3.0;
     private static final double GROUND_TURN_DAMPING = 0.5;
+    /** Throttle floor when pointing the wrong way - see alignmentFactor. */
+    private static final double MIN_MISALIGNED_THROTTLE = 0.15;
+    /** Hold on the centreline before rolling: at least this long, until
+     *  aligned, and never longer than the cap. */
+    private static final int TAKEOFF_MIN_HOLD_TICKS = 20;
+    private static final int TAKEOFF_MAX_HOLD_TICKS = 100;
+    private static final double TAKEOFF_ALIGNMENT_THRESHOLD = 0.98;
     /** How far above the terrain still counts as "on the ground" rather than airborne. */
     private static final int GROUND_HEIGHT_TOLERANCE = 6;
 
@@ -157,6 +164,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      *  plane has got. Transient, like the rest of the in-flight values. */
     @org.jetbrains.annotations.Nullable
     private Vec3 takeoffStart;
+    /** Ticks spent lined up on the centreline before the roll begins. */
+    private int takeoffHoldTicks = 0;
 
     private FlightState state = FlightState.IDLE;
     private int currentWaypointIndex = 0;
@@ -307,6 +316,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         originAirportId = null;
         joinPoint = null;
         takeoffStart = null;
+        takeoffHoldTicks = 0;
         pitchDegrees = 0;
         waitTicksRemaining = 0;
         setChanged();
@@ -607,7 +617,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // Ease off on the way in so it settles on the waypoint instead of
         // overshooting and having to come back.
         double topSpeed = onGround ? CRAFT_TAXI_SPEED : cruiseSpeed();
-        double speed = Math.min(topSpeed, distance * CRAFT_APPROACH_GAIN);
+        double speed = Math.min(topSpeed, distance * CRAFT_APPROACH_GAIN) * alignmentFactor(heading);
         Vec3 desired = heading.scale(speed);
 
         Vector3dc v = activeBody.getLinearVelocity();
@@ -622,6 +632,38 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 ? (float) Math.toDegrees(Math.atan2(heading.y, headingHorizontal))
                 : 0;
         return false;
+    }
+
+    /**
+     * How much of the commanded speed to actually apply, based on how well
+     * the nose is already lined up with where we're going.
+     *
+     * Steering was pushing the craft along the path regardless of which way
+     * it faced, so any time the turn lagged the heading, the plane slid
+     * sideways. Aircraft don't: they have to be pointing roughly where
+     * they're going to make progress. Backing off the throttle while badly
+     * misaligned lets the turn catch up first, which is also what stops the
+     * craft carving sideways out of a corner.
+     */
+    private double alignmentFactor(Vec3 heading) {
+        if (activeSubLevel == null) return 1.0;
+
+        Quaterniondc orientation = activeSubLevel.logicalPose().orientation();
+        Direction facing = getBlockState().hasProperty(AutopilotBlock.FACING)
+                ? getBlockState().getValue(AutopilotBlock.FACING)
+                : Direction.NORTH;
+        Vector3d nose = orientation.transform(
+                new Vector3d(facing.getStepX(), facing.getStepY(), facing.getStepZ()));
+
+        double noseLen = Math.sqrt(nose.x * nose.x + nose.z * nose.z);
+        double headLen = Math.sqrt(heading.x * heading.x + heading.z * heading.z);
+        if (noseLen < 1.0e-6 || headLen < 1.0e-6) return 1.0;
+
+        double dot = (nose.x * heading.x + nose.z * heading.z) / (noseLen * headLen);
+        // 1 when pointing straight at it, tapering to a crawl when sideways -
+        // never zero, or a craft that starts badly aligned could never build
+        // the speed it needs for the turn to bite.
+        return Math.max(MIN_MISALIGNED_THROTTLE, dot);
     }
 
     private boolean isGroundState() {
@@ -808,6 +850,25 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private void runTakeoffRoll(List<BlockPos> runway) {
         BlockPos start = runway.get(0);
         BlockPos end = runway.get(1);
+
+        double dxAlign = end.getX() - start.getX();
+        double dzAlign = end.getZ() - start.getZ();
+        double alignLen = Math.sqrt(dxAlign * dxAlign + dzAlign * dzAlign);
+        Vec3 centreline = alignLen < 1.0e-6
+                ? new Vec3(1, 0, 0)
+                : new Vec3(dxAlign / alignLen, 0, dzAlign / alignLen);
+
+        // Line up on the centreline before rolling. Starting the roll while
+        // still turning is what produced departures that tracked sideways -
+        // the craft was committed to a heading it hadn't finished taking.
+        if (takeoffHoldTicks < TAKEOFF_MAX_HOLD_TICKS
+                && (takeoffHoldTicks < TAKEOFF_MIN_HOLD_TICKS
+                    || alignmentFactor(centreline) < TAKEOFF_ALIGNMENT_THRESHOLD)) {
+            takeoffHoldTicks++;
+            flyHeading(centreline, 0); // hold still, but keep turning onto the heading
+            return;
+        }
+
         if (takeoffStart == null) takeoffStart = simulatedPosition;
 
         double runwayLength = horizontalDistance(start, end);
@@ -819,16 +880,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         double ramp = runwayLength <= 1 ? 1 : Math.min(1.0, rolled / (runwayLength * 0.5));
         double speed = CRAFT_TAXI_SPEED + (CRAFT_TAKEOFF_SPEED - CRAFT_TAXI_SPEED) * ramp;
 
-        double dx = end.getX() - start.getX();
-        double dz = end.getZ() - start.getZ();
-        double len = Math.sqrt(dx * dx + dz * dz);
-        Vec3 along = len < 1.0e-6 ? new Vec3(1, 0, 0) : new Vec3(dx / len, 0, dz / len);
-        flyHeading(along, speed);
+        flyHeading(centreline, speed);
 
         boolean atRotationSpeed = ramp >= 1.0;
         boolean nearRunwayEnd = horizontalDistance(end, BlockPos.containing(simulatedPosition)) <= CRAFT_ARRIVAL_RADIUS;
         if (atRotationSpeed && nearRunwayEnd) {
             takeoffStart = null;
+            takeoffHoldTicks = 0;
             setState(FlightState.CLIMB);
         }
     }
