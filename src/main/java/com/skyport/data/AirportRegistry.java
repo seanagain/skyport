@@ -79,14 +79,42 @@ public class AirportRegistry extends SavedData {
     private final transient Map<UUID, UUID> trafficClearances = new HashMap<>();
 
     /**
-     * Ask for the run of an airport. Granted if nobody else holds it, or if
-     * this plane already does (so re-asking every tick is harmless). A
-     * refusal means wait - hold overhead if airborne, stay at the gate if not.
+     * When each clearance was last confirmed by the plane holding it.
+     *
+     * A clearance is a lease, not a lock. Every path that hands one back can
+     * be skipped - the block is broken mid-flight, its chunk unloads, the
+     * server stops - and a clearance nobody is left to release locks the
+     * airport permanently, with every other aircraft circling a field that is
+     * actually empty. Holders re-confirm each tick (see heartbeat), so a
+     * clearance whose holder has gone quiet can simply be taken.
      */
-    public boolean tryClaimTraffic(UUID airportId, UUID planeId) {
-        UUID holder = trafficClearances.get(airportId);
-        if (holder != null && !holder.equals(planeId)) return false;
+    private final transient Map<UUID, Long> clearanceSeen = new HashMap<>();
+
+    /** How long a holder can go silent before its clearance is up for grabs. */
+    private static final long CLEARANCE_TIMEOUT_TICKS = 200; // 10 seconds
+
+    private boolean available(Map<UUID, UUID> clearances, UUID airportId, UUID planeId, long now) {
+        UUID holder = clearances.get(airportId);
+        if (holder == null || holder.equals(planeId)) return true;
+        Long seen = clearanceSeen.get(holder);
+        return seen == null || now - seen > CLEARANCE_TIMEOUT_TICKS;
+    }
+
+    /** Called every tick by a plane holding any clearance, to keep its lease
+     *  alive. Silence is what lets a stuck clearance be reclaimed. */
+    public void heartbeat(UUID planeId, long now) {
+        clearanceSeen.put(planeId, now);
+    }
+
+    /**
+     * Ask for the run of an airport. Granted if nobody else holds it, if this
+     * plane already does (so re-asking every tick is harmless), or if the
+     * current holder has gone silent long enough to be presumed gone.
+     */
+    public boolean tryClaimTraffic(UUID airportId, UUID planeId, long now) {
+        if (!available(trafficClearances, airportId, planeId, now)) return false;
         trafficClearances.put(airportId, planeId);
+        clearanceSeen.put(planeId, now);
         return true;
     }
 
@@ -103,10 +131,10 @@ public class AirportRegistry extends SavedData {
      */
     private final transient Map<UUID, UUID> taxiwayClearances = new HashMap<>();
 
-    public boolean tryClaimTaxiway(UUID airportId, UUID planeId) {
-        UUID holder = taxiwayClearances.get(airportId);
-        if (holder != null && !holder.equals(planeId)) return false;
+    public boolean tryClaimTaxiway(UUID airportId, UUID planeId, long now) {
+        if (!available(taxiwayClearances, airportId, planeId, now)) return false;
         taxiwayClearances.put(airportId, planeId);
+        clearanceSeen.put(planeId, now);
         return true;
     }
 
@@ -124,14 +152,12 @@ public class AirportRegistry extends SavedData {
      * the other needs. Grabbing both atomically means an arrival that cannot
      * have the whole path simply stays in the pattern, holding nothing.
      */
-    public boolean tryClaimArrival(UUID airportId, UUID planeId) {
-        UUID runwayHolder = trafficClearances.get(airportId);
-        UUID taxiHolder = taxiwayClearances.get(airportId);
-        boolean runwayFree = runwayHolder == null || runwayHolder.equals(planeId);
-        boolean taxiFree = taxiHolder == null || taxiHolder.equals(planeId);
-        if (!runwayFree || !taxiFree) return false;
+    public boolean tryClaimArrival(UUID airportId, UUID planeId, long now) {
+        if (!available(trafficClearances, airportId, planeId, now)) return false;
+        if (!available(taxiwayClearances, airportId, planeId, now)) return false;
         trafficClearances.put(airportId, planeId);
         taxiwayClearances.put(airportId, planeId);
+        clearanceSeen.put(planeId, now);
         return true;
     }
 

@@ -1,7 +1,7 @@
 package com.skyport.blockentity;
 
 import com.skyport.data.AirportRegistry;
-import com.skyport.data.AirportSummary;
+import com.skyport.data.AirportLayout;
 import com.skyport.data.TrafficReport;
 import com.skyport.network.OpenAtcPayload;
 import com.skyport.registry.ModBlockEntities;
@@ -29,7 +29,7 @@ public class AtcBlockEntity extends BlockEntity {
         ServerLevel serverLevel = player.serverLevel();
         AirportRegistry registry = AirportRegistry.get(serverLevel);
 
-        List<AirportSummary> airports = registry.all().stream().map(AirportSummary::of).toList();
+        List<AirportLayout> airports = List.copyOf(registry.all());
         List<TrafficReport> traffic = List.copyOf(registry.airborneTraffic().values());
 
         PacketDistributor.sendToPlayer(player, new OpenAtcPayload(getBlockPos(), airports, traffic));

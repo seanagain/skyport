@@ -53,8 +53,8 @@ import java.util.List;
 public class AirportMapScreen extends Screen {
 
     private enum EditMode {
-        RUNWAY("Runway"), TAXIWAY("Taxiway"), HOLDING_PATTERN("Holding"),
-        FINAL_LEG("Final"), GATE("Gate"), HOLD_SHORT("Hold");
+        RUNWAY("Runway"), TAXIWAY("Taxiway"), HOLDING_PATTERN("Pattern"),
+        FINAL_LEG("Final"), GATE("Gate"), HOLD_SHORT("Hold Line");
 
         final String label;
         EditMode(String label) { this.label = label; }
@@ -634,10 +634,10 @@ public class AirportMapScreen extends Screen {
         return switch (mode) {
             case RUNWAY -> "draw this first - 2 points: gate end, then far end";
             case TAXIWAY -> "pairs; start each on the runway or another taxiway";
-            case HOLDING_PATTERN -> "click a loop of 3+ points";
+            case HOLDING_PATTERN -> "the airborne racetrack - click a loop of 3+ points";
             case FINAL_LEG -> "2 points: from holding pattern, to runway";
             case GATE -> "click the end of a runway or taxiway line";
-            case HOLD_SHORT -> "one point on the taxiway - planes wait here for the runway";
+            case HOLD_SHORT -> "the ground stop line - planes wait here for the runway";
         };
     }
 

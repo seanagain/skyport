@@ -130,6 +130,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      *  back in, so a gentle correction loses to it. */
     private static final double GROUND_LEVEL_GAIN = 3.0;
     private static final double GROUND_TURN_DAMPING = 0.5;
+    /** How much bank to carry per radian of heading error, and the ceiling on
+     *  it - about 18 degrees, a gentle airliner bank rather than aerobatics. */
+    private static final double BANK_PER_YAW_ERROR = 0.8;
+    private static final double MAX_BANK_RADIANS = Math.toRadians(18);
     /** Throttle floor when pointing the wrong way - see alignmentFactor. */
     private static final double MIN_MISALIGNED_THROTTLE = 0.15;
     /** Hold on the centreline before rolling: at least this long, until
@@ -595,6 +599,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // Publish our position for other planes' separation checks, and work
         // out whether we're the one that has to give way.
         AirportRegistry registry = AirportRegistry.get(serverLevel);
+        // Keep any clearance we hold alive. Going quiet is what lets another
+        // plane reclaim it, so a flight that ends abruptly can't lock a field.
+        registry.heartbeat(planeId(), serverLevel.getGameTime());
         if (isGroundState()) {
             registry.clearAirborne(planeId());
             currentSeparationOffset = 0;
@@ -966,9 +973,19 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (right.lengthSquared() < 1.0e-8) return new Vector3d();
         right.normalize();
 
-        // --- roll: rotate the craft's up back onto the level up.
+        // --- roll: hold the wings level, except in a turn.
+        //
+        // Airborne, bank into the turn by an amount proportional to how hard
+        // we're turning - a plane that changes heading with its wings dead
+        // level looks like it's sliding sideways through the air. Kept well
+        // short of a real aerobatic bank: enough to read as an aeroplane, not
+        // enough to look like it's falling out of the sky. On the ground the
+        // target stays zero, since a taxiing plane has wheels, not wings.
         Vector3d idealUp = new Vector3d(right).cross(nose).normalize();
-        double rollError = Math.atan2(up.dot(right), up.dot(idealUp));
+        double actualRoll = Math.atan2(up.dot(right), up.dot(idealUp));
+        double desiredRoll = onGround ? 0
+                : Math.max(-MAX_BANK_RADIANS, Math.min(MAX_BANK_RADIANS, yawError * BANK_PER_YAW_ERROR));
+        double rollError = actualRoll - desiredRoll;
 
         Vector3d noseUnit = new Vector3d(nose).normalize();
         double rollGain = onGround ? GROUND_LEVEL_GAIN : TURN_GAIN;
@@ -1133,11 +1150,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** Ask for the run of an airport - covers the runway and everything
      *  committed to it, bounded by the hold-short point where one is drawn. */
     private boolean claimTraffic(ServerLevel level, AirportLayout destination) {
-        return AirportRegistry.get(level).tryClaimTraffic(destination.id(), planeId());
+        return AirportRegistry.get(level).tryClaimTraffic(destination.id(), planeId(), level.getGameTime());
     }
 
     private boolean claimTaxiway(ServerLevel level, AirportLayout airport) {
-        return AirportRegistry.get(level).tryClaimTaxiway(airport.id(), planeId());
+        return AirportRegistry.get(level).tryClaimTaxiway(airport.id(), planeId(), level.getGameTime());
     }
 
     private void releaseTaxiway(ServerLevel level, AirportLayout airport) {
@@ -1147,7 +1164,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** Arrivals take runway and taxiway together - see tryClaimArrival for
      *  why splitting them deadlocks against departures. */
     private boolean claimArrival(ServerLevel level, AirportLayout destination) {
-        return AirportRegistry.get(level).tryClaimArrival(destination.id(), planeId());
+        return AirportRegistry.get(level).tryClaimArrival(destination.id(), planeId(), level.getGameTime());
     }
 
     /** Take the clearance if it's going, then start down regardless - used
@@ -1175,6 +1192,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     public void setRemoved() {
         super.setRemoved();
         releaseChunks();
+        // Hand back any clearance too. Breaking an autopilot mid-flight used
+        // to leave its airport locked with no plane left to release it, so
+        // everyone else circled a field that was actually empty. The lease
+        // timeout would recover it eventually; this makes it immediate.
+        releaseApproach();
     }
 
     /** Give the departure airport's runway back once safely airborne. */
