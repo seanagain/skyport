@@ -56,6 +56,8 @@ public class AirportMapScreen extends Screen {
     private static final int BLOCKS_PER_PIXEL = 4;
     private static final int TERRAIN_CELL_SIZE = 4; // screen px per sampled terrain cell
     private static final int SNAP_GRID = 8;         // world blocks a clicked point snaps to
+    private static final int NODE_SNAP_BLOCKS = 24; // pull onto an existing node within this
+    private static final long REJECTION_VISIBLE_MS = 4000;
     // Deliberately NOT a plausible ground color - real sampled terrain and
     // "not loaded yet" need to look obviously different, the way an
     // unexplored patch of a vanilla map is blank rather than guessing grass.
@@ -79,6 +81,10 @@ public class AirportMapScreen extends Screen {
 
     private Button heightValueButton;
     private Button directionButton;
+
+    @Nullable
+    private String rejection;
+    private long rejectionShownAtMs;
 
     public AirportMapScreen(BlockPos stationPos, AirportLayout layout) {
         super(Component.translatable("gui.skyport.airport_map.title"));
@@ -237,7 +243,16 @@ public class AirportMapScreen extends Screen {
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button == 0 && isInsideMap(mouseX, mouseY)) {
-            BlockPos world = screenToWorld((int) mouseX, (int) mouseY);
+            BlockPos world = snapToExistingNode(screenToWorld((int) mouseX, (int) mouseY));
+
+            String refusal = whyCantPlace(world);
+            if (refusal != null) {
+                rejection = refusal;
+                rejectionShownAtMs = System.currentTimeMillis();
+                return true;
+            }
+            rejection = null;
+
             if (mode == EditMode.GATE) {
                 layout.gates().put(layout.nextGateName(), world);
             } else {
@@ -249,6 +264,109 @@ public class AirportMapScreen extends Screen {
             return true;
         }
         return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    /**
+     * Pulls a click exactly onto a nearby existing node so lines actually
+     * join up instead of "nearly" touching. Grid snapping alone isn't enough:
+     * two points can both be on the 8-block grid and still be a grid step
+     * apart, which leaves a gap the autopilot's connectivity check would
+     * treat as a broken network.
+     */
+    private BlockPos snapToExistingNode(BlockPos candidate) {
+        BlockPos best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (BlockPos node : allNodes()) {
+            double d = horizontalDistance(node, candidate);
+            if (d < bestDist) {
+                bestDist = d;
+                best = node;
+            }
+        }
+        return best != null && bestDist <= NODE_SNAP_BLOCKS ? best : candidate;
+    }
+
+    private List<BlockPos> allNodes() {
+        List<BlockPos> nodes = new ArrayList<>();
+        for (Waypoint.Type type : Waypoint.Type.values()) {
+            for (Waypoint w : layout.waypoints(type)) nodes.add(w.pos());
+        }
+        nodes.addAll(layout.gates().values());
+        return nodes;
+    }
+
+    private List<BlockPos> nodesOf(Waypoint.Type... types) {
+        List<BlockPos> nodes = new ArrayList<>();
+        for (Waypoint.Type type : types) {
+            for (Waypoint w : layout.waypoints(type)) nodes.add(w.pos());
+        }
+        return nodes;
+    }
+
+    private static boolean touches(List<BlockPos> nodes, BlockPos p) {
+        for (BlockPos n : nodes) {
+            if (n.getX() == p.getX() && n.getZ() == p.getZ()) return true;
+        }
+        return false;
+    }
+
+    private static double horizontalDistance(BlockPos a, BlockPos b) {
+        double dx = a.getX() - b.getX(), dz = a.getZ() - b.getZ();
+        return Math.sqrt(dx * dx + dz * dz);
+    }
+
+    /**
+     * Enforces that what gets drawn is a connected network the autopilot can
+     * actually route over, rather than a pile of unrelated lines. Returns the
+     * reason a click is refused, or null to allow it.
+     */
+    @Nullable
+    private String whyCantPlace(BlockPos p) {
+        boolean hasRunway = layout.waypoints(Waypoint.Type.RUNWAY).size() >= 2;
+        List<Waypoint> taxiway = layout.waypoints(Waypoint.Type.TAXIWAY);
+
+        return switch (mode) {
+            // The runway is the spine everything else hangs off, so it goes
+            // down first and needs no connection of its own.
+            case RUNWAY -> null;
+
+            case TAXIWAY -> {
+                if (!hasRunway) yield "Draw the runway first.";
+                // Only the START of each segment must join the network; its
+                // far end is the new ground being claimed.
+                boolean startingSegment = taxiway.size() % 2 == 0;
+                if (startingSegment && !touches(nodesOf(Waypoint.Type.RUNWAY, Waypoint.Type.TAXIWAY), p)) {
+                    yield "Start a taxiway on the runway or an existing taxiway point.";
+                }
+                yield null;
+            }
+
+            case GATE -> {
+                if (!hasRunway) yield "Draw the runway first.";
+                if (!touches(nodesOf(Waypoint.Type.RUNWAY, Waypoint.Type.TAXIWAY), p)) {
+                    yield "Gates go on the end of a runway or taxiway line.";
+                }
+                yield null;
+            }
+
+            case HOLDING_PATTERN -> null;
+
+            case FINAL_LEG -> {
+                if (!hasRunway) yield "Draw the runway first.";
+                if (layout.waypoints(Waypoint.Type.HOLDING_PATTERN).size() < 3) {
+                    yield "Draw the holding pattern first.";
+                }
+                // Point 0 leaves the holding pattern, point 1 meets the runway.
+                boolean first = layout.waypoints(Waypoint.Type.FINAL_LEG).size() % 2 == 0;
+                if (first && !touches(nodesOf(Waypoint.Type.HOLDING_PATTERN), p)) {
+                    yield "Start the final leg on a holding pattern point.";
+                }
+                if (!first && !touches(nodesOf(Waypoint.Type.RUNWAY), p)) {
+                    yield "End the final leg on a runway point.";
+                }
+                yield null;
+            }
+        };
     }
 
     private boolean isInsideMap(double mouseX, double mouseY) {
@@ -347,15 +465,28 @@ public class AirportMapScreen extends Screen {
 
         drawPlayerMarker(guiGraphics);
 
-        // Crosshair on the snapped position the next click would land on.
+        // Crosshair on the position the next click would actually land on -
+        // including the pull onto a nearby node, so joining up is visible
+        // before committing rather than a surprise afterwards.
         if (isInsideMap(mouseX, mouseY)) {
-            BlockPos hovered = screenToWorld(mouseX, mouseY);
+            BlockPos raw = screenToWorld(mouseX, mouseY);
+            BlockPos hovered = snapToExistingNode(raw);
+            boolean snapped = !hovered.equals(raw);
             int hx = worldToScreenX(hovered);
             int hy = worldToScreenY(hovered);
-            guiGraphics.fill(hx - 4, hy, hx + 5, hy + 1, 0x80FFFFFF);
-            guiGraphics.fill(hx, hy - 4, hx + 1, hy + 5, 0x80FFFFFF);
-            guiGraphics.drawString(font, "X " + hovered.getX() + "  Z " + hovered.getZ(),
+            int color = snapped ? 0xFF63D66B : 0x80FFFFFF;
+            guiGraphics.fill(hx - 4, hy, hx + 5, hy + 1, color);
+            guiGraphics.fill(hx, hy - 4, hx + 1, hy + 5, color);
+            if (snapped) drawBorder(guiGraphics, hx - 4, hy - 4, 9, 9, color);
+            guiGraphics.drawString(font,
+                    "X " + hovered.getX() + "  Z " + hovered.getZ() + (snapped ? "  (join)" : ""),
                     mapX + 2, mapY + mapH + 2, 0xFFD9D9D9);
+        }
+
+        // Refusals fade out on their own - a stale "you can't do that" next to
+        // a click that did work would be more confusing than no message.
+        if (rejection != null && System.currentTimeMillis() - rejectionShownAtMs < REJECTION_VISIBLE_MS) {
+            guiGraphics.drawString(font, rejection, mapX + 2, mapY + mapH + 12, 0xFFE0603A);
         }
 
         guiGraphics.drawString(font, mode.label + " - " + hint(), mapX + 2, 3, 0xFFAAAAAA);
@@ -384,11 +515,11 @@ public class AirportMapScreen extends Screen {
      *  the rules differ per element and aren't guessable from the buttons. */
     private String hint() {
         return switch (mode) {
-            case RUNWAY -> "click 2 points: gate end, then far end";
-            case TAXIWAY -> "click pairs: backbone first, then one per gate";
+            case RUNWAY -> "draw this first - 2 points: gate end, then far end";
+            case TAXIWAY -> "pairs; start each on the runway or another taxiway";
             case HOLDING_PATTERN -> "click a loop of 3+ points";
-            case FINAL_LEG -> "click 2 points: holding side, then runway far end";
-            case GATE -> "click to place a gate";
+            case FINAL_LEG -> "2 points: from holding pattern, to runway";
+            case GATE -> "click the end of a runway or taxiway line";
         };
     }
 

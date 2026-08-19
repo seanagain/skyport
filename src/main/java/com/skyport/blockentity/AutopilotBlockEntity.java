@@ -57,14 +57,19 @@ public class AutopilotBlockEntity extends BlockEntity {
     /** Y level CLIMB aims for before CRUISE starts covering ground distance. */
     private static final int SAFE_CRUISE_ALTITUDE = 200;
     /**
-     * How close (horizontally) to a gate/runway/taxiway line counts as
-     * "parked there". Generous on purpose: the map editor draws at 4 blocks
-     * per screen pixel and snaps to 8, so a pixel of mouse imprecision is
-     * already 4 blocks of world error, and nothing marks these positions in
-     * the world for the player to line up against. A tight radius here just
-     * produces a refusal the player has no way to act on.
+     * How far to either side of a gate/runway/taxiway line still counts as
+     * "parked there" - a buffer along the line, not a radius around its
+     * drawn nodes, since the plane joins the nearest point ON the line (see
+     * {@link #nearestPointOnGroundPath}) rather than needing to sit on a node.
      */
-    private static final double GROUND_PATH_RADIUS = 16.0;
+    private static final double GROUND_PATH_RADIUS = 8.0;
+
+    /** Steepest climb/descent the autopilot will command, in degrees. Applied
+     *  as a cap on the vertical component of each move, so a plane pitches up
+     *  to leave the runway and noses down on final rather than teleporting
+     *  vertically. */
+    private static final double MAX_PITCH_DEGREES = 30.0;
+    private static final double MAX_PITCH_TANGENT = Math.tan(Math.toRadians(MAX_PITCH_DEGREES));
     /** How far above the terrain still counts as "on the ground" rather than airborne. */
     private static final int GROUND_HEIGHT_TOLERANCE = 6;
 
@@ -81,6 +86,11 @@ public class AutopilotBlockEntity extends BlockEntity {
     // not worth persisting across a server restart.
     @org.jetbrains.annotations.Nullable
     private UUID originAirportId;
+    // Where the plane first turns onto the ground network, so it doesn't have
+    // to be parked exactly on a drawn node. Same non-persisted reasoning as
+    // simulatedPosition below.
+    @org.jetbrains.annotations.Nullable
+    private BlockPos joinPoint;
 
     private FlightState state = FlightState.IDLE;
     private int currentWaypointIndex = 0;
@@ -89,6 +99,10 @@ public class AutopilotBlockEntity extends BlockEntity {
     private int holdingEntryIndex = -1;
     @org.jetbrains.annotations.Nullable
     private Vec3 simulatedPosition;
+    // Current climb/descent angle, capped at MAX_PITCH_DEGREES. Reported in
+    // telemetry; this is the value a real contraption's rotation would be
+    // driven from once movement is wired up.
+    private float pitchDegrees = 0;
     private int tickCounter = 0;
 
     public AutopilotBlockEntity(BlockPos pos, BlockState state) {
@@ -105,23 +119,39 @@ public class AutopilotBlockEntity extends BlockEntity {
     }
 
     public void engage(UUID airportId, String gateName, ServerPlayer player) {
-        if (!(level instanceof ServerLevel serverLevel)) return;
+        // Deliberately go through the PLAYER for both the level and the
+        // position, not this block entity's own.
+        //
+        // Once this block is part of an assembled Create contraption, the
+        // blocks get moved into contraption-local space: getBlockPos()
+        // returns a small local offset rather than a world position (which
+        // read as the plane being "a million blocks" from the taxiway), and
+        // getLevel() is Create's wrapper world rather than the real
+        // ServerLevel. The player who just right-clicked the block is
+        // standing on the plane, in the real world, so their position is a
+        // reliable stand-in for where the plane actually is.
+        //
+        // The proper fix, once real contraption movement is wired up, is to
+        // resolve the owning AbstractContraptionEntity and use
+        // toGlobalVector() to convert local -> world.
+        ServerLevel serverLevel = player.serverLevel();
+        BlockPos reference = player.blockPosition();
 
         this.destinationAirportId = airportId;
         this.destinationGateName = gateName;
         this.controllingPlayerId = player.getUUID();
         this.currentWaypointIndex = 0;
         this.holdingEntryIndex = -1;
-        this.simulatedPosition = getBlockPos().getCenter();
+        this.simulatedPosition = player.position();
 
-        if (isOnGround(serverLevel)) {
+        if (isOnGround(serverLevel, reference)) {
             AirportRegistry registry = AirportRegistry.get(serverLevel);
-            AirportLayout origin = findGroundOrigin(registry);
+            AirportLayout origin = findGroundOrigin(registry, reference);
             if (origin == null) {
                 message(player, "Can't engage here - not parked on a taxiway or at a gate.");
                 // Nothing marks these positions in the world, so a bare
                 // refusal is a dead end - name somewhere concrete to tow to.
-                NearestGround nearest = findNearestGround(registry);
+                NearestGround nearest = findNearestGround(registry, reference);
                 if (nearest == null) {
                     message(player, "No airport has any runway, taxiway or gate drawn yet. Draw one at an Airport Station first.");
                 } else {
@@ -131,8 +161,11 @@ public class AutopilotBlockEntity extends BlockEntity {
                 return;
             }
             this.originAirportId = origin.id();
+            // Turn onto the line before following it, so parking anywhere
+            // within the buffer alongside a taxiway is good enough.
+            this.joinPoint = nearestPointOnGroundPath(origin, reference);
             setState(FlightState.TAXI_OUT);
-            message(player, "Autopilot engaged - taxiing out toward runway.");
+            message(player, "Autopilot engaged - joining the taxiway, then out to the runway.");
         } else {
             this.originAirportId = null;
             setState(FlightState.CLIMB);
@@ -146,6 +179,8 @@ public class AutopilotBlockEntity extends BlockEntity {
         destinationGateName = null;
         controllingPlayerId = null;
         originAirportId = null;
+        joinPoint = null;
+        pitchDegrees = 0;
         setChanged();
     }
 
@@ -173,16 +208,28 @@ public class AutopilotBlockEntity extends BlockEntity {
             // graph if that gets confusing with more.
             case TAXI_OUT -> {
                 AirportLayout origin = originLayout(serverLevel);
-                followWaypoints(origin != null ? groundTaxiPath(origin, false) : List.of(), () -> setState(FlightState.TAKEOFF_ROLL));
+                List<BlockPos> path = new ArrayList<>();
+                if (joinPoint != null) path.add(joinPoint);
+                if (origin != null) path.addAll(groundTaxiPath(origin, false));
+                followWaypoints(path, () -> setState(FlightState.TAKEOFF_ROLL));
             }
             case TAKEOFF_ROLL -> {
                 AirportLayout origin = originLayout(serverLevel);
                 List<BlockPos> runway = origin != null ? positionsOf(origin, Waypoint.Type.RUNWAY) : List.of();
                 followWaypoints(runway, () -> setState(FlightState.CLIMB));
             }
+            // Climb toward where we're going, not straight up: the pitch cap
+            // in applyMotionTowards limits how fast altitude comes, so this
+            // covers ground on the way up the way a real departure does.
+            // Straight up would have zero horizontal distance to pitch
+            // against, which the cap can't express as an angle at all.
             case CLIMB -> {
-                BlockPos climbTarget = new BlockPos((int) Math.round(simulatedPosition.x), SAFE_CRUISE_ALTITUDE, (int) Math.round(simulatedPosition.z));
-                if (applyMotionTowards(climbTarget)) setState(FlightState.CRUISE);
+                List<BlockPos> loop = positionsOf(destination, Waypoint.Type.HOLDING_PATTERN);
+                BlockPos ahead = loop.isEmpty()
+                        ? new BlockPos((int) Math.round(simulatedPosition.x) + 200, SAFE_CRUISE_ALTITUDE, (int) Math.round(simulatedPosition.z))
+                        : withY(loop.get(nearestIndex(loop, simulatedPosition)), SAFE_CRUISE_ALTITUDE);
+                applyMotionTowards(ahead);
+                if (simulatedPosition.y >= SAFE_CRUISE_ALTITUDE - 1) setState(FlightState.CRUISE);
             }
             case CRUISE -> {
                 List<BlockPos> loop = positionsOf(destination, Waypoint.Type.HOLDING_PATTERN);
@@ -260,9 +307,26 @@ public class AutopilotBlockEntity extends BlockEntity {
         double distance = delta.length();
         if (distance <= ARRIVAL_RADIUS) {
             simulatedPosition = targetCenter;
+            pitchDegrees = 0;
             return true;
         }
-        simulatedPosition = simulatedPosition.add(delta.normalize().scale(Math.min(SIMULATED_SPEED_BLOCKS_PER_TICK, distance)));
+
+        Vec3 step = delta.normalize().scale(Math.min(SIMULATED_SPEED_BLOCKS_PER_TICK, distance));
+
+        // Cap how steeply the plane climbs or descends. A plane can't gain
+        // altitude vertically - it noses up and covers ground while doing it,
+        // so the vertical part of each step is limited to what
+        // MAX_PITCH_DEGREES allows for the horizontal distance travelled.
+        double horizontal = Math.sqrt(step.x * step.x + step.z * step.z);
+        double maxVertical = horizontal * MAX_PITCH_TANGENT;
+        if (horizontal > 1.0e-4 && Math.abs(step.y) > maxVertical) {
+            step = new Vec3(step.x, Math.copySign(maxVertical, step.y), step.z);
+        }
+
+        simulatedPosition = simulatedPosition.add(step);
+        pitchDegrees = horizontal > 1.0e-4
+                ? (float) Math.toDegrees(Math.atan2(step.y, horizontal))
+                : (float) Math.copySign(90, step.y);
         return false;
     }
 
@@ -344,12 +408,54 @@ public class AutopilotBlockEntity extends BlockEntity {
      *  GROUND_PATH_RADIUS of this block - i.e. "is this plane actually
      *  parked somewhere on charted airport ground infrastructure." */
     @org.jetbrains.annotations.Nullable
-    private AirportLayout findGroundOrigin(AirportRegistry registry) {
-        BlockPos pos = getBlockPos();
+    private AirportLayout findGroundOrigin(AirportRegistry registry, BlockPos pos) {
         for (AirportLayout candidate : registry.all()) {
             if (isNearGroundPath(candidate, pos)) return candidate;
         }
         return null;
+    }
+
+    /**
+     * The closest point ON a taxiway or runway line (not just the closest
+     * drawn node) to `from`. Engaging steers the plane here first, so parking
+     * anywhere within the buffer alongside a line is enough - the plane turns
+     * and joins the line itself rather than needing to sit exactly on a node.
+     */
+    @org.jetbrains.annotations.Nullable
+    private static BlockPos nearestPointOnGroundPath(AirportLayout layout, BlockPos from) {
+        BlockPos best = null;
+        double bestDist = Double.MAX_VALUE;
+
+        List<BlockPos> runway = positionsOf(layout, Waypoint.Type.RUNWAY);
+        if (runway.size() == 2) {
+            BlockPos p = closestPointOnSegment(runway.get(0), runway.get(1), from);
+            best = p;
+            bestDist = horizontalDistance(p, from);
+        }
+        List<BlockPos> taxiway = positionsOf(layout, Waypoint.Type.TAXIWAY);
+        for (int i = 0; i + 1 < taxiway.size(); i += 2) {
+            BlockPos p = closestPointOnSegment(taxiway.get(i), taxiway.get(i + 1), from);
+            double d = horizontalDistance(p, from);
+            if (d < bestDist) {
+                bestDist = d;
+                best = p;
+            }
+        }
+        return best;
+    }
+
+    /** The point on segment a-b closest to p, keeping a/b's Y (ground height
+     *  varies; the horizontal projection is what matters here). */
+    private static BlockPos closestPointOnSegment(BlockPos a, BlockPos b, BlockPos p) {
+        double ax = a.getX(), az = a.getZ();
+        double dx = b.getX() - ax, dz = b.getZ() - az;
+        double lengthSq = dx * dx + dz * dz;
+        double t = lengthSq == 0 ? 0 : ((p.getX() - ax) * dx + (p.getZ() - az) * dz) / lengthSq;
+        t = Math.max(0, Math.min(1, t));
+        return new BlockPos(
+                (int) Math.round(ax + t * dx),
+                (int) Math.round(a.getY() + t * (b.getY() - a.getY())),
+                (int) Math.round(az + t * dz));
     }
 
     /** The closest piece of drawn ground infrastructure to this block, across
@@ -357,8 +463,7 @@ public class AutopilotBlockEntity extends BlockEntity {
     private record NearestGround(String description, BlockPos pos, double distance) { }
 
     @org.jetbrains.annotations.Nullable
-    private NearestGround findNearestGround(AirportRegistry registry) {
-        BlockPos from = getBlockPos();
+    private NearestGround findNearestGround(AirportRegistry registry, BlockPos from) {
         NearestGround best = null;
         for (AirportLayout layout : registry.all()) {
             for (var gate : layout.gates().entrySet()) {
@@ -432,8 +537,7 @@ public class AutopilotBlockEntity extends BlockEntity {
     /** "On the ground" = close to the terrain surface below, as opposed to
      *  mid-flight. A real contraption would have proper flight/grounded
      *  state to read instead of this heightmap proxy - see class doc. */
-    private boolean isOnGround(ServerLevel level) {
-        BlockPos pos = getBlockPos();
+    private static boolean isOnGround(ServerLevel level, BlockPos pos) {
         int surfaceY = level.getHeight(Heightmap.Types.WORLD_SURFACE, pos.getX(), pos.getZ());
         return pos.getY() <= surfaceY + GROUND_HEIGHT_TOLERANCE;
     }
@@ -443,7 +547,8 @@ public class AutopilotBlockEntity extends BlockEntity {
         ServerPlayer player = server.getPlayerList().getPlayer(controllingPlayerId);
         if (player == null) return;
         String pos = String.format("%.0f, %.0f, %.0f", simulatedPosition.x, simulatedPosition.y, simulatedPosition.z);
-        player.displayClientMessage(Component.literal("[Skyport] " + state + " @ " + pos), true);
+        String pitch = Math.abs(pitchDegrees) < 1 ? "level" : String.format("%+.0f deg", pitchDegrees);
+        player.displayClientMessage(Component.literal("[Skyport] " + state + " @ " + pos + "  " + pitch), true);
     }
 
     private void message(String text) {
