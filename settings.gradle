@@ -1,0 +1,14 @@
+pluginManagement {
+    repositories {
+        mavenLocal()
+        gradlePluginPortal()
+        maven { url = 'https://maven.neoforged.net/releases' }
+    }
+}
+
+rootProject.name = 'skyport'
+
+// If Gradle can't find a JDK 21 on your machine automatically, add the
+// "org.gradle.toolchains.foojay-resolver-convention" plugin here (see
+// https://docs.gradle.org/current/userguide/toolchains.html#sub:download_repositories)
+// to have it fetch one for you instead of installing JDK 21 by hand.

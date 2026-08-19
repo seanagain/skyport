@@ -1,0 +1,140 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.140'
+}
+
+version = mod_version
+group = mod_group_id
+
+base {
+    archivesName = mod_id
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+repositories {
+    mavenCentral()
+    mavenLocal()
+
+    // Create's own maven, needed to compile against Create's classes.
+    maven { url = 'https://maven.createmod.net' }
+
+    // Registrate - a dependency Create's "slim" jar strips out, so it has
+    // to be pulled in separately for the dev-run runtime classpath.
+    maven { url = 'https://maven.ithundxr.dev/snapshots' }
+
+    // Modrinth's maven proxy - lets us pull a specific released build of
+    // Create Aeronautics (and its Sable dependency) as a compile-time jar,
+    // since neither publishes its own dev maven. Scoped to the
+    // "maven.modrinth" group only so it doesn't shadow other repos.
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'Modrinth'
+                url = 'https://api.modrinth.com/maven'
+            }
+        }
+        filter { includeGroup 'maven.modrinth' }
+    }
+}
+
+neoForge {
+    version = neo_version
+
+    parchment {
+        minecraftVersion = parchment_minecraft_version
+        mappingsVersion = parchment_mappings_version
+    }
+
+    // Generates the standard IDE run configurations: client, server, data.
+    runs {
+        client {
+            client()
+            systemProperty 'neoforge.enabledGameTestNamespaces', mod_id
+        }
+        server {
+            server()
+            programArgument '--nogui'
+            systemProperty 'neoforge.enabledGameTestNamespaces', mod_id
+        }
+        data {
+            data()
+            programArguments.addAll '--mod', mod_id, '--all', '--output', file('src/generated/resources/').getAbsolutePath(),
+                    '--existing', file('src/main/resources/').getAbsolutePath()
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+sourceSets.main.resources { srcDir 'src/generated/resources' }
+
+dependencies {
+    // --- Create -------------------------------------------------------
+    // compileOnly because Create itself is NOT bundled in our jar - the
+    // player is expected to already have Create + Create Aeronautics
+    // installed (this is an addon, not a standalone mod). "slim" strips
+    // Create's own bundled/shaded dependencies so we don't drag in
+    // duplicate copies of things NeoForge already provides.
+    compileOnly("com.simibubi.create:create-${minecraft_version}:${create_version}:slim") { transitive = false }
+    compileOnly "net.createmod.ponder:ponder-neoforge:1.0.82+mc${minecraft_version}"
+    compileOnly "dev.engine-room.flywheel:flywheel-neoforge-api-${minecraft_version}:1.0.6"
+
+    // --- Create Aeronautics + its Sable dependency ---------------------
+    // Pulled from Modrinth as compile-time-only jars so we can reference
+    // their classes (plane/contraption entities, ship assembly, etc.)
+    // without shipping copies of them ourselves.
+    compileOnly "maven.modrinth:create-aeronautics:${create_aeronautics_version}"
+    compileOnly "maven.modrinth:sable:${sable_version}"
+
+    // --- Runtime-only copies for local testing (runClient/runServer) --
+    // None of the above are on the actual run classpath - compileOnly
+    // only makes their classes available while compiling. Without these,
+    // NeoForge refuses to load skyport at all ("requires create ... not
+    // installed"). These don't get bundled into the shipped jar (this
+    // project uses a plain `jar` task, no shading) - they only affect the
+    // dev environment's runs, exactly like real installed mods would.
+    runtimeOnly("com.simibubi.create:create-${minecraft_version}:${create_version}:slim") { transitive = false }
+    runtimeOnly "net.createmod.ponder:ponder-neoforge:1.0.82+mc${minecraft_version}"
+    runtimeOnly "dev.engine-room.flywheel:flywheel-neoforge-${minecraft_version}:1.0.6"
+    // Create's "slim" jar strips its own bundled dependencies (see above) -
+    // Registrate is one of them, and Create needs it at runtime even though
+    // our own code never references it directly.
+    runtimeOnly "com.tterrag.registrate:Registrate:MC1.21-1.3.0+67"
+    runtimeOnly "maven.modrinth:create-aeronautics:${create_aeronautics_version}"
+    runtimeOnly "maven.modrinth:sable:${sable_version}"
+}
+
+// Expands the placeholders below (${mod_id}, ${mod_version}, etc.) into
+// META-INF/neoforge.mods.toml when the jar is built.
+tasks.named('processResources', ProcessResources).configure {
+    var replaceProperties = [
+            minecraft_version: minecraft_version,
+            minecraft_version_range: minecraft_version_range,
+            neo_version: neo_version,
+            neo_version_range: neo_version_range,
+            loader_version_range: loader_version_range,
+            mod_id: mod_id,
+            mod_name: mod_name,
+            mod_license: mod_license,
+            mod_version: mod_version,
+            mod_authors: mod_authors,
+            mod_description: mod_description,
+    ]
+    inputs.properties replaceProperties
+    filesMatching(['META-INF/neoforge.mods.toml']) {
+        expand replaceProperties + [project: project]
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+java {
+    withSourcesJar()
+}
