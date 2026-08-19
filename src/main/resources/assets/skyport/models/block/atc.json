@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/cube_bottom_top",
+  "textures": {
+    "side": "skyport:block/atc",
+    "bottom": "skyport:block/atc",
+    "top": "skyport:block/atc_top"
+  }
+}

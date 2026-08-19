@@ -141,17 +141,17 @@ public class AirportRegistry extends SavedData {
      * Transient for the same reason as the clearances: a stale position from
      * before a restart would have live aircraft dodging a ghost.
      */
-    private final transient Map<UUID, Vec3> airborneTraffic = new HashMap<>();
+    private final transient Map<UUID, TrafficReport> airborneTraffic = new HashMap<>();
 
-    public void reportAirborne(UUID planeId, Vec3 position) {
-        airborneTraffic.put(planeId, position);
+    public void reportAirborne(TrafficReport report) {
+        airborneTraffic.put(report.planeId(), report);
     }
 
     public void clearAirborne(UUID planeId) {
         airborneTraffic.remove(planeId);
     }
 
-    public Map<UUID, Vec3> airborneTraffic() {
+    public Map<UUID, TrafficReport> airborneTraffic() {
         return airborneTraffic;
     }
 

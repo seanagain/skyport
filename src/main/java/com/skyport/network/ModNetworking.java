@@ -4,6 +4,7 @@ import com.skyport.Skyport;
 import com.skyport.blockentity.AirportStationBlockEntity;
 import com.skyport.blockentity.AutopilotBlockEntity;
 import com.skyport.client.gui.AirportStationScreen;
+import com.skyport.client.gui.AtcScreen;
 import com.skyport.client.gui.AutopilotScreen;
 import com.skyport.data.Waypoint;
 import net.minecraft.network.chat.Component;
@@ -60,6 +61,11 @@ public class ModNetworking {
                 OpenAutopilotPayload.TYPE,
                 OpenAutopilotPayload.STREAM_CODEC,
                 ModNetworking::handleOpenAutopilot);
+
+        registrar.playToClient(
+                OpenAtcPayload.TYPE,
+                OpenAtcPayload.STREAM_CODEC,
+                ModNetworking::handleOpenAtc);
     }
 
     // ---- C2S: player -> server ----
@@ -113,6 +119,12 @@ public class ModNetworking {
     private static void handleOpenAirportMap(OpenAirportMapPayload payload, IPayloadContext context) {
         context.enqueueWork(() ->
                 Minecraft.getInstance().setScreen(new AirportStationScreen(payload.stationPos(), payload.layout())));
+    }
+
+    private static void handleOpenAtc(OpenAtcPayload payload, IPayloadContext context) {
+        context.enqueueWork(() ->
+                Minecraft.getInstance().setScreen(
+                        new AtcScreen(payload.atcPos(), payload.airports(), payload.traffic())));
     }
 
     private static void handleOpenAutopilot(OpenAutopilotPayload payload, IPayloadContext context) {

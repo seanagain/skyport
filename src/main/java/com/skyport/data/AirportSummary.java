@@ -1,5 +1,6 @@
 package com.skyport.data;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 
 import java.util.ArrayList;
@@ -13,10 +14,26 @@ import java.util.UUID;
  * never needs the actual runway/taxiway/holding-pattern geometry, only
  * "which airports exist" and "which gates does each one have".
  */
-public record AirportSummary(UUID id, String displayName, List<String> gateNames) {
+public record AirportSummary(UUID id, String displayName, List<String> gateNames, BlockPos position) {
 
     public static AirportSummary of(AirportLayout layout) {
-        return new AirportSummary(layout.id(), layout.displayName(), List.copyOf(layout.gates().keySet()));
+        return new AirportSummary(layout.id(), layout.displayName(),
+                List.copyOf(layout.gates().keySet()), locate(layout));
+    }
+
+    /**
+     * Somewhere sensible to draw this airport on a map. The layout has no
+     * single "position" of its own, so take the runway if there is one (that
+     * is what an airport IS, effectively), and fall back through the other
+     * drawn elements rather than reporting the origin for a half-built field.
+     */
+    private static BlockPos locate(AirportLayout layout) {
+        List<Waypoint> runway = layout.waypoints(Waypoint.Type.RUNWAY);
+        if (!runway.isEmpty()) return runway.get(0).pos();
+        List<Waypoint> taxiway = layout.waypoints(Waypoint.Type.TAXIWAY);
+        if (!taxiway.isEmpty()) return taxiway.get(0).pos();
+        if (!layout.gates().isEmpty()) return layout.gates().values().iterator().next();
+        return BlockPos.ZERO;
     }
 
     public void write(FriendlyByteBuf buf) {
@@ -24,6 +41,7 @@ public record AirportSummary(UUID id, String displayName, List<String> gateNames
         buf.writeUtf(displayName);
         buf.writeVarInt(gateNames.size());
         for (String name : gateNames) buf.writeUtf(name);
+        buf.writeBlockPos(position);
     }
 
     public static AirportSummary read(FriendlyByteBuf buf) {
@@ -32,6 +50,6 @@ public record AirportSummary(UUID id, String displayName, List<String> gateNames
         int count = buf.readVarInt();
         List<String> gates = new ArrayList<>(count);
         for (int i = 0; i < count; i++) gates.add(buf.readUtf());
-        return new AirportSummary(id, name, gates);
+        return new AirportSummary(id, name, gates, buf.readBlockPos());
     }
 }

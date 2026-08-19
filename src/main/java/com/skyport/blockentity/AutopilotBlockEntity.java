@@ -5,6 +5,7 @@ import com.skyport.data.AirportRegistry;
 import com.skyport.data.AirportSummary;
 import com.skyport.data.FlightSchedule;
 import com.skyport.data.ScheduleEntry;
+import com.skyport.data.TrafficReport;
 import com.skyport.data.Waypoint;
 import com.skyport.network.OpenAutopilotPayload;
 import com.skyport.registry.ModBlockEntities;
@@ -598,7 +599,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             registry.clearAirborne(planeId());
             currentSeparationOffset = 0;
         } else {
-            registry.reportAirborne(planeId(), simulatedPosition);
+            registry.reportAirborne(new TrafficReport(
+                    planeId(), callsign(), state.name(), simulatedPosition, destinationLabel(registry)));
             if (tickCounter % SEPARATION_CHECK_INTERVAL_TICKS == 0) {
                 currentSeparationOffset = separationOffset(serverLevel);
             }
@@ -1071,9 +1073,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (simulatedPosition == null || planeId == null) return 0;
 
         int stacked = 0;
-        for (Map.Entry<UUID, Vec3> other : AirportRegistry.get(serverLevel).airborneTraffic().entrySet()) {
+        for (Map.Entry<UUID, TrafficReport> other : AirportRegistry.get(serverLevel).airborneTraffic().entrySet()) {
             if (other.getKey().equals(planeId)) continue;
-            Vec3 pos = other.getValue();
+            Vec3 pos = other.getValue().position();
             double dx = pos.x - simulatedPosition.x;
             double dz = pos.z - simulatedPosition.z;
             if (dx * dx + dz * dz > SEPARATION_RADIUS * SEPARATION_RADIUS) continue;
@@ -1099,6 +1101,17 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         List<BlockPos> runway = positionsOf(origin, Waypoint.Type.RUNWAY);
         if (!runway.isEmpty() && first.equals(runway.get(0))) return null;
         return first;
+    }
+
+    /** "Airport / Gate" for the ATC readout, or the gate alone if the airport
+     *  has since been deleted out from under us. */
+    private String destinationLabel(AirportRegistry registry) {
+        ScheduleEntry entry = currentEntry();
+        if (entry == null) return "-";
+        String gate = entry.gateName();
+        return registry.byId(entry.airportId())
+                .map(layout -> layout.displayName() + " / " + gate)
+                .orElse(gate);
     }
 
     /** The airport's hold-short point, if one is drawn. */

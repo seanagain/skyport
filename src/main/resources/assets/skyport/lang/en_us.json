@@ -1,6 +1,7 @@
 {
   "block.skyport.airport_station": "Airport Station",
   "block.skyport.autopilot": "Autopilot",
+  "block.skyport.atc": "Air Traffic Control",
   "itemGroup.skyport": "Skyport",
 
   "gui.skyport.airport_station.title": "Airport Station",
@@ -12,6 +13,8 @@
   "gui.skyport.airport_map.save": "Save",
   "gui.skyport.airport_map.clear": "Clear",
   "gui.skyport.airport_map.undo": "Undo",
+
+  "gui.skyport.atc.title": "Air Traffic Control",
 
   "gui.skyport.autopilot.title": "Autopilot",
   "gui.skyport.autopilot.no_airports": "No airports registered yet",

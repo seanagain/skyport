@@ -2,6 +2,7 @@ package com.skyport.registry;
 
 import com.skyport.Skyport;
 import com.skyport.blockentity.AirportStationBlockEntity;
+import com.skyport.blockentity.AtcBlockEntity;
 import com.skyport.blockentity.AutopilotBlockEntity;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -20,4 +21,8 @@ public class ModBlockEntities {
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<AutopilotBlockEntity>> AUTOPILOT =
             REGISTER.register("autopilot", () -> BlockEntityType.Builder.of(
                     AutopilotBlockEntity::new, ModBlocks.AUTOPILOT.get()).build(null));
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<AtcBlockEntity>> ATC =
+            REGISTER.register("atc", () -> BlockEntityType.Builder.of(
+                    AtcBlockEntity::new, ModBlocks.ATC.get()).build(null));
 }

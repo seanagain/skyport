@@ -9,7 +9,7 @@ import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
 /**
- * A dedicated creative tab for both blocks, so you can actually get them
+ * A dedicated creative tab for the addon's blocks, so you can actually get them
  * in your inventory to test with rather than hunting the search tab.
  */
 public class ModCreativeTabs {
@@ -25,6 +25,7 @@ public class ModCreativeTabs {
                     .displayItems((params, output) -> {
                         output.accept(ModBlocks.AIRPORT_STATION_ITEM.get());
                         output.accept(ModBlocks.AUTOPILOT_ITEM.get());
+                        output.accept(ModBlocks.ATC_ITEM.get());
                     })
                     .build());
 

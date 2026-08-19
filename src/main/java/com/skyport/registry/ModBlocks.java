@@ -2,6 +2,7 @@ package com.skyport.registry;
 
 import com.skyport.Skyport;
 import com.skyport.block.AirportStationBlock;
+import com.skyport.block.AtcBlock;
 import com.skyport.block.AutopilotBlock;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
@@ -39,11 +40,23 @@ public class ModBlocks {
                     .sound(SoundType.METAL)
                     .requiresCorrectToolForDrops()));
 
+    // The control tower desk - see AtcBlock.
+    public static final DeferredBlock<AtcBlock> ATC = REGISTER.register(
+            "atc",
+            () -> new AtcBlock(BlockBehaviour.Properties.of()
+                    .mapColor(MapColor.COLOR_GREEN)
+                    .strength(3.5f)
+                    .sound(SoundType.METAL)
+                    .requiresCorrectToolForDrops()));
+
     public static final DeferredHolder<Item, BlockItem> AIRPORT_STATION_ITEM = ITEMS.register(
             "airport_station", () -> new BlockItem(AIRPORT_STATION.get(), new Item.Properties()));
 
     public static final DeferredHolder<Item, BlockItem> AUTOPILOT_ITEM = ITEMS.register(
             "autopilot", () -> new BlockItem(AUTOPILOT.get(), new Item.Properties()));
+
+    public static final DeferredHolder<Item, BlockItem> ATC_ITEM = ITEMS.register(
+            "atc", () -> new BlockItem(ATC.get(), new Item.Properties()));
 
     public static void register(net.neoforged.bus.api.IEventBus modEventBus) {
         REGISTER.register(modEventBus);
