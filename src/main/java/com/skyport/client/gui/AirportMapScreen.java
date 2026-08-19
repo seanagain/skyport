@@ -497,7 +497,20 @@ public class AirportMapScreen extends Screen {
             case -1 -> MapColor.Brightness.LOW;   // falling away
             default -> MapColor.Brightness.NORMAL;
         };
-        return 0xFF000000 | (mapColor.calculateRGBColor(brightness) & 0xFFFFFF);
+        return toArgb(mapColor.calculateRGBColor(brightness));
+    }
+
+    /**
+     * MapColor#calculateRGBColor returns ABGR, not ARGB - see its source:
+     * it packs `blue << 16 | green << 8 | red`. GuiGraphics#fill wants ARGB,
+     * so the red and blue channels have to be swapped or every colour comes
+     * out inverted along that axis. Water was rendering red.
+     */
+    private static int toArgb(int abgr) {
+        int r = abgr & 0xFF;
+        int g = (abgr >> 8) & 0xFF;
+        int b = (abgr >> 16) & 0xFF;
+        return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 
     /**
