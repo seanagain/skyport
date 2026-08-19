@@ -52,6 +52,11 @@ public class ModNetworking {
                 SaveAirportLayoutPayload.STREAM_CODEC,
                 ModNetworking::handleSaveAirportLayout);
 
+        registrar.playToServer(
+                SaveSchedulePayload.TYPE,
+                SaveSchedulePayload.STREAM_CODEC,
+                ModNetworking::handleSaveSchedule);
+
         registrar.playToClient(
                 OpenAirportMapPayload.TYPE,
                 OpenAirportMapPayload.STREAM_CODEC,
@@ -87,6 +92,15 @@ public class ModNetworking {
             ServerPlayer player = (ServerPlayer) context.player();
             if (player.level().getBlockEntity(payload.pos()) instanceof AutopilotBlockEntity autopilot) {
                 autopilot.disengage();
+            }
+        });
+    }
+
+    private static void handleSaveSchedule(SaveSchedulePayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            ServerPlayer player = (ServerPlayer) context.player();
+            if (player.level().getBlockEntity(payload.pos()) instanceof AutopilotBlockEntity autopilot) {
+                autopilot.setSchedule(payload.schedule());
             }
         });
     }
@@ -129,6 +143,7 @@ public class ModNetworking {
 
     private static void handleOpenAutopilot(OpenAutopilotPayload payload, IPayloadContext context) {
         context.enqueueWork(() ->
-                Minecraft.getInstance().setScreen(new AutopilotScreen(payload.autopilotPos(), payload.airports())));
+                Minecraft.getInstance().setScreen(new AutopilotScreen(
+                        payload.autopilotPos(), payload.airports(), payload.schedule())));
     }
 }

@@ -5,6 +5,7 @@ import com.skyport.data.FlightSchedule;
 import com.skyport.data.ScheduleEntry;
 import com.skyport.network.DisengageAutopilotPayload;
 import com.skyport.network.EngageAutopilotPayload;
+import com.skyport.network.SaveSchedulePayload;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
@@ -36,7 +37,7 @@ public class AutopilotScreen extends Screen {
 
     private final BlockPos autopilotPos;
     private final List<AirportSummary> airports;
-    private final FlightSchedule schedule = new FlightSchedule();
+    private final FlightSchedule schedule;
 
     /** Which stop the edit buttons act on. -1 when the schedule is empty. */
     private int selected = -1;
@@ -51,10 +52,14 @@ public class AutopilotScreen extends Screen {
     private Button engageButton;
     private Button removeButton;
 
-    public AutopilotScreen(BlockPos autopilotPos, List<AirportSummary> airports) {
+    public AutopilotScreen(BlockPos autopilotPos, List<AirportSummary> airports, FlightSchedule schedule) {
         super(Component.translatable("gui.skyport.autopilot.title"));
         this.autopilotPos = autopilotPos;
         this.airports = airports;
+        // The block's existing schedule, so reopening shows the route you set
+        // rather than a blank one.
+        this.schedule = schedule;
+        this.selected = schedule.entries().isEmpty() ? -1 : 0;
     }
 
     @Override
@@ -285,6 +290,14 @@ public class AutopilotScreen extends Screen {
         if (schedule.isEmpty()) return;
         PacketDistributor.sendToServer(new EngageAutopilotPayload(autopilotPos, schedule));
         onClose();
+    }
+
+    /** Closing keeps the route without flying it - editing a schedule and
+     *  starting a flight are different intentions. */
+    @Override
+    public void onClose() {
+        PacketDistributor.sendToServer(new SaveSchedulePayload(autopilotPos, schedule));
+        super.onClose();
     }
 
     /** Vanilla's default blurs the world behind the GUI; a flat fill matches

@@ -3,6 +3,7 @@ package com.skyport.block;
 import com.skyport.blockentity.AutopilotBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.block.state.StateDefinition;
@@ -71,6 +72,28 @@ public class AutopilotBlock extends Block implements EntityBlock {
             return InteractionResult.CONSUME;
         }
         return InteractionResult.SUCCESS;
+    }
+
+    /**
+     * Redstone runs the autopilot: powered engages the saved schedule,
+     * unpowered disengages.
+     *
+     * Level-triggered rather than edge-triggered on purpose - a lever left on
+     * means "this plane should be flying", which survives a reload, whereas a
+     * pulse that happened while the chunk was out would just be missed.
+     */
+    @Override
+    protected void neighborChanged(BlockState state, Level level, BlockPos pos,
+                                   Block block, BlockPos fromPos, boolean movedByPiston) {
+        super.neighborChanged(state, level, pos, block, fromPos, movedByPiston);
+        if (level.isClientSide || !(level instanceof ServerLevel serverLevel)) return;
+        if (!(level.getBlockEntity(pos) instanceof AutopilotBlockEntity autopilot)) return;
+
+        if (level.hasNeighborSignal(pos)) {
+            autopilot.engageFromRedstone(serverLevel);
+        } else {
+            autopilot.disengage();
+        }
     }
 
     @Nullable

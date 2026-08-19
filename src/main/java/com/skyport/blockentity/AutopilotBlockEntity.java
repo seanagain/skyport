@@ -239,7 +239,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         List<AirportSummary> airports = AirportRegistry.get(serverLevel).all().stream()
                 .map(AirportSummary::of)
                 .toList();
-        PacketDistributor.sendToPlayer(player, new OpenAutopilotPayload(getBlockPos(), airports));
+        PacketDistributor.sendToPlayer(player, new OpenAutopilotPayload(getBlockPos(), airports, schedule));
     }
 
     /**
@@ -271,6 +271,32 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private String destinationGateName() {
         ScheduleEntry entry = currentEntry();
         return entry == null ? null : entry.gateName();
+    }
+
+    /** Store a route without flying it - see SaveSchedulePayload. */
+    public void setSchedule(FlightSchedule newSchedule) {
+        this.schedule = newSchedule;
+        this.scheduleIndex = 0;
+        setChanged();
+    }
+
+    public FlightSchedule schedule() {
+        return schedule;
+    }
+
+    /**
+     * Start the saved schedule with no player involved - what a redstone
+     * pulse does.
+     *
+     * Position comes from the craft itself here. There's no player standing
+     * on it to borrow a position from, which is fine while it's assembled;
+     * a loose block with no craft falls back to its own coordinates.
+     */
+    public void engageFromRedstone(ServerLevel serverLevel) {
+        if (state != FlightState.IDLE || schedule.isEmpty()) return;
+        this.scheduleIndex = 0;
+        this.controllingPlayerId = null;
+        engageCurrentLeg(serverLevel, craftPositionOr(getBlockPos()), null);
     }
 
     public void engage(FlightSchedule newSchedule, ServerPlayer player) {
@@ -456,7 +482,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 if (back == null) {
                     setState(FlightState.TAXI_OUT);
                 } else if (applyMotionTowards(back)) {
-                    message("Pushback complete.");
+                    note("Pushback complete.");
                     setState(FlightState.TAXI_OUT);
                 }
             }
@@ -471,13 +497,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 // hold point included - there's nowhere to pass, so a second
                 // plane pushing back would just queue into the first.
                 if (origin != null && !claimTaxiway(serverLevel, origin)) {
-                    if (tickCounter % 100 == 0) message("Holding at the gate - taxiway occupied.");
+                    if (tickCounter % 100 == 0) note("Holding at the gate - taxiway occupied.");
                     break;
                 }
 
                 if (holdShort == null) {
                     if (origin != null && !claimTraffic(serverLevel, origin)) {
-                        if (tickCounter % 100 == 0) message("Holding at the gate - airport busy.");
+                        if (tickCounter % 100 == 0) note("Holding at the gate - airport busy.");
                         break;
                     }
                 } else if (!clearedPastHoldShort) {
@@ -493,9 +519,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                             // Off the taxiway and onto the runway - the next
                             // aircraft can start taxiing out behind us.
                             releaseTaxiway(serverLevel, origin);
-                            message("Cleared to line up.");
+                            note("Cleared to line up.");
                         } else if (tickCounter % 100 == 0) {
-                            message("Holding short - runway in use.");
+                            note("Holding short - runway in use.");
                         }
                     });
                     break;
@@ -554,7 +580,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                     applyMotionTowards(entry);
                     if (horizontalDistance(entry, BlockPos.containing(simulatedPosition)) <= HOLDING_ENTRY_LEAD_BLOCKS) {
                         if (claimArrival(serverLevel, destination)) {
-                            message("Runway clear - straight in.");
+                            note("Runway clear - straight in.");
                             setState(FlightState.APPROACH);
                         } else {
                             setState(FlightState.HOLDING);
@@ -589,7 +615,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                         && horizontalDistance(holdShort, BlockPos.containing(simulatedPosition)) <= CRAFT_ARRIVAL_RADIUS) {
                     clearedPastHoldShort = true;
                     releaseApproach();
-                    message("Runway vacated.");
+                    note("Runway vacated.");
                 }
                 followWaypoints(groundTaxiPath(destination, true), this::arrive);
             }
@@ -683,7 +709,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         scheduleIndex = next;
         ScheduleEntry nextEntry = schedule.entries().get(next);
-        message("Departing for " + nextEntry.gateName() + ".");
+        note("Departing for " + nextEntry.gateName() + ".");
         // Depart from where the plane actually is - it flew here itself, so
         // its own tracked position is right even if the player wandered off.
         ServerPlayer player = controllingPlayerId == null ? null
@@ -708,7 +734,12 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             this.clearedPastHoldShort = false;
         }
         setChanged();
-        message(switch (newState) {
+        // Routine progress goes to the action bar, not chat. One plane
+        // narrating every state change was tolerable; several of them turn
+        // chat into a wall of telemetry, and the ATC screen is the place to
+        // read what everything is doing. Chat is kept for things that need a
+        // decision - refusals, and arriving somewhere.
+        note(switch (newState) {
             case PUSHBACK -> "Pushing back from the gate.";
             case TAKEOFF_ROLL -> "On the runway, taking off.";
             case CLIMB -> "Climbing to cruising altitude.";
@@ -984,7 +1015,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         Vector3d idealUp = new Vector3d(right).cross(nose).normalize();
         double actualRoll = Math.atan2(up.dot(right), up.dot(idealUp));
         double desiredRoll = onGround ? 0
-                : Math.max(-MAX_BANK_RADIANS, Math.min(MAX_BANK_RADIANS, yawError * BANK_PER_YAW_ERROR));
+                : Math.max(-MAX_BANK_RADIANS, Math.min(MAX_BANK_RADIANS, -yawError * BANK_PER_YAW_ERROR));
         double rollError = actualRoll - desiredRoll;
 
         Vector3d noseUnit = new Vector3d(nose).normalize();
@@ -1665,6 +1696,15 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (level == null || level.isClientSide || controllingPlayerId == null) return;
         ServerPlayer player = ((ServerLevel) level).getServer().getPlayerList().getPlayer(controllingPlayerId);
         message(player, text);
+    }
+
+    /** Progress update - action bar rather than chat, so a fleet of planes
+     *  doesn't bury everything else the player is reading. */
+    private void note(@org.jetbrains.annotations.Nullable String text) {
+        if (text == null || level == null || level.isClientSide || controllingPlayerId == null) return;
+        ServerPlayer player = ((ServerLevel) level).getServer().getPlayerList().getPlayer(controllingPlayerId);
+        if (player == null) return;
+        player.displayClientMessage(Component.literal("[" + callsign() + "] " + text), true);
     }
 
     private void message(@org.jetbrains.annotations.Nullable ServerPlayer player, @org.jetbrains.annotations.Nullable String text) {

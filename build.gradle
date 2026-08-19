@@ -141,6 +141,13 @@ dependencies {
     runtimeOnly "com.tterrag.registrate:Registrate:MC1.21-1.3.0+67"
     runtimeOnly "maven.modrinth:create-aeronautics:${create_aeronautics_version}"
     runtimeOnly "maven.modrinth:sable:${sable_version}"
+
+    // --- dev convenience -----------------------------------------------
+    // WorldEdit in the dev client only, for carving out realistic airports
+    // to test against. Deliberately runtimeOnly and NOT declared in
+    // neoforge.mods.toml: nothing in this addon compiles against it, and it
+    // must not become something players are required to install.
+    runtimeOnly "maven.modrinth:worldedit:${worldedit_version}"
 }
 
 // Expands the placeholders below (${mod_id}, ${mod_version}, etc.) into

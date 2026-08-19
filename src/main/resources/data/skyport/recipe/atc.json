@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "BSB",
+    "AEA",
+    "AAA"
+  ],
+  "key": {
+    "A": { "item": "create:andesite_alloy" },
+    "B": { "item": "create:brass_ingot" },
+    "E": { "item": "create:electron_tube" },
+    "S": { "item": "minecraft:spyglass" }
+  },
+  "result": { "id": "skyport:atc", "count": 1 }
+}
