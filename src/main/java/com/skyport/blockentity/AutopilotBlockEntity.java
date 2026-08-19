@@ -21,6 +21,12 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.minecraft.world.phys.Vec3;
 
+import dev.ryanhcode.sable.api.block.BlockEntitySubLevelActor;
+import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
+import dev.ryanhcode.sable.sublevel.ServerSubLevel;
+import org.joml.Vector3d;
+import org.joml.Vector3dc;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -46,7 +52,7 @@ import java.util.UUID;
  * to climbing to a safe cruising altitude and heading for the destination's
  * holding pattern, since there's no ground path to follow from mid-air.
  */
-public class AutopilotBlockEntity extends BlockEntity {
+public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubLevelActor {
 
     public enum FlightState {
         IDLE, TAXI_OUT, TAKEOFF_ROLL, CLIMB, CRUISE, HOLDING, APPROACH, TAXI_IN, WAITING
@@ -78,6 +84,18 @@ public class AutopilotBlockEntity extends BlockEntity {
      *  vertically. */
     private static final double MAX_PITCH_DEGREES = 30.0;
     private static final double MAX_PITCH_TANGENT = Math.tan(Math.toRadians(MAX_PITCH_DEGREES));
+
+    // --- real-craft steering (see steerCraftTowards) ---
+    /** Target cruise speed in blocks/second. */
+    private static final double CRAFT_CRUISE_SPEED = 12.0;
+    /** Fraction of the velocity error corrected per physics tick. Low on
+     *  purpose: a heavy contraption yanked to a new velocity looks wrong. */
+    private static final double CRAFT_STEER_GAIN = 0.25;
+    /** Slows the craft as it closes on a waypoint so it settles rather than
+     *  overshooting - speed is capped at distance * this. */
+    private static final double CRAFT_APPROACH_GAIN = 0.6;
+    /** Planes are big; "arrived" has to be looser than for a point. */
+    private static final double CRAFT_ARRIVAL_RADIUS = 6.0;
     /** How far above the terrain still counts as "on the ground" rather than airborne. */
     private static final int GROUND_HEIGHT_TOLERANCE = 6;
 
@@ -109,6 +127,23 @@ public class AutopilotBlockEntity extends BlockEntity {
     // Which holding-pattern point CRUISE picked as the nearest entry - HOLDING
     // starts its lap there instead of always at index 0. -1 = "not picked yet".
     private int holdingEntryIndex = -1;
+    // Set only for the duration of a sable$physicsTick callback - its
+    // presence is what switches applyMotionTowards from simulating to
+    // actually flying.
+    @org.jetbrains.annotations.Nullable
+    private transient RigidBodyHandle activeBody;
+    // Kept between callbacks so engage() can read the craft's real position
+    // rather than approximating it from the player's.
+    @org.jetbrains.annotations.Nullable
+    private transient ServerSubLevel activeSubLevel;
+    // Not Long.MIN_VALUE: `gameTime - this` would overflow to a negative
+    // number and make the "was I physics-ticked recently" check below always
+    // true, silently disabling the simulated path.
+    private long lastPhysicsTickGameTime = -1000;
+
+    /** The craft's position: real when assembled, phantom when this block is
+     *  just sitting in the world (which is still useful for testing a layout
+     *  without building a plane). */
     @org.jetbrains.annotations.Nullable
     private Vec3 simulatedPosition;
     // Current climb/descent angle, capped at MAX_PITCH_DEGREES. Reported in
@@ -128,6 +163,19 @@ public class AutopilotBlockEntity extends BlockEntity {
                 .map(AirportSummary::of)
                 .toList();
         PacketDistributor.sendToPlayer(player, new OpenAutopilotPayload(getBlockPos(), airports));
+    }
+
+    /**
+     * Where the craft actually is, if this block is mounted on one. Falls
+     * back to {@code fallback} for a block placed loose in the world.
+     *
+     * This is the real fix for the "a million blocks away" reading: mounted
+     * on a craft, getBlockPos() is a sub-level-local coordinate, and the
+     * sub-level's pose is what maps it back onto the world.
+     */
+    private BlockPos craftPositionOr(BlockPos fallback) {
+        if (activeSubLevel == null || activeSubLevel.isRemoved()) return fallback;
+        return BlockPos.containing(activeSubLevel.logicalPose().transformPosition(getBlockPos().getCenter()));
     }
 
     @org.jetbrains.annotations.Nullable
@@ -156,8 +204,10 @@ public class AutopilotBlockEntity extends BlockEntity {
         this.schedule = newSchedule;
         this.scheduleIndex = 0;
         this.controllingPlayerId = player.getUUID();
-        // First leg: anchor to the player, who is standing on the plane.
-        engageCurrentLeg(player.serverLevel(), player.blockPosition(), player);
+        // Prefer the craft's own position when it's assembled - that's the
+        // real answer. The player's position is the fallback for a block
+        // sitting loose in the world, where there's no craft to ask.
+        engageCurrentLeg(player.serverLevel(), craftPositionOr(player.blockPosition()), player);
     }
 
     /**
@@ -225,9 +275,52 @@ public class AutopilotBlockEntity extends BlockEntity {
         setChanged();
     }
 
+    /**
+     * Sable's hook: called every physics tick while this block is part of an
+     * assembled craft, handing over that craft's rigid body. This is where
+     * the autopilot stops being a simulation and actually flies something.
+     *
+     * The state machine is shared with {@link #serverTick} - the only
+     * difference is that {@link #applyMotionTowards} steers the real body
+     * while {@code activeBody} is set, instead of advancing a phantom
+     * position. Everything above it (waypoint sequencing, states, schedule)
+     * is the same code either way.
+     */
+    @Override
+    public void sable$physicsTick(ServerSubLevel subLevel, RigidBodyHandle body, double deltaSeconds) {
+        if (state == FlightState.IDLE) return;
+        if (!(subLevel.getLevel() instanceof ServerLevel serverLevel)) return;
+
+        this.activeSubLevel = subLevel;
+        this.lastPhysicsTickGameTime = serverLevel.getGameTime();
+
+        // The craft's real world position: this block sits at local
+        // coordinates inside the sub-level, and the sub-level's pose maps
+        // those onto the world. This is the honest version of the position
+        // engage() currently approximates with the player's.
+        this.simulatedPosition = subLevel.logicalPose().transformPosition(getBlockPos().getCenter());
+
+        this.activeBody = body;
+        try {
+            runFlightLogic(serverLevel);
+        } finally {
+            // Only valid for the duration of this callback.
+            this.activeBody = null;
+        }
+    }
+
     /** Runs every server tick this block entity is loaded and ticking. */
     public void serverTick() {
         if (state == FlightState.IDLE || !(level instanceof ServerLevel serverLevel)) return;
+        if (simulatedPosition == null) return;
+        // When mounted on a craft, sable$physicsTick drives everything - don't
+        // also run the simulated path and fight it.
+        if (serverLevel.getGameTime() - lastPhysicsTickGameTime < 5) return;
+
+        runFlightLogic(serverLevel);
+    }
+
+    private void runFlightLogic(ServerLevel serverLevel) {
         if (simulatedPosition == null) return;
 
         if (state == FlightState.WAITING) {
@@ -412,6 +505,61 @@ public class AutopilotBlockEntity extends BlockEntity {
      * to the contraption here instead of to `simulatedPosition`.
      */
     private boolean applyMotionTowards(BlockPos target) {
+        if (activeBody != null) return steerCraftTowards(target);
+        return advanceSimulatedTowards(target);
+    }
+
+    /**
+     * Flies the real craft toward a waypoint by nudging its velocity, rather
+     * than by setting its position.
+     *
+     * Deliberately a velocity controller and not a teleport: Sable is running
+     * a rigid-body simulation, and overwriting the transform each tick would
+     * fight it (and throw away collisions, and look wrong). Steering by
+     * velocity correction leaves the physics engine in charge of how the
+     * craft actually gets there. The gain is intentionally gentle - a big
+     * correction on a heavy contraption reads as a lurch.
+     */
+    private boolean steerCraftTowards(BlockPos target) {
+        Vec3 position = simulatedPosition;
+        Vec3 delta = Vec3.atCenterOf(target).subtract(position);
+        double distance = delta.length();
+        if (distance <= CRAFT_ARRIVAL_RADIUS) {
+            pitchDegrees = 0;
+            return true;
+        }
+
+        Vec3 heading = delta.normalize();
+
+        // Same 30-degree limit as the simulation, applied to the direction
+        // we're asking for rather than to a position step.
+        double horizontal = Math.sqrt(heading.x * heading.x + heading.z * heading.z);
+        if (horizontal > 1.0e-4) {
+            double maxVertical = horizontal * MAX_PITCH_TANGENT;
+            if (Math.abs(heading.y) > maxVertical) {
+                heading = new Vec3(heading.x, Math.copySign(maxVertical, heading.y), heading.z).normalize();
+            }
+        }
+
+        // Ease off on the way in so it settles on the waypoint instead of
+        // overshooting and having to come back.
+        double speed = Math.min(CRAFT_CRUISE_SPEED, distance * CRAFT_APPROACH_GAIN);
+        Vec3 desired = heading.scale(speed);
+
+        Vector3dc v = activeBody.getLinearVelocity();
+        Vec3 correction = desired.subtract(new Vec3(v.x(), v.y(), v.z())).scale(CRAFT_STEER_GAIN);
+
+        activeBody.addLinearAndAngularVelocity(
+                new Vector3d(correction.x, correction.y, correction.z),
+                new Vector3d());
+
+        pitchDegrees = horizontal > 1.0e-4
+                ? (float) Math.toDegrees(Math.atan2(heading.y, horizontal))
+                : 0;
+        return false;
+    }
+
+    private boolean advanceSimulatedTowards(BlockPos target) {
         Vec3 targetCenter = Vec3.atCenterOf(target);
         Vec3 delta = targetCenter.subtract(simulatedPosition);
         double distance = delta.length();
@@ -698,7 +846,15 @@ public class AutopilotBlockEntity extends BlockEntity {
         if (player == null) return;
         String pos = String.format("%.0f, %.0f, %.0f", simulatedPosition.x, simulatedPosition.y, simulatedPosition.z);
         String pitch = Math.abs(pitchDegrees) < 1 ? "level" : String.format("%+.0f deg", pitchDegrees);
-        player.displayClientMessage(Component.literal("[Skyport] " + state + " @ " + pos + "  " + pitch), true);
+        // Says outright whether it's flying a real craft or just simulating,
+        // so "the plane isn't moving" is answerable at a glance instead of
+        // needing a code read.
+        boolean flyingReal = server.getTickCount() >= 0
+                && lastPhysicsTickGameTime > 0
+                && server.overworld().getGameTime() - lastPhysicsTickGameTime < 20;
+        String mode = flyingReal ? "FLYING" : "sim";
+        player.displayClientMessage(
+                Component.literal("[Skyport] " + state + " @ " + pos + "  " + pitch + "  (" + mode + ")"), true);
     }
 
     private void message(String text) {
