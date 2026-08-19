@@ -44,7 +44,19 @@ public record Waypoint(BlockPos pos, Type type, int order) {
          * plane peels off to land), index 1 the runway's far end (where it
          * touches down). This is the descent path for FlightState.APPROACH.
          */
-        FINAL_LEG
+        FINAL_LEG,
+        /**
+         * A single point on the taxiway marking where the protected area
+         * begins - the runway and everything committed to it.
+         *
+         * This is the boundary the traffic clearance actually guards. Without
+         * it the whole airport had to be one resource (nowhere to wait but
+         * the gate, since on a shared strip there's nowhere to pass); with
+         * it, a departure can taxi up to here freely and only needs clearance
+         * to go beyond, and an arrival frees the runway as soon as it taxis
+         * back past this point rather than when it finally parks.
+         */
+        HOLD_SHORT
         // Gates are NOT a Waypoint type - see AirportLayout#gates. A gate
         // needs a name ("Gate A") so the autopilot GUI can list it, and
         // isn't part of a connected line the way the other four are (it

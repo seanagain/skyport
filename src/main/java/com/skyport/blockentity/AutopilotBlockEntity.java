@@ -190,6 +190,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private final transient Set<ChunkPos> heldChunks = new HashSet<>();
     /** Extra altitude currently being flown to stay clear of other traffic. */
     private transient int currentSeparationOffset = 0;
+    /** Whether this plane has been cleared past the hold point for the leg
+     *  it is currently flying. Reset per leg, not persisted. */
+    private transient boolean clearedPastHoldShort = false;
 
     private FlightState state = FlightState.IDLE;
     private int currentWaypointIndex = 0;
@@ -344,6 +347,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         takeoffStart = null;
         takeoffHoldTicks = 0;
         climbHeadingLocked = null;
+        clearedPastHoldShort = false;
         pitchDegrees = 0;
         waitTicksRemaining = 0;
         setChanged();
@@ -429,14 +433,38 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // field where the taxiway and runway are the same strip there is
             // nowhere to pass or hold short, so the decision has to be made
             // before pushback rather than at the runway threshold.
+            // Taxi out to the hold point without needing clearance, then wait
+            // there for the runway. If no hold point is drawn there's nowhere
+            // safe to wait, so the whole airport has to be claimed up front.
             case TAXI_OUT -> {
                 AirportLayout origin = originLayout(serverLevel);
-                if (origin != null && !claimTraffic(serverLevel, origin)) {
-                    if (tickCounter % 100 == 0) message("Holding at the gate - airport busy.");
+                BlockPos holdShort = origin == null ? null : holdShortPoint(origin);
+
+                if (holdShort == null) {
+                    if (origin != null && !claimTraffic(serverLevel, origin)) {
+                        if (tickCounter % 100 == 0) message("Holding at the gate - airport busy.");
+                        break;
+                    }
+                } else if (!clearedPastHoldShort) {
+                    // Roll up to the line first...
+                    List<BlockPos> toHold = new ArrayList<>();
+                    if (joinPoint != null) toHold.add(joinPoint);
+                    toHold.add(holdShort);
+                    followWaypoints(toHold, () -> {
+                        // ...and only ask for the runway once we're sitting on it.
+                        if (claimTraffic(serverLevel, origin)) {
+                            clearedPastHoldShort = true;
+                            currentWaypointIndex = 0;
+                            message("Cleared to line up.");
+                        } else if (tickCounter % 100 == 0) {
+                            message("Holding short - runway in use.");
+                        }
+                    });
                     break;
                 }
+
                 List<BlockPos> path = new ArrayList<>();
-                if (joinPoint != null) path.add(joinPoint);
+                if (joinPoint != null && !clearedPastHoldShort) path.add(joinPoint);
                 if (origin != null) path.addAll(groundTaxiPath(origin, false));
                 followWaypoints(path, () -> setState(FlightState.TAKEOFF_ROLL));
             }
@@ -512,10 +540,21 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // Final leg (holding pattern -> runway far end, descending), then
             // roll down the runway to the gate end, ready to taxi in.
             case APPROACH -> followWaypoints(approachPath(destination), () -> setState(FlightState.TAXI_IN));
-            // Keep the clearance all the way to the gate: still rolling down
-            // the shared strip, so the airport isn't actually free yet. It's
-            // released in arrive().
-            case TAXI_IN -> followWaypoints(groundTaxiPath(destination, true), this::arrive);
+            // Once back past the hold point the plane is clear of the runway,
+            // so release then rather than at the gate - that's the whole
+            // reason the hold point exists. Without one, hold the clearance
+            // to the gate, since there's no defined point at which the plane
+            // stops being in the way.
+            case TAXI_IN -> {
+                BlockPos holdShort = holdShortPoint(destination);
+                if (holdShort != null && !clearedPastHoldShort
+                        && horizontalDistance(holdShort, BlockPos.containing(simulatedPosition)) <= CRAFT_ARRIVAL_RADIUS) {
+                    clearedPastHoldShort = true;
+                    releaseApproach();
+                    message("Runway vacated.");
+                }
+                followWaypoints(groundTaxiPath(destination, true), this::arrive);
+            }
             default -> { }
         }
 
@@ -620,6 +659,12 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private void setState(FlightState newState) {
         this.state = newState;
         this.currentWaypointIndex = 0;
+        // Each ground phase starts on the near side of the hold point again:
+        // taxiing out hasn't been cleared onto the runway yet, and taxiing in
+        // hasn't yet crossed back off it.
+        if (newState == FlightState.TAXI_OUT || newState == FlightState.TAXI_IN) {
+            this.clearedPastHoldShort = false;
+        }
         setChanged();
         message(switch (newState) {
             case TAKEOFF_ROLL -> "On the runway, taking off.";
@@ -984,8 +1029,24 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return stacked * SEPARATION_ALTITUDE;
     }
 
-    /** Ask for the run of an airport - covers taxiing, the runway and final
-     *  approach, since on a small field they are the same strip. */
+    /** The airport's hold-short point, if one is drawn. */
+    @org.jetbrains.annotations.Nullable
+    private static BlockPos holdShortPoint(AirportLayout layout) {
+        List<BlockPos> points = positionsOf(layout, Waypoint.Type.HOLD_SHORT);
+        return points.isEmpty() ? null : points.get(0);
+    }
+
+    /**
+     * Short identifier for this plane, so chat is readable once more than one
+     * aircraft is flying - "[Skyport] Holding short" is ambiguous the moment
+     * there are two of them.
+     */
+    private String callsign() {
+        return "SKY-" + planeId().toString().substring(0, 4).toUpperCase(java.util.Locale.ROOT);
+    }
+
+    /** Ask for the run of an airport - covers the runway and everything
+     *  committed to it, bounded by the hold-short point where one is drawn. */
     private boolean claimTraffic(ServerLevel level, AirportLayout destination) {
         return AirportRegistry.get(level).tryClaimTraffic(destination.id(), planeId());
     }
@@ -1463,7 +1524,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 && server.overworld().getGameTime() - lastPhysicsTickGameTime < 20;
         String mode = flyingReal ? "FLYING" : "sim";
         player.displayClientMessage(
-                Component.literal("[Skyport] " + state + " @ " + pos + "  " + pitch + "  (" + mode + ")"), true);
+                Component.literal("[" + callsign() + "] " + state + " @ " + pos + "  " + pitch + "  (" + mode + ")"), true);
     }
 
     private void message(String text) {
@@ -1474,7 +1535,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
     private void message(@org.jetbrains.annotations.Nullable ServerPlayer player, @org.jetbrains.annotations.Nullable String text) {
         if (player == null || text == null) return;
-        player.sendSystemMessage(Component.literal("[Skyport] " + text));
+        player.sendSystemMessage(Component.literal("[" + callsign() + "] " + text));
     }
 
     @Override

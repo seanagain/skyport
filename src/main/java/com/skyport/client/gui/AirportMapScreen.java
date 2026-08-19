@@ -53,7 +53,8 @@ import java.util.List;
 public class AirportMapScreen extends Screen {
 
     private enum EditMode {
-        RUNWAY("Runway"), TAXIWAY("Taxiway"), HOLDING_PATTERN("Holding"), FINAL_LEG("Final"), GATE("Gate");
+        RUNWAY("Runway"), TAXIWAY("Taxiway"), HOLDING_PATTERN("Holding"),
+        FINAL_LEG("Final"), GATE("Gate"), HOLD_SHORT("Hold");
 
         final String label;
         EditMode(String label) { this.label = label; }
@@ -81,6 +82,7 @@ public class AirportMapScreen extends Screen {
     private static final int COLOR_FINAL_LEG = 0xFF7FD1E0;
     private static final int COLOR_GATE = 0xFFE0812F;
     private static final int COLOR_PLAYER = 0xFFE33A3A;
+    private static final int COLOR_HOLD_SHORT = 0xFFD64550;
 
     private final BlockPos stationPos;
     private final AirportLayout layout;
@@ -287,6 +289,7 @@ public class AirportMapScreen extends Screen {
             case TAXIWAY -> Waypoint.Type.TAXIWAY;
             case HOLDING_PATTERN -> Waypoint.Type.HOLDING_PATTERN;
             case FINAL_LEG -> Waypoint.Type.FINAL_LEG;
+            case HOLD_SHORT -> Waypoint.Type.HOLD_SHORT;
             case GATE -> throw new IllegalArgumentException("GATE is not a Waypoint.Type");
         };
     }
@@ -310,6 +313,8 @@ public class AirportMapScreen extends Screen {
                 Waypoint.Type type = toWaypointType(mode);
                 List<Waypoint> points = layout.waypoints(type);
                 if (isLineMode(mode) && points.size() >= 2) points.clear();
+                // Only one hold point per airport - a second click moves it.
+                if (mode == EditMode.HOLD_SHORT) points.clear();
                 points.add(new Waypoint(world, type, points.size()));
             }
             return true;
@@ -404,6 +409,17 @@ public class AirportMapScreen extends Screen {
             }
 
             case HOLDING_PATTERN -> null;
+
+            // One per airport, on the taxiway - it marks where the taxiway
+            // stops being safe and the runway's protected area begins.
+            case HOLD_SHORT -> {
+                if (!hasRunway) yield "Draw the runway first.";
+                if (taxiway.isEmpty()) yield "Draw a taxiway first.";
+                if (!touches(nodesOf(Waypoint.Type.TAXIWAY), p)) {
+                    yield "Put the hold point on a taxiway point.";
+                }
+                yield null;
+            }
 
             case FINAL_LEG -> {
                 if (!hasRunway) yield "Draw the runway first.";
@@ -557,6 +573,13 @@ public class AirportMapScreen extends Screen {
             guiGraphics.fill(gx - 2, gy - 2, gx + 2, gy + 2, COLOR_GATE);
         }
 
+        for (Waypoint hold : layout.waypoints(Waypoint.Type.HOLD_SHORT)) {
+            int hx = worldToScreenX(hold.pos());
+            int hy = worldToScreenY(hold.pos());
+            drawBorder(guiGraphics, hx - 3, hy - 3, 7, 7, COLOR_HOLD_SHORT);
+            guiGraphics.fill(hx - 1, hy - 1, hx + 2, hy + 2, COLOR_HOLD_SHORT);
+        }
+
         drawPlayerMarker(guiGraphics);
 
         // Crosshair on the position the next click would actually land on -
@@ -614,6 +637,7 @@ public class AirportMapScreen extends Screen {
             case HOLDING_PATTERN -> "click a loop of 3+ points";
             case FINAL_LEG -> "2 points: from holding pattern, to runway";
             case GATE -> "click the end of a runway or taxiway line";
+            case HOLD_SHORT -> "one point on the taxiway - planes wait here for the runway";
         };
     }
 
