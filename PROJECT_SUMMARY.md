@@ -71,8 +71,8 @@ dependencies. On top of that:
 - `AirportMapScreen` - real click-to-place waypoint/gate editor.
 - `AutopilotScreen` - real cycle-button airport/gate picker.
 - `AutopilotBlockEntity` - the full flight state machine (`TAXI_OUT ->
-  TAKEOFF_ROLL -> CRUISE -> HOLDING -> APPROACH -> TAXI_IN -> IDLE`)
-  actually runs, driving a *simulated* position with chat/action-bar
+  TAKEOFF_ROLL -> CLIMB -> CRUISE -> HOLDING -> APPROACH -> TAXI_IN ->
+  IDLE`) actually runs, driving a *simulated* position with chat/action-bar
   telemetry.
 - Hand-drawn 16x16 pixel-art textures for both blocks, a creative tab,
   full lang file.
@@ -89,31 +89,48 @@ plane/contraption classes and swap this in.
 
 ## Known simplifications (see README for the full list)
 
-No real terrain on the map (flat color, not `MapItemSavedData`
-sampling); no altitude; taxi/approach reuse the same waypoint order in
-both directions rather than reversing; no ATC/queueing (one plane's
-state per Autopilot block, holding is a fixed one-lap wait); Autopilot
-block has no placement restriction yet (should require an assembled
-contraption once that API is in view).
+Ground routing walks every taxiway point rather than pathfinding the
+target gate's spur; terrain sampling is coarse, client-side and
+heightmap-based rather than `MapItemSavedData`; "is the plane on the
+ground" is a heightmap guess standing in for real contraption flight
+state; only the holding pattern has a real altitude; no ATC/queueing (one
+plane's state per Autopilot block, holding is a fixed one-lap wait);
+Autopilot block has no placement restriction yet (should require an
+assembled contraption once that API is in view).
 
-## Unverified / worth double-checking early in the new session
+## It builds and runs now (as of 2026-08-19)
 
-This was all written without a working NeoForge/Create toolchain
-available (sandboxed network, couldn't reach `maven.neoforged.net` /
-`maven.createmod.net`). Ran every `.java` file through `javac` with no
-classpath to catch real syntax errors (none found), but that's not the
-same as a real compile. Specifically flagged as best-effort in the
-README: exact mod version numbers in `gradle.properties`
-(`sable_version` is a placeholder), the `modId` strings for
-`create_aeronautics`/`sable` in `neoforge.mods.toml`, `AirportRegistry`'s
-`SavedData` save/load method signature, and the `PacketDistributor`/
-`StreamCodec.of` networking calls throughout `network/` and the block
-entities. First real build in Claude Code, with real internet access
-and IDE indexing, is the actual test of all of this.
+The old "unverified, check before you rely on it" list is worked through -
+README's **Build status** section has the detail. Short version: the
+`SavedData` and networking code was all correct as written. What actually
+blocked the build was a placeholder `sable_version`, a wrong modId
+(Create Aeronautics is `aeronautics`, not `create_aeronautics`), a missing
+Gradle wrapper, and `compileOnly` deps not being on the dev-run classpath
+(so `runClient` had none of the mods `neoforge.mods.toml` requires).
 
-## Suggested first message in the new Claude Code session
+Both blocks work in game. The layout model was then reworked from playtest
+feedback into fixed-shape elements - single-line runway and final leg,
+paired taxiway segments so a gate terminates its own spur, configurable
+holding altitude and turn direction - and the map editor got real terrain
+sampling, snap-to-grid, and a responsive layout. The autopilot gained a
+ground/air engage check, a `CLIMB` state, and nearest-point holding entry.
 
-Something like: "Read PROJECT_SUMMARY.md, README.md, and DESIGN.md in
-this folder for context, then get this Create Aeronautics addon
-building - start with the items flagged in README's 'Before your first
-real build' section."
+Environment note: this machine had no JDK at all; Temurin 21 is now
+installed and `JAVA_HOME` is set machine-wide. The project is a local git
+repo (no remote yet).
+
+## Where to pick up
+
+1. **Real contraption movement.** Still the whole point, still the one
+   stand-in - `AutopilotBlockEntity#applyMotionTowards` moves a phantom
+   `Vec3`. Everything calling it is real logic. The thing that was missing
+   before is now available: the project compiles against Create
+   Aeronautics for real, so its plane/contraption classes are browsable
+   and indexed in the IDE. Start with `TAXI_OUT` - short, flat, no
+   altitude change.
+2. **Ground routing that pathfinds.** Taxi currently walks every taxiway
+   point in drawing order rather than the target gate's own spur; this
+   gets visibly wrong at three or more gates. See
+   `AutopilotBlockEntity#groundTaxiPath`.
+3. Placement restriction on `AutopilotBlock` (must be on an assembled
+   contraption) - and only after all that, the unloaded-chunk problem.

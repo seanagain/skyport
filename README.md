@@ -36,17 +36,36 @@ movement, not a stub.
    the dependency versions to double check first).
 2. Creative inventory -> Skyport tab -> grab an Airport Station and an
    Autopilot block.
-3. Place the Airport Station, right-click it. Click "Gate" mode, click
-   once on the map to drop a gate. Click "Runway" mode, click twice for
-   a short runway. Click "Taxiway", click twice to connect gate to
-   runway. Optionally "Holding Pattern", click 3-4 times for a loop.
-   Hit Save Layout.
-4. Place an Autopilot block anywhere nearby, right-click it. It should
-   show your airport's name; click the gate button until it shows your
-   gate; hit Engage Autopilot.
-5. Watch chat - you'll get a message on every state change, and an
-   action-bar position/state update once a second, cycling through the
-   whole state machine down to "Arrived at gate".
+3. Place the Airport Station and right-click it. Name the airport, then
+   hit **Edit Map**.
+4. Draw the layout. Each mode's click rule is spelled out in the hint line
+   above the map, because they differ:
+   - **Runway** - 2 clicks: the gate end first, then the far end.
+   - **Taxiway** - clicks are read in *pairs*, each pair its own segment.
+     First pair is the backbone (runway gate end <-> holding pattern);
+     each later pair is one gate's spur.
+   - **Holding** - 3+ clicks forming a loop. Set its altitude with `-`/`+`
+     and its turn direction with the CW/CCW button.
+   - **Final** - 2 clicks: holding-pattern side first, then the runway's
+     far end. This is the descent path.
+   - **Gate** - one click per gate, auto-named Gate A, Gate B, ...
+
+   Points snap to an 8-block grid; the hovered world X/Z shows under the
+   map. Closing the screen saves - there's no way to lose a drawing by
+   pressing Escape.
+5. Back on the station screen, the summary line shows what's actually
+   registered (`Runway ok   Taxiway ok   Holding 0/3 ...`). Anything not
+   "ok" doesn't have enough points to fly yet.
+6. Place an Autopilot block, right-click it, pick the airport and gate,
+   hit Engage Autopilot.
+7. Watch chat - a message on every state change, plus an action-bar
+   position/state update once a second, through the whole state machine
+   down to "Arrived at gate".
+
+Engaging is refused if the plane is sitting on the ground away from any
+marked taxiway/runway/gate - it'll tell you to tow it onto one first.
+Engaging while airborne skips the ground states and climbs to cruise
+altitude instead.
 
 ## What's here
 
@@ -55,17 +74,20 @@ movement, not a stub.
   `AirportRegistry` so any Autopilot block can look it up from anywhere.
 - `AutopilotBlock` / `AutopilotBlockEntity` - the flight state machine
   and the simulated-movement prototype described above.
-- `data/` - `Waypoint`, `AirportLayout` (runway/taxiway/holding-pattern
-  waypoint lists + a named `gates` map), `AirportSummary` (the lightweight
-  version sent to the autopilot picker), `AirportRegistry` (world-level
-  `SavedData`).
+- `data/` - `Waypoint` (four types: runway/taxiway/holding-pattern/final
+  leg - the enum's javadoc is where each one's point-count and ordering
+  rules are written down), `AirportLayout` (those waypoint lists, a named
+  `gates` map, plus holding-pattern altitude and turn direction),
+  `AirportSummary` (the lightweight version sent to the autopilot picker),
+  `AirportRegistry` (world-level `SavedData`).
 - `network/` - all five payloads: `EngageAutopilotPayload` /
   `DisengageAutopilotPayload` / `SaveAirportLayoutPayload` (C2S) and
   `OpenAirportMapPayload` / `OpenAutopilotPayload` (S2C), registered in
   `ModNetworking`.
-- `client/gui/` - `AirportMapScreen` (click-to-place waypoints/gates over
-  a flat map-colored background, deliberately no fancy rendering - see
-  its class doc) and `AutopilotScreen` (cycle-button destination picker).
+- `client/gui/` - `AirportStationScreen` (name the airport, see what's
+  registered, open the editor), `AirportMapScreen` (the editor: terrain-
+  sampled background, snap-to-grid click-to-place, per-mode drawing rules)
+  and `AutopilotScreen` (cycle-button destination picker).
 - `registry/ModCreativeTabs` - a Skyport creative tab so both blocks are
   reachable in your inventory.
 
@@ -75,12 +97,20 @@ Kept deliberately simple so the prototype was buildable in one pass -
 each of these is a reasonable next step, not an oversight:
 
 - **No real movement yet** - see above. This is the big one.
-- **Map editor has no real terrain** - flat green background, not
-  sampled from `MapItemSavedData`. Waypoints are placed at a fixed
-  scale (4 blocks/pixel) and the station's own Y level; no altitude.
-- **Directionality is ignored** - taxi-out and taxi-in reuse the same
-  taxiway point order, takeoff and approach reuse the same runway point
-  order. A real airport would traverse some of these in reverse.
+- **Ground routing doesn't pathfind** - `TAXI_OUT`/`TAXI_IN` walk *every*
+  taxiway point in the order they were drawn (reversed when arriving),
+  rather than following the specific spur belonging to the target gate.
+  Fine with one or two gates; with more, planes will visit spurs that
+  aren't theirs. Wants a real graph search - see
+  `AutopilotBlockEntity#groundTaxiPath`.
+- **Terrain sampling is coarse and client-side** - real `MapColor` values
+  now, but sampled per 4px cell from the *client's* loaded chunks via the
+  heightmap, not from `MapItemSavedData`. Unloaded chunks stay blue-gray.
+  Waypoints are still placed at a fixed 4 blocks/pixel and the station's
+  own Y; only the holding pattern has a real altitude.
+- **"On the ground" is a heightmap guess** - `isOnGround` compares the
+  block's Y against the world surface, because there's no real contraption
+  flight state to read yet. Replace it when the movement API is wired up.
 - **No ATC/queueing** - only one plane's state is tracked per Autopilot
   block; nothing stops two planes converging on the same runway. Holding
   is a fixed one-lap wait, not a real clearance system.
@@ -110,43 +140,43 @@ each of these is a reasonable next step, not an oversight:
    this mod (and whatever's on the classpath) loaded - that's how you
    playtest as you go.
 
-## Before your first real build
+## Build status
 
-I don't have a way to run a full NeoForge/Create toolchain in the
-environment this was written in (its network access doesn't reach
-`maven.neoforged.net` or `maven.createmod.net`) - I did run every `.java`
-file here through `javac` with no classpath to catch real syntax errors
-(none found; all remaining errors were the expected "can't find
-NeoForge/Minecraft classes"), but that's not the same as a real compile.
-Treat these as "check this before you rely on it":
+This **builds and runs** (`./gradlew build`, `./gradlew runClient`) against
+a real NeoForge/Create toolchain, and both blocks show up and work in game.
+The scaffold's original "I couldn't compile this, check it yourself" list
+has been worked through - what it flagged, and what turned out to be true:
 
-- **Mod version numbers** in `gradle.properties`
-  (`create_version`, `create_aeronautics_version`, `sable_version`) are
-  whatever was current on Modrinth in August 2026. Check
-  [Create Aeronautics](https://modrinth.com/mod/create-aeronautics/versions),
-  [Sable](https://modrinth.com/mod/sable/versions), and
-  [Create](https://modrinth.com/mod/create/versions) for NeoForge
-  1.21.1 builds and bump these if newer ones exist. `sable_version` is a
-  placeholder you need to fill in.
-- **The `modId` strings** for Create Aeronautics and Sable in
-  `neoforge.mods.toml` (`create_aeronautics`, `sable`) are my best guess.
-  Since your server already runs both, the fastest way to confirm is to
-  unzip those jars from your server's `mods` folder and check their own
-  `META-INF/neoforge.mods.toml`.
-- **`AirportRegistry`'s `SavedData` save/load signature** - this API has
-  changed across Minecraft versions; double-check against
-  `net.minecraft.world.level.saveddata.SavedData` in your IDE (it'll show
-  you the real method signatures once the project's indexed) before
-  assuming this compiles as-is.
-- **`PacketDistributor` / `StreamCodec.of` calls** in `network/` and the
-  block entities - written to match current NeoForge 1.21.1 networking
-  API as I understand it, but this is exactly the kind of API that's
-  worth a quick diff against NeoForged's own docs/examples once your IDE
-  is indexed and can tell you immediately if a method doesn't exist.
-- **Gradle plugin/dependency versions** (`net.neoforged.moddev` version,
-  Create/Ponder/Flywheel artifact versions) - correct as of when this was
-  written, but these move; if the build fails resolving a dependency,
-  that's the first place to look.
+- **`sable_version` was a literal placeholder string**
+  (`REPLACE_WITH_LATEST_SABLE_VERSION_ID`) that would have failed
+  dependency resolution outright. Now a real Modrinth version id. The
+  other two (`create_version`, `create_aeronautics_version`) were already
+  valid - verified against Create's maven and Modrinth's API.
+- **Create Aeronautics' modId is `aeronautics`, not `create_aeronautics`**
+  - the Modrinth slug and the in-game modId genuinely differ, and NeoForge
+  refused to load the mod until `neoforge.mods.toml` was corrected. `sable`
+  was already right. (Confirmed from the mod list a `runClient` prints at
+  startup - easier than unzipping jars.)
+- **`AirportRegistry`'s `SavedData` signature, and the `PacketDistributor`
+  / `StreamCodec.of` calls** were all correct as written. No changes needed.
+- **Gradle plugin/dependency versions** were fine, but two things were
+  missing rather than wrong: there was no Gradle wrapper in the project at
+  all (added from the official 1.21.1 MDK), and Registrate - which Create's
+  `slim` jar deliberately strips - needs both its own dependency line and
+  its own maven repo (`maven.ithundxr.dev/snapshots`).
+
+The one non-obvious trap, worth knowing if you add more dependencies:
+**`compileOnly` deps are not on the dev-run classpath.** Create,
+Create Aeronautics and Sable are all `compileOnly` (correct - this is an
+addon and shouldn't bundle them), but that means `runClient` had none of
+them installed, and `neoforge.mods.toml` requires all three, so mod loading
+failed. `build.gradle` now has a parallel set of `runtimeOnly` lines purely
+so the dev environment behaves like a real install. Those don't affect the
+shipped jar.
+
+You need **JDK 21** installed (nothing else - the wrapper fetches Gradle,
+and ModDevGradle fetches/decompiles Minecraft on first build, which takes a
+while and several GB).
 
 ## Where to go from here
 
