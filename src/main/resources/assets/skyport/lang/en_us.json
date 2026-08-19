@@ -17,5 +17,7 @@
   "gui.skyport.autopilot.no_airports": "No airports registered yet",
   "gui.skyport.autopilot.no_gates": "This airport has no gates yet",
   "gui.skyport.autopilot.engage": "Engage Autopilot",
-  "gui.skyport.autopilot.disengage": "Disengage"
+  "gui.skyport.autopilot.disengage": "Disengage",
+  "gui.skyport.autopilot.add_stop": "Add Stop",
+  "gui.skyport.autopilot.remove_stop": "Remove"
 }

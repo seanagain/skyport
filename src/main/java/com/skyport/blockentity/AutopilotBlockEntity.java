@@ -3,6 +3,8 @@ package com.skyport.blockentity;
 import com.skyport.data.AirportLayout;
 import com.skyport.data.AirportRegistry;
 import com.skyport.data.AirportSummary;
+import com.skyport.data.FlightSchedule;
+import com.skyport.data.ScheduleEntry;
 import com.skyport.data.Waypoint;
 import com.skyport.network.OpenAutopilotPayload;
 import com.skyport.registry.ModBlockEntities;
@@ -47,8 +49,11 @@ import java.util.UUID;
 public class AutopilotBlockEntity extends BlockEntity {
 
     public enum FlightState {
-        IDLE, TAXI_OUT, TAKEOFF_ROLL, CLIMB, CRUISE, HOLDING, APPROACH, TAXI_IN
+        IDLE, TAXI_OUT, TAKEOFF_ROLL, CLIMB, CRUISE, HOLDING, APPROACH, TAXI_IN, WAITING
     }
+
+    /** How near a player counts as "boarded" for WaitCondition.PLAYER. */
+    private static final double BOARDING_RADIUS = 8.0;
 
     private static final double SIMULATED_SPEED_BLOCKS_PER_TICK = 0.5; // ~10 blocks/sec
     private static final double ARRIVAL_RADIUS = 1.0;
@@ -73,10 +78,14 @@ public class AutopilotBlockEntity extends BlockEntity {
     /** How far above the terrain still counts as "on the ground" rather than airborne. */
     private static final int GROUND_HEIGHT_TOLERANCE = 6;
 
-    @org.jetbrains.annotations.Nullable
-    private UUID destinationAirportId;
-    @org.jetbrains.annotations.Nullable
-    private String destinationGateName;
+    // The itinerary, and which stop we're currently flying to. The
+    // destination airport/gate are read off the current entry rather than
+    // stored separately, so there's one source of truth.
+    private FlightSchedule schedule = new FlightSchedule();
+    private int scheduleIndex = 0;
+    /** Ticks left of a WAITING hold; only meaningful while state == WAITING. */
+    private int waitTicksRemaining = 0;
+
     @org.jetbrains.annotations.Nullable
     private UUID controllingPlayerId;
     // Which airport this plane taxied out from, for TAXI_OUT/TAKEOFF_ROLL to
@@ -118,31 +127,61 @@ public class AutopilotBlockEntity extends BlockEntity {
         PacketDistributor.sendToPlayer(player, new OpenAutopilotPayload(getBlockPos(), airports));
     }
 
-    public void engage(UUID airportId, String gateName, ServerPlayer player) {
-        // Deliberately go through the PLAYER for both the level and the
-        // position, not this block entity's own.
+    @org.jetbrains.annotations.Nullable
+    private ScheduleEntry currentEntry() {
+        if (scheduleIndex < 0 || scheduleIndex >= schedule.entries().size()) return null;
+        return schedule.entries().get(scheduleIndex);
+    }
+
+    @org.jetbrains.annotations.Nullable
+    private UUID destinationAirportId() {
+        ScheduleEntry entry = currentEntry();
+        return entry == null ? null : entry.airportId();
+    }
+
+    @org.jetbrains.annotations.Nullable
+    private String destinationGateName() {
+        ScheduleEntry entry = currentEntry();
+        return entry == null ? null : entry.gateName();
+    }
+
+    public void engage(FlightSchedule newSchedule, ServerPlayer player) {
+        if (newSchedule.isEmpty()) {
+            message(player, "Schedule is empty - add at least one stop first.");
+            return;
+        }
+        this.schedule = newSchedule;
+        this.scheduleIndex = 0;
+        this.controllingPlayerId = player.getUUID();
+        // First leg: anchor to the player, who is standing on the plane.
+        engageCurrentLeg(player.serverLevel(), player.blockPosition(), player);
+    }
+
+    /**
+     * @param reference where the plane actually is. The player's position on
+     *                  the first leg (they're stood on it, and the block's own
+     *                  coordinates are unreliable once assembled - see below);
+     *                  the plane's own tracked position on later legs, since
+     *                  by then it has flown somewhere the player may not be.
+     */
+    private void engageCurrentLeg(ServerLevel serverLevel, BlockPos reference,
+                                  @org.jetbrains.annotations.Nullable ServerPlayer player) {
+        // Note what this deliberately does NOT use: this block entity's own
+        // getBlockPos() and getLevel().
         //
-        // Once this block is part of an assembled Create contraption, the
-        // blocks get moved into contraption-local space: getBlockPos()
-        // returns a small local offset rather than a world position (which
-        // read as the plane being "a million blocks" from the taxiway), and
-        // getLevel() is Create's wrapper world rather than the real
-        // ServerLevel. The player who just right-clicked the block is
-        // standing on the plane, in the real world, so their position is a
-        // reliable stand-in for where the plane actually is.
+        // Once the block is part of an assembled Create contraption, its
+        // blocks live in contraption-local space - getBlockPos() returns a
+        // small local offset rather than a world position (which read as the
+        // plane being "a million blocks" from the taxiway), and getLevel() is
+        // Create's wrapper world rather than the real ServerLevel, which
+        // would make this method bail out entirely.
         //
         // The proper fix, once real contraption movement is wired up, is to
         // resolve the owning AbstractContraptionEntity and use
         // toGlobalVector() to convert local -> world.
-        ServerLevel serverLevel = player.serverLevel();
-        BlockPos reference = player.blockPosition();
-
-        this.destinationAirportId = airportId;
-        this.destinationGateName = gateName;
-        this.controllingPlayerId = player.getUUID();
         this.currentWaypointIndex = 0;
         this.holdingEntryIndex = -1;
-        this.simulatedPosition = player.position();
+        this.simulatedPosition = reference.getCenter();
 
         if (isOnGround(serverLevel, reference)) {
             AirportRegistry registry = AirportRegistry.get(serverLevel);
@@ -175,21 +214,31 @@ public class AutopilotBlockEntity extends BlockEntity {
 
     public void disengage() {
         setState(FlightState.IDLE);
-        destinationAirportId = null;
-        destinationGateName = null;
         controllingPlayerId = null;
         originAirportId = null;
         joinPoint = null;
         pitchDegrees = 0;
+        waitTicksRemaining = 0;
         setChanged();
     }
 
     /** Runs every server tick this block entity is loaded and ticking. */
     public void serverTick() {
         if (state == FlightState.IDLE || !(level instanceof ServerLevel serverLevel)) return;
-        if (destinationAirportId == null || simulatedPosition == null) return;
+        if (simulatedPosition == null) return;
 
-        AirportLayout destination = AirportRegistry.get(serverLevel).byId(destinationAirportId).orElse(null);
+        if (state == FlightState.WAITING) {
+            tickWaiting(serverLevel);
+            return;
+        }
+
+        UUID destinationId = destinationAirportId();
+        if (destinationId == null) {
+            disengage();
+            return;
+        }
+
+        AirportLayout destination = AirportRegistry.get(serverLevel).byId(destinationId).orElse(null);
         if (destination == null) {
             // Destination vanished (deleted station?) - park it rather than
             // fly forever toward nothing.
@@ -258,8 +307,70 @@ public class AutopilotBlockEntity extends BlockEntity {
     }
 
     private void arrive() {
-        message("Arrived at gate " + destinationGateName + ".");
-        disengage();
+        ScheduleEntry entry = currentEntry();
+        message("Arrived at " + (entry == null ? "gate" : entry.gateName()) + ".");
+
+        if (entry == null) {
+            disengage();
+            return;
+        }
+
+        waitTicksRemaining = Math.max(0, entry.waitSeconds()) * 20;
+        setState(FlightState.WAITING);
+        message(switch (entry.condition()) {
+            case TIMER -> "Holding at the gate for " + entry.waitSeconds() + "s.";
+            case PLAYER -> "Waiting for a player to board.";
+            case CARGO -> "Cargo conditions aren't readable yet - holding on the timer instead ("
+                    + entry.waitSeconds() + "s).";
+        });
+    }
+
+    /**
+     * Sits at a gate until this stop's departure condition is met, then flies
+     * the next leg (or stops, if the schedule has run out and isn't looping).
+     */
+    private void tickWaiting(ServerLevel serverLevel) {
+        ScheduleEntry entry = currentEntry();
+        if (entry == null) {
+            disengage();
+            return;
+        }
+
+        if (waitTicksRemaining > 0) waitTicksRemaining--;
+
+        boolean ready = switch (entry.condition()) {
+            case TIMER -> waitTicksRemaining <= 0;
+            case PLAYER -> isPlayerNearby(serverLevel);
+            // Falls back to the timer - see ScheduleEntry.WaitCondition.CARGO.
+            case CARGO -> waitTicksRemaining <= 0;
+        };
+        if (!ready) {
+            if (++tickCounter % TELEMETRY_INTERVAL_TICKS == 0) sendTelemetry(serverLevel.getServer());
+            return;
+        }
+
+        int next = schedule.nextIndex(scheduleIndex);
+        if (next < 0) {
+            message("Schedule complete.");
+            disengage();
+            return;
+        }
+
+        scheduleIndex = next;
+        ScheduleEntry nextEntry = schedule.entries().get(next);
+        message("Departing for " + nextEntry.gateName() + ".");
+        // Depart from where the plane actually is - it flew here itself, so
+        // its own tracked position is right even if the player wandered off.
+        ServerPlayer player = controllingPlayerId == null ? null
+                : serverLevel.getServer().getPlayerList().getPlayer(controllingPlayerId);
+        engageCurrentLeg(serverLevel, BlockPos.containing(simulatedPosition), player);
+    }
+
+    private boolean isPlayerNearby(ServerLevel serverLevel) {
+        if (simulatedPosition == null) return false;
+        return serverLevel.getNearestPlayer(
+                simulatedPosition.x, simulatedPosition.y, simulatedPosition.z,
+                BOARDING_RADIUS, false) != null;
     }
 
     private void setState(FlightState newState) {
@@ -380,7 +491,7 @@ public class AutopilotBlockEntity extends BlockEntity {
         if (arriving) {
             java.util.Collections.reverse(taxiway);
             path.addAll(taxiway);
-            BlockPos gate = layout.gates().get(destinationGateName);
+            BlockPos gate = layout.gates().get(destinationGateName());
             if (gate != null) path.add(gate);
         } else {
             path.addAll(taxiway);
@@ -565,22 +676,25 @@ public class AutopilotBlockEntity extends BlockEntity {
     @Override
     protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
         super.saveAdditional(tag, registries);
-        if (destinationAirportId != null) tag.putUUID("destinationAirportId", destinationAirportId);
-        if (destinationGateName != null) tag.putString("destinationGateName", destinationGateName);
+        // The schedule IS worth persisting - it's player-authored config,
+        // not transient flight state, and losing it on reload would mean
+        // retyping the whole itinerary.
+        tag.put("schedule", schedule.save());
+        tag.putInt("scheduleIndex", scheduleIndex);
         if (controllingPlayerId != null) tag.putUUID("controllingPlayerId", controllingPlayerId);
         tag.putString("state", state.name());
         tag.putInt("currentWaypointIndex", currentWaypointIndex);
-        // originAirportId, holdingEntryIndex and simulatedPosition are
-        // intentionally NOT persisted - this is a prototype stand-in for
-        // real contraption movement, not worth preserving across a server
-        // restart. Re-initializes next time it starts moving.
+        // originAirportId, holdingEntryIndex, waitTicksRemaining and
+        // simulatedPosition are intentionally NOT persisted - transient
+        // stand-ins for real contraption movement, not worth preserving
+        // across a restart. They re-initialize next time it starts moving.
     }
 
     @Override
     protected void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
         super.loadAdditional(tag, registries);
-        if (tag.hasUUID("destinationAirportId")) destinationAirportId = tag.getUUID("destinationAirportId");
-        if (tag.contains("destinationGateName")) destinationGateName = tag.getString("destinationGateName");
+        if (tag.contains("schedule")) schedule = FlightSchedule.load(tag.getCompound("schedule"));
+        scheduleIndex = tag.getInt("scheduleIndex");
         if (tag.hasUUID("controllingPlayerId")) controllingPlayerId = tag.getUUID("controllingPlayerId");
         if (tag.contains("state")) state = FlightState.valueOf(tag.getString("state"));
         currentWaypointIndex = tag.getInt("currentWaypointIndex");

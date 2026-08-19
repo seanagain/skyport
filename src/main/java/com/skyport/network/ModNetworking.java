@@ -71,7 +71,7 @@ public class ModNetworking {
                 // TODO: validate the player is actually allowed to control
                 // this autopilot block (distance check, ownership, etc.)
                 // before trusting a client-sent payload.
-                autopilot.engage(payload.airportId(), payload.gateName(), player);
+                autopilot.engage(payload.schedule(), player);
             }
         });
     }
