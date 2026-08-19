@@ -33,7 +33,11 @@ import org.joml.Vector3d;
 import org.joml.Vector3dc;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.UUID;
 
 /**
@@ -93,6 +97,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     // --- real-craft steering (see steerCraftTowards) ---
     /** Target cruise speed in blocks/second. */
     private static final double CRAFT_CRUISE_SPEED = 12.0;
+    /** Taxi speed - slower, so the craft actually settles on tightly spaced
+     *  ground waypoints instead of sailing past them and turning back. */
+    private static final double CRAFT_TAXI_SPEED = 4.0;
     /** Fraction of the velocity error corrected per physics tick. Low on
      *  purpose: a heavy contraption yanked to a new velocity looks wrong. */
     private static final double CRAFT_STEER_GAIN = 0.25;
@@ -543,20 +550,30 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         }
 
         Vec3 heading = delta.normalize();
+        boolean onGround = isGroundState();
 
-        // Same 30-degree limit as the simulation, applied to the direction
-        // we're asking for rather than to a position step.
-        double horizontal = Math.sqrt(heading.x * heading.x + heading.z * heading.z);
-        if (horizontal > 1.0e-4) {
-            double maxVertical = horizontal * MAX_PITCH_TANGENT;
-            if (Math.abs(heading.y) > maxVertical) {
-                heading = new Vec3(heading.x, Math.copySign(maxVertical, heading.y), heading.z).normalize();
+        if (onGround) {
+            // Taxiing is a 2D problem - let gravity and the wheels own the
+            // vertical axis rather than steering into or out of the ground.
+            double flat = Math.sqrt(heading.x * heading.x + heading.z * heading.z);
+            if (flat < 1.0e-4) return true;
+            heading = new Vec3(heading.x / flat, 0, heading.z / flat);
+        } else {
+            // Same 30-degree limit as the simulation, applied to the
+            // direction we're asking for rather than to a position step.
+            double horizontal = Math.sqrt(heading.x * heading.x + heading.z * heading.z);
+            if (horizontal > 1.0e-4) {
+                double maxVertical = horizontal * MAX_PITCH_TANGENT;
+                if (Math.abs(heading.y) > maxVertical) {
+                    heading = new Vec3(heading.x, Math.copySign(maxVertical, heading.y), heading.z).normalize();
+                }
             }
         }
 
         // Ease off on the way in so it settles on the waypoint instead of
         // overshooting and having to come back.
-        double speed = Math.min(CRAFT_CRUISE_SPEED, distance * CRAFT_APPROACH_GAIN);
+        double topSpeed = onGround ? CRAFT_TAXI_SPEED : CRAFT_CRUISE_SPEED;
+        double speed = Math.min(topSpeed, distance * CRAFT_APPROACH_GAIN);
         Vec3 desired = heading.scale(speed);
 
         Vector3dc v = activeBody.getLinearVelocity();
@@ -566,10 +583,49 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 new Vector3d(correction.x, correction.y, correction.z),
                 angularCorrectionTowards(heading));
 
-        pitchDegrees = horizontal > 1.0e-4
-                ? (float) Math.toDegrees(Math.atan2(heading.y, horizontal))
+        double headingHorizontal = Math.sqrt(heading.x * heading.x + heading.z * heading.z);
+        pitchDegrees = headingHorizontal > 1.0e-4
+                ? (float) Math.toDegrees(Math.atan2(heading.y, headingHorizontal))
                 : 0;
         return false;
+    }
+
+    private boolean isGroundState() {
+        return state == FlightState.TAXI_OUT
+                || state == FlightState.TAKEOFF_ROLL
+                || state == FlightState.TAXI_IN
+                || state == FlightState.WAITING;
+    }
+
+    /**
+     * On the ground, a plane pivots about its wheels and nothing else: it
+     * yaws, full stop.
+     *
+     * Correcting the orientation error gently (what the airborne path does)
+     * wasn't enough here - the ground contact keeps feeding roll back in
+     * faster than a damped correction takes it out, so the craft visibly
+     * rolled through turns. This instead treats roll and pitch as a hard
+     * constraint: cancel their angular velocity outright, every tick, and
+     * leave only rotation about the world's vertical axis.
+     */
+    private Vector3d groundYawCorrection(Vector3d nose, Vector3d target) {
+        Vector3dc spin = activeBody.getAngularVelocity();
+
+        // Signed yaw error: which way, and how far, to turn about vertical.
+        double flatNoseLen = Math.sqrt(nose.x * nose.x + nose.z * nose.z);
+        if (flatNoseLen < 1.0e-6) return new Vector3d();
+        double noseAngle = Math.atan2(nose.x / flatNoseLen, nose.z / flatNoseLen);
+        double targetAngle = Math.atan2(target.x, target.z);
+        double error = Math.atan2(Math.sin(targetAngle - noseAngle), Math.cos(targetAngle - noseAngle));
+
+        double desiredYawRate = Math.max(-MAX_TURN_RATE_RAD_PER_SEC,
+                Math.min(MAX_TURN_RATE_RAD_PER_SEC, error * TURN_GAIN));
+
+        // Kill roll and pitch rate completely; steer only yaw.
+        return new Vector3d(
+                -spin.x(),
+                (desiredYawRate - spin.y()) * TURN_DAMPING,
+                -spin.z());
     }
 
     /**
@@ -600,13 +656,12 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         // On the ground a plane yaws flat; it doesn't pitch its nose down to
         // chase a waypoint that happens to sit below it.
-        boolean onGround = state == FlightState.TAXI_OUT
-                || state == FlightState.TAKEOFF_ROLL
-                || state == FlightState.TAXI_IN
-                || state == FlightState.WAITING;
+        boolean onGround = isGroundState();
         Vector3d target = new Vector3d(heading.x, onGround ? 0 : heading.y, heading.z);
         if (target.lengthSquared() < 1.0e-8) return new Vector3d();
         target.normalize();
+
+        if (onGround) return groundYawCorrection(nose, target);
 
         // Nose onto the heading...
         Quaterniond align = new Quaterniond().rotationTo(nose, target);
@@ -736,26 +791,114 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return lap;
     }
 
-    /** Every taxiway point (backbone + every gate's spur, in drawing order),
-     *  ending at the runway's gate end - or, reversed, starting there and
-     *  ending at the named destination gate. See the TAXI_OUT case comment
-     *  for the multi-gate simplification this implies. */
+    /**
+     * The actual route across the ground network, from where the plane is to
+     * the runway (departing) or to its gate (arriving).
+     *
+     * This used to just walk every taxiway point in the order they were
+     * drawn, which zigzagged between unrelated segments - a plane would head
+     * for a point behind it, oscillate around a target it kept overshooting,
+     * and sit there looking stopped. Now the taxiway segments are treated as
+     * what they are, a graph, and this finds the shortest path through it.
+     */
     private List<BlockPos> groundTaxiPath(AirportLayout layout, boolean arriving) {
-        List<BlockPos> taxiway = new ArrayList<>(positionsOf(layout, Waypoint.Type.TAXIWAY));
         List<BlockPos> runway = positionsOf(layout, Waypoint.Type.RUNWAY);
-        BlockPos gateEnd = runway.isEmpty() ? null : runway.get(0);
+        if (runway.isEmpty()) return List.of();
+        BlockPos gateEnd = runway.get(0);
+
+        BlockPos from;
+        BlockPos to;
+        if (arriving) {
+            from = gateEnd;
+            BlockPos gate = layout.gates().get(destinationGateName());
+            if (gate == null) return List.of();
+            to = gate;
+        } else {
+            from = joinPoint != null ? joinPoint : BlockPos.containing(simulatedPosition);
+            to = gateEnd;
+        }
+
+        List<BlockPos> route = shortestGroundRoute(layout, from, to);
+        // No connected route (a layout drawn before the editor enforced
+        // connectivity, say) - head straight there rather than refusing to
+        // move at all.
+        return route.isEmpty() ? List.of(to) : route;
+    }
+
+    /** Taxiway segments plus the runway, as an adjacency map keyed by node. */
+    private static Map<BlockPos, List<BlockPos>> groundGraph(AirportLayout layout) {
+        Map<BlockPos, List<BlockPos>> graph = new HashMap<>();
+        List<BlockPos> taxiway = positionsOf(layout, Waypoint.Type.TAXIWAY);
+        for (int i = 0; i + 1 < taxiway.size(); i += 2) {
+            link(graph, taxiway.get(i), taxiway.get(i + 1));
+        }
+        List<BlockPos> runway = positionsOf(layout, Waypoint.Type.RUNWAY);
+        if (runway.size() == 2) link(graph, runway.get(0), runway.get(1));
+        return graph;
+    }
+
+    private static void link(Map<BlockPos, List<BlockPos>> graph, BlockPos a, BlockPos b) {
+        graph.computeIfAbsent(a, k -> new ArrayList<>()).add(b);
+        graph.computeIfAbsent(b, k -> new ArrayList<>()).add(a);
+    }
+
+    /**
+     * Dijkstra over the ground network. `from` and `to` are snapped to the
+     * nearest node first, since the plane is parked somewhere near the line
+     * rather than exactly on a drawn point.
+     */
+    private static List<BlockPos> shortestGroundRoute(AirportLayout layout, BlockPos from, BlockPos to) {
+        Map<BlockPos, List<BlockPos>> graph = groundGraph(layout);
+        if (graph.isEmpty()) return List.of();
+
+        BlockPos start = nearestNode(graph.keySet(), from);
+        BlockPos goal = nearestNode(graph.keySet(), to);
+        if (start == null || goal == null) return List.of();
+
+        Map<BlockPos, Double> best = new HashMap<>();
+        Map<BlockPos, BlockPos> cameFrom = new HashMap<>();
+        PriorityQueue<BlockPos> queue = new PriorityQueue<>(Comparator.comparingDouble(p -> best.getOrDefault(p, Double.MAX_VALUE)));
+        best.put(start, 0.0);
+        queue.add(start);
+
+        while (!queue.isEmpty()) {
+            BlockPos node = queue.poll();
+            if (node.equals(goal)) break;
+            double baseCost = best.getOrDefault(node, Double.MAX_VALUE);
+            for (BlockPos neighbour : graph.getOrDefault(node, List.of())) {
+                double cost = baseCost + horizontalDistance(node, neighbour);
+                if (cost < best.getOrDefault(neighbour, Double.MAX_VALUE)) {
+                    best.put(neighbour, cost);
+                    cameFrom.put(neighbour, node);
+                    queue.add(neighbour);
+                }
+            }
+        }
+        if (!best.containsKey(goal)) return List.of();
 
         List<BlockPos> path = new ArrayList<>();
-        if (arriving) {
-            java.util.Collections.reverse(taxiway);
-            path.addAll(taxiway);
-            BlockPos gate = layout.gates().get(destinationGateName());
-            if (gate != null) path.add(gate);
-        } else {
-            path.addAll(taxiway);
-            if (gateEnd != null) path.add(gateEnd);
+        for (BlockPos at = goal; at != null; at = cameFrom.get(at)) {
+            path.add(at);
+            if (at.equals(start)) break;
         }
+        java.util.Collections.reverse(path);
+        // The real destination (a gate) may sit slightly off its node.
+        if (!path.isEmpty() && !path.get(path.size() - 1).equals(to)) path.add(to);
         return path;
+    }
+
+    @org.jetbrains.annotations.Nullable
+    private static BlockPos nearestNode(java.util.Collection<BlockPos> nodes, BlockPos to) {
+        BlockPos best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (BlockPos node : nodes) {
+            double d = horizontalDistance(node, to);
+            if (d < bestDist) {
+                bestDist = d;
+                best = node;
+            }
+        }
+        return best;
     }
 
     /** Final leg (holding pattern side -> runway far end) then the runway
