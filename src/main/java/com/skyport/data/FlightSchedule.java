@@ -20,6 +20,9 @@ public class FlightSchedule {
     private boolean loop = true;
     /** Y level the plane levels out at between airports. */
     private int cruiseAltitude = 150;
+    /** Airborne speed in blocks/second. Ground speeds stay fixed - taxiing
+     *  fast is just a way to overshoot waypoints. */
+    private int cruiseSpeed = 24;
 
     public List<ScheduleEntry> entries() {
         return entries;
@@ -39,6 +42,14 @@ public class FlightSchedule {
 
     public void setCruiseAltitude(int cruiseAltitude) {
         this.cruiseAltitude = cruiseAltitude;
+    }
+
+    public int cruiseSpeed() {
+        return cruiseSpeed;
+    }
+
+    public void setCruiseSpeed(int cruiseSpeed) {
+        this.cruiseSpeed = cruiseSpeed;
     }
 
     public boolean isEmpty() {
@@ -64,6 +75,7 @@ public class FlightSchedule {
         tag.put("entries", list);
         tag.putBoolean("loop", loop);
         tag.putInt("cruiseAltitude", cruiseAltitude);
+        tag.putInt("cruiseSpeed", cruiseSpeed);
         return tag;
     }
 
@@ -75,6 +87,7 @@ public class FlightSchedule {
         }
         schedule.loop = tag.getBoolean("loop");
         if (tag.contains("cruiseAltitude")) schedule.cruiseAltitude = tag.getInt("cruiseAltitude");
+        if (tag.contains("cruiseSpeed")) schedule.cruiseSpeed = tag.getInt("cruiseSpeed");
         return schedule;
     }
 
@@ -83,6 +96,7 @@ public class FlightSchedule {
         for (ScheduleEntry entry : entries) entry.write(buf);
         buf.writeBoolean(loop);
         buf.writeVarInt(cruiseAltitude);
+        buf.writeVarInt(cruiseSpeed);
     }
 
     public static FlightSchedule read(FriendlyByteBuf buf) {
@@ -91,6 +105,7 @@ public class FlightSchedule {
         for (int i = 0; i < count; i++) schedule.entries.add(ScheduleEntry.read(buf));
         schedule.loop = buf.readBoolean();
         schedule.cruiseAltitude = buf.readVarInt();
+        schedule.cruiseSpeed = buf.readVarInt();
         return schedule;
     }
 }

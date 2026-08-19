@@ -47,6 +47,7 @@ public class AutopilotScreen extends Screen {
     private Button waitButton;
     private Button loopButton;
     private Button altitudeButton;
+    private Button speedButton;
     private Button engageButton;
     private Button removeButton;
 
@@ -94,15 +95,24 @@ public class AutopilotScreen extends Screen {
                         })
                 .bounds(left + half + 4, top + 72, half, 20).build());
 
-        // Cruise altitude: the one setting that's about the flight rather
-        // than about a particular stop.
+        // Cruise altitude and speed: the settings that describe the flight
+        // rather than a particular stop.
+        int valueW = half - 44;
         addRenderableWidget(Button.builder(Component.literal("-"), b -> adjustCruiseAltitude(-10))
-                .bounds(left, top + 96, 24, 20).build());
+                .bounds(left, top + 96, 20, 20).build());
         altitudeButton = addRenderableWidget(Button.builder(altitudeLabel(), b -> { })
-                .bounds(left + 26, top + 96, panelW - 52, 20).build());
+                .bounds(left + 22, top + 96, valueW, 20).build());
         altitudeButton.active = false;
         addRenderableWidget(Button.builder(Component.literal("+"), b -> adjustCruiseAltitude(10))
-                .bounds(left + panelW - 24, top + 96, 24, 20).build());
+                .bounds(left + 22 + valueW + 2, top + 96, 20, 20).build());
+
+        addRenderableWidget(Button.builder(Component.literal("-"), b -> adjustCruiseSpeed(-4))
+                .bounds(left + half + 4, top + 96, 20, 20).build());
+        speedButton = addRenderableWidget(Button.builder(speedLabel(), b -> { })
+                .bounds(left + half + 26, top + 96, valueW, 20).build());
+        speedButton.active = false;
+        addRenderableWidget(Button.builder(Component.literal("+"), b -> adjustCruiseSpeed(4))
+                .bounds(left + half + 26 + valueW + 2, top + 96, 20, 20).build());
 
         engageButton = addRenderableWidget(Button.builder(Component.translatable("gui.skyport.autopilot.engage"),
                         b -> engage())
@@ -233,11 +243,20 @@ public class AutopilotScreen extends Screen {
     }
 
     private Component altitudeLabel() {
-        return Component.literal("Cruise altitude: Y " + schedule.cruiseAltitude());
+        return Component.literal("Alt Y " + schedule.cruiseAltitude());
+    }
+
+    private Component speedLabel() {
+        return Component.literal("Spd " + schedule.cruiseSpeed());
     }
 
     private void adjustCruiseAltitude(int delta) {
         schedule.setCruiseAltitude(Math.max(0, Math.min(400, schedule.cruiseAltitude() + delta)));
+        refresh();
+    }
+
+    private void adjustCruiseSpeed(int delta) {
+        schedule.setCruiseSpeed(Math.max(4, Math.min(80, schedule.cruiseSpeed() + delta)));
         refresh();
     }
 
@@ -250,6 +269,7 @@ public class AutopilotScreen extends Screen {
         waitButton.setMessage(waitLabel());
         loopButton.setMessage(loopLabel());
         altitudeButton.setMessage(altitudeLabel());
+        speedButton.setMessage(speedLabel());
 
         airportButton.active = sel && airports.size() > 1;
         gateButton.active = sel && airportOf(entry().airportId()).gateNames().size() > 1;

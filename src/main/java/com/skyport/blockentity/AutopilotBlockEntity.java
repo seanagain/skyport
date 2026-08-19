@@ -95,8 +95,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private static final double MAX_PITCH_TANGENT = Math.tan(Math.toRadians(MAX_PITCH_DEGREES));
 
     // --- real-craft steering (see steerCraftTowards) ---
-    /** Target cruise speed in blocks/second. */
-    private static final double CRAFT_CRUISE_SPEED = 12.0;
+    // Airborne speed is per-schedule (FlightSchedule#cruiseSpeed) rather than
+    // a constant - how fast is worth flying depends on the route.
     /** Taxi speed - slower, so the craft actually settles on tightly spaced
      *  ground waypoints instead of sailing past them and turning back. */
     private static final double CRAFT_TAXI_SPEED = 4.0;
@@ -124,6 +124,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** Fraction of the rotation error corrected per tick; damped so the craft
      *  settles on a heading instead of oscillating around it. */
     private static final double TURN_DAMPING = 0.3;
+    /** Levelling on the ground is firmer: wheel contact keeps feeding roll
+     *  back in, so a gentle correction loses to it. */
+    private static final double GROUND_LEVEL_GAIN = 3.0;
+    private static final double GROUND_TURN_DAMPING = 0.5;
     /** How far above the terrain still counts as "on the ground" rather than airborne. */
     private static final int GROUND_HEIGHT_TOLERANCE = 6;
 
@@ -413,7 +417,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 Vec3 forward = climbHeading(destination);
                 double climbY = Math.sin(Math.toRadians(CLIMB_PITCH_DEGREES));
                 double climbXZ = Math.cos(Math.toRadians(CLIMB_PITCH_DEGREES));
-                flyHeading(new Vec3(forward.x * climbXZ, climbY, forward.z * climbXZ), CRAFT_CRUISE_SPEED);
+                flyHeading(new Vec3(forward.x * climbXZ, climbY, forward.z * climbXZ), cruiseSpeed());
                 if (simulatedPosition.y >= cruiseAltitude() - 2) setState(FlightState.CRUISE);
             }
             // Level flight toward the nearest holding-pattern point, handing
@@ -602,7 +606,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         // Ease off on the way in so it settles on the waypoint instead of
         // overshooting and having to come back.
-        double topSpeed = onGround ? CRAFT_TAXI_SPEED : CRAFT_CRUISE_SPEED;
+        double topSpeed = onGround ? CRAFT_TAXI_SPEED : cruiseSpeed();
         double speed = Math.min(topSpeed, distance * CRAFT_APPROACH_GAIN);
         Vec3 desired = heading.scale(speed);
 
@@ -628,49 +632,12 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     }
 
     /**
-     * On the ground, a plane pivots about its wheels and nothing else: it
-     * yaws, full stop.
-     *
-     * Correcting the orientation error gently (what the airborne path does)
-     * wasn't enough here - the ground contact keeps feeding roll back in
-     * faster than a damped correction takes it out, so the craft visibly
-     * rolled through turns. This instead treats roll and pitch as a hard
-     * constraint: cancel their angular velocity outright, every tick, and
-     * leave only rotation about the world's vertical axis.
-     */
-    private Vector3d groundYawCorrection(Vector3d nose, Vector3d target) {
-        Vector3dc spin = activeBody.getAngularVelocity();
-
-        // Signed yaw error: which way, and how far, to turn about vertical.
-        double flatNoseLen = Math.sqrt(nose.x * nose.x + nose.z * nose.z);
-        if (flatNoseLen < 1.0e-6) return new Vector3d();
-        double noseAngle = Math.atan2(nose.x / flatNoseLen, nose.z / flatNoseLen);
-        double targetAngle = Math.atan2(target.x, target.z);
-        double error = Math.atan2(Math.sin(targetAngle - noseAngle), Math.cos(targetAngle - noseAngle));
-
-        double desiredYawRate = Math.max(-MAX_TURN_RATE_RAD_PER_SEC,
-                Math.min(MAX_TURN_RATE_RAD_PER_SEC, error * TURN_GAIN));
-
-        // Kill roll and pitch rate completely; steer only yaw.
-        return new Vector3d(
-                -spin.x(),
-                (desiredYawRate - spin.y()) * TURN_DAMPING,
-                -spin.z());
-    }
-
-    /**
      * Turns the craft to point where it's going, and keeps its wings level.
      *
-     * Without this the autopilot was only ever pushing the craft around,
-     * leaving it to fly sideways in whatever attitude it happened to hold.
-     *
-     * Two corrections, combined into one angular-velocity nudge:
-     *  - yaw/pitch: rotate the nose (which is whichever way the Autopilot
-     *    block faces - a contraption has no inherent front) onto the heading.
-     *  - roll: rotate the craft's own up-vector back to world up. Planes bank
-     *    in reality, but on the ground they only yaw, and a contraption that
-     *    rolls while taxiing just looks broken - so roll is always driven to
-     *    zero and the ground case additionally flattens the target heading.
+     * Without this the autopilot only pushed the craft around, leaving it to
+     * fly sideways in whatever attitude it happened to hold. The actual
+     * control is in {@link #attitudeCorrection}; this works out the nose and
+     * up vectors and the heading to aim for.
      */
     private Vector3d angularCorrectionTowards(Vec3 heading) {
         if (activeSubLevel == null) return new Vector3d();
@@ -691,28 +658,65 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (target.lengthSquared() < 1.0e-8) return new Vector3d();
         target.normalize();
 
-        if (onGround) return groundYawCorrection(nose, target);
+        return attitudeCorrection(nose, up, target, onGround);
+    }
 
-        // Nose onto the heading...
-        Quaterniond align = new Quaterniond().rotationTo(nose, target);
-        // ...then take the roll out of whatever that leaves.
-        Vector3d upAfterAlign = align.transform(new Vector3d(up));
+    /**
+     * Drives the craft's attitude by controlling yaw, pitch and roll
+     * separately, rather than by the shortest rotation from its nose to the
+     * target heading.
+     *
+     * The shortest-arc version banked into turns and sometimes wedged: for a
+     * turn approaching 180 degrees the two vectors are nearly opposite, and
+     * the shortest arc between nearly-opposite vectors has an essentially
+     * arbitrary axis - frequently a roll. Planes don't turn like that. They
+     * yaw about vertical, pitch about the wing axis, and hold the wings
+     * level, which is what these three independent terms do.
+     *
+     * Roll is always commanded to zero, in the air as well as on the ground.
+     * Correcting only the roll RATE (what the ground path did before) leaves
+     * a craft that started out banked staying banked - which is exactly the
+     * "took off banked 20 degrees" case.
+     */
+    private Vector3d attitudeCorrection(Vector3d nose, Vector3d up, Vector3d target, boolean onGround) {
         Vector3d worldUp = new Vector3d(0, 1, 0);
-        Vector3d levelUp = new Vector3d(worldUp).sub(new Vector3d(target).mul(worldUp.dot(target)));
-        Quaterniond level = levelUp.lengthSquared() < 1.0e-8
-                ? new Quaterniond()
-                : new Quaterniond().rotationTo(upAfterAlign, levelUp.normalize());
 
-        AxisAngle4d error = new AxisAngle4d().set(level.mul(align, new Quaterniond()));
-        if (!Double.isFinite(error.angle) || error.angle < 1.0e-4) return new Vector3d();
+        double flatLen = Math.sqrt(nose.x * nose.x + nose.z * nose.z);
+        if (flatLen < 1.0e-6) return new Vector3d(); // pointing straight up/down; nothing sane to yaw about
 
-        // Desired angular velocity: turn through the error at a bounded rate,
-        // then correct only part of the difference from the current spin, so
-        // it converges instead of oscillating.
-        double rate = Math.min(error.angle * TURN_GAIN, MAX_TURN_RATE_RAD_PER_SEC);
-        Vector3d desiredSpin = new Vector3d(error.x, error.y, error.z).normalize().mul(rate);
+        // --- yaw: turn about the world vertical, always the short way round.
+        double noseYaw = Math.atan2(nose.x / flatLen, nose.z / flatLen);
+        double targetYaw = Math.atan2(target.x, target.z);
+        double yawError = Math.atan2(Math.sin(targetYaw - noseYaw), Math.cos(targetYaw - noseYaw));
+
+        // --- pitch: about the craft's wing axis. Level on the ground.
+        double nosePitch = Math.asin(Math.max(-1, Math.min(1, nose.y)));
+        double targetPitch = onGround ? 0 : Math.asin(Math.max(-1, Math.min(1, target.y)));
+        double pitchError = targetPitch - nosePitch;
+
+        Vector3d right = new Vector3d(nose).cross(worldUp);
+        if (right.lengthSquared() < 1.0e-8) return new Vector3d();
+        right.normalize();
+
+        // --- roll: rotate the craft's up back onto the level up.
+        Vector3d idealUp = new Vector3d(right).cross(nose).normalize();
+        double rollError = Math.atan2(up.dot(right), up.dot(idealUp));
+
+        Vector3d noseUnit = new Vector3d(nose).normalize();
+        double rollGain = onGround ? GROUND_LEVEL_GAIN : TURN_GAIN;
+
+        Vector3d desiredSpin = new Vector3d();
+        desiredSpin.fma(clampRate(yawError * TURN_GAIN), worldUp);
+        desiredSpin.fma(clampRate(pitchError * rollGain), right);
+        desiredSpin.fma(clampRate(-rollError * rollGain), noseUnit);
+
         Vector3dc current = activeBody.getAngularVelocity();
-        return desiredSpin.sub(current.x(), current.y(), current.z()).mul(TURN_DAMPING);
+        return desiredSpin.sub(current.x(), current.y(), current.z())
+                .mul(onGround ? GROUND_TURN_DAMPING : TURN_DAMPING);
+    }
+
+    private static double clampRate(double rate) {
+        return Math.max(-MAX_TURN_RATE_RAD_PER_SEC, Math.min(MAX_TURN_RATE_RAD_PER_SEC, rate));
     }
 
     private boolean advanceSimulatedTowards(BlockPos target) {
@@ -788,6 +792,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      */
     private int cruiseAltitude() {
         return schedule.cruiseAltitude();
+    }
+
+    private double cruiseSpeed() {
+        return schedule.cruiseSpeed();
     }
 
     /**
