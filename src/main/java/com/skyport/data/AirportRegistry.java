@@ -60,6 +60,33 @@ public class AirportRegistry extends SavedData {
         setDirty();
     }
 
+    /**
+     * Which plane currently holds the approach clearance at each airport -
+     * the smallest thing that counts as air traffic control.
+     *
+     * Deliberately NOT persisted: it describes planes in flight right now,
+     * and a clearance surviving a restart would block an airport forever
+     * with no plane to release it.
+     */
+    private final transient Map<UUID, UUID> approachClearances = new HashMap<>();
+
+    /**
+     * Ask to fly a straight-in approach. Granted if nobody else is on final
+     * or on the runway, or if this plane already holds it (so re-asking each
+     * tick is harmless). A refusal means "go and hold".
+     */
+    public boolean tryClaimApproach(UUID airportId, UUID planeId) {
+        UUID holder = approachClearances.get(airportId);
+        if (holder != null && !holder.equals(planeId)) return false;
+        approachClearances.put(airportId, planeId);
+        return true;
+    }
+
+    /** Give up the clearance - on landing, on disengaging, or on giving up. */
+    public void releaseApproach(UUID airportId, UUID planeId) {
+        approachClearances.remove(airportId, planeId);
+    }
+
     @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider registries) {
         ListTag list = new ListTag();

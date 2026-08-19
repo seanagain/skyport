@@ -135,6 +135,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private static final int TAKEOFF_MIN_HOLD_TICKS = 20;
     private static final int TAKEOFF_MAX_HOLD_TICKS = 100;
     private static final double TAKEOFF_ALIGNMENT_THRESHOLD = 0.98;
+    /** Seconds of travel before a turn point to start cutting the corner. */
+    private static final double TURN_ANTICIPATION_SECONDS = 1.5;
     /** How far above the terrain still counts as "on the ground" rather than airborne. */
     private static final int GROUND_HEIGHT_TOLERANCE = 6;
 
@@ -166,6 +168,15 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private Vec3 takeoffStart;
     /** Ticks spent lined up on the centreline before the roll begins. */
     private int takeoffHoldTicks = 0;
+    /** Heading held throughout the climb, fixed at rotation. */
+    @org.jetbrains.annotations.Nullable
+    private Vec3 climbHeadingLocked;
+    /** Stable identity for runway clearances; see planeId(). */
+    @org.jetbrains.annotations.Nullable
+    private UUID planeId;
+    /** Whether the waypoint being steered to is one to stop at, rather than
+     *  a turn point to carry speed through. */
+    private boolean steeringToLastWaypoint = true;
 
     private FlightState state = FlightState.IDLE;
     private int currentWaypointIndex = 0;
@@ -311,12 +322,14 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     }
 
     public void disengage() {
+        releaseApproach();
         setState(FlightState.IDLE);
         controllingPlayerId = null;
         originAirportId = null;
         joinPoint = null;
         takeoffStart = null;
         takeoffHoldTicks = 0;
+        climbHeadingLocked = null;
         pitchDegrees = 0;
         waitTicksRemaining = 0;
         setChanged();
@@ -424,7 +437,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // up. A departure is "keep flying forward, nose up", not "fly to
             // a spot", so that's what this does now.
             case CLIMB -> {
-                Vec3 forward = climbHeading(destination);
+                // Locked at rotation, not recomputed: re-aiming at the
+                // destination every tick made the plane wander through the
+                // climb instead of flying the runway heading out.
+                if (climbHeadingLocked == null) climbHeadingLocked = climbHeading(destination);
+                Vec3 forward = climbHeadingLocked;
                 double climbY = Math.sin(Math.toRadians(CLIMB_PITCH_DEGREES));
                 double climbXZ = Math.cos(Math.toRadians(CLIMB_PITCH_DEGREES));
                 flyHeading(new Vec3(forward.x * climbXZ, climbY, forward.z * climbXZ), cruiseSpeed());
@@ -433,27 +450,49 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // Level flight toward the nearest holding-pattern point, handing
             // over to HOLDING early enough to turn into the pattern rather
             // than arriving at a point and pivoting on the spot.
+            // Head for the holding pattern, but if the runway is free by the
+            // time we get near it, go straight in - circling an empty airport
+            // is just a delay. Holding is for when someone else is landing.
             case CRUISE -> {
                 List<BlockPos> loop = positionsOf(destination, Waypoint.Type.HOLDING_PATTERN);
                 if (loop.isEmpty()) {
-                    setState(FlightState.APPROACH);
+                    beginApproach(serverLevel, destination);
                 } else {
                     if (holdingEntryIndex < 0) holdingEntryIndex = nearestIndex(loop, simulatedPosition);
                     BlockPos entry = withY(loop.get(holdingEntryIndex), destination.holdingPatternHeight());
                     applyMotionTowards(entry);
                     if (horizontalDistance(entry, BlockPos.containing(simulatedPosition)) <= HOLDING_ENTRY_LEAD_BLOCKS) {
-                        setState(FlightState.HOLDING);
+                        if (claimApproach(serverLevel, destination)) {
+                            message("Runway clear - straight in.");
+                            setState(FlightState.APPROACH);
+                        } else {
+                            setState(FlightState.HOLDING);
+                        }
                     }
                 }
             }
             // One full lap of the holding pattern starting at the point CRUISE
             // entered from, in the layout's configured direction, then
             // cleared to land - no real ATC/queueing yet (see DESIGN.md).
-            case HOLDING -> followWaypoints(holdingLap(destination), () -> setState(FlightState.APPROACH));
+            // Circle until the runway frees up, re-asking each lap.
+            case HOLDING -> followWaypoints(holdingLap(destination), () -> {
+                if (claimApproach(serverLevel, destination)) {
+                    setState(FlightState.APPROACH);
+                } else {
+                    // Still occupied - go round again rather than landing on
+                    // top of whoever's down there.
+                    currentWaypointIndex = 0;
+                }
+            });
             // Final leg (holding pattern -> runway far end, descending), then
             // roll down the runway to the gate end, ready to taxi in.
             case APPROACH -> followWaypoints(approachPath(destination), () -> setState(FlightState.TAXI_IN));
-            case TAXI_IN -> followWaypoints(groundTaxiPath(destination, true), this::arrive);
+            // Off the runway now - hand the clearance back so anyone holding
+            // overhead can come down, without waiting for us to reach a gate.
+            case TAXI_IN -> {
+                releaseApproach();
+                followWaypoints(groundTaxiPath(destination, true), this::arrive);
+            }
             default -> { }
         }
 
@@ -550,10 +589,35 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             onFinished.run();
             return;
         }
-        if (applyMotionTowards(targets.get(currentWaypointIndex))) {
+
+        BlockPos target = targets.get(currentWaypointIndex);
+        boolean isLast = currentWaypointIndex == targets.size() - 1;
+        steeringToLastWaypoint = isLast;
+
+        // Start the turn early on intermediate waypoints: airborne, cut the
+        // corner well before arriving so the plane eases onto the new leg,
+        // rather than flying to the point, stopping, and pivoting. The last
+        // waypoint still has to be reached properly.
+        if (!isLast && !isGroundState() && activeBody != null) {
+            double distance = Math.sqrt(
+                    Math.pow(target.getX() + 0.5 - simulatedPosition.x, 2)
+                            + Math.pow(target.getZ() + 0.5 - simulatedPosition.z, 2));
+            if (distance <= turnAnticipationRadius()) {
+                currentWaypointIndex++;
+                return;
+            }
+        }
+
+        if (applyMotionTowards(target)) {
             currentWaypointIndex++;
             if (currentWaypointIndex >= targets.size()) onFinished.run();
         }
+    }
+
+    /** How far out to begin cutting a corner. Scaled to speed, since a faster
+     *  plane needs more room to come round at the same turn rate. */
+    private double turnAnticipationRadius() {
+        return Math.max(CRAFT_ARRIVAL_RADIUS, cruiseSpeed() * TURN_ANTICIPATION_SECONDS);
     }
 
     /**
@@ -616,8 +680,15 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         // Ease off on the way in so it settles on the waypoint instead of
         // overshooting and having to come back.
+        // Only ease off for a waypoint the plane actually has to stop at.
+        // Braking for every point in the route is what made it slow down,
+        // arrive, and then turn sharply - a plane passing a turn point should
+        // carry its speed through the corner.
         double topSpeed = onGround ? CRAFT_TAXI_SPEED : cruiseSpeed();
-        double speed = Math.min(topSpeed, distance * CRAFT_APPROACH_GAIN) * alignmentFactor(heading);
+        double speed = steeringToLastWaypoint
+                ? Math.min(topSpeed, distance * CRAFT_APPROACH_GAIN)
+                : topSpeed;
+        speed *= alignmentFactor(heading);
         Vec3 desired = heading.scale(speed);
 
         Vector3dc v = activeBody.getLinearVelocity();
@@ -733,7 +804,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         // --- pitch: about the craft's wing axis. Level on the ground.
         double nosePitch = Math.asin(Math.max(-1, Math.min(1, nose.y)));
-        double targetPitch = onGround ? 0 : Math.asin(Math.max(-1, Math.min(1, target.y)));
+        // Level on the ground, and level on the way down: a plane on final
+        // holds its attitude and descends, rather than aiming its nose at the
+        // threshold. Only the climb actually pitches.
+        boolean holdLevel = onGround || state == FlightState.APPROACH;
+        double targetPitch = holdLevel ? 0 : Math.asin(Math.max(-1, Math.min(1, target.y)));
         double pitchError = targetPitch - nosePitch;
 
         Vector3d right = new Vector3d(nose).cross(worldUp);
@@ -832,6 +907,36 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * Overflying the airport while climbing is fine and realistic - CRUISE
      * turns it back toward the holding pattern.
      */
+    /** This plane's identity for runway clearances - generated once and
+     *  persisted, so a clearance can be matched back to its holder. */
+    private UUID planeId() {
+        if (planeId == null) {
+            planeId = UUID.randomUUID();
+            setChanged();
+        }
+        return planeId;
+    }
+
+    private boolean claimApproach(ServerLevel level, AirportLayout destination) {
+        return AirportRegistry.get(level).tryClaimApproach(destination.id(), planeId());
+    }
+
+    /** Take the clearance if it's going, then start down regardless - used
+     *  where there's no holding pattern to wait in. */
+    private void beginApproach(ServerLevel level, AirportLayout destination) {
+        claimApproach(level, destination);
+        setState(FlightState.APPROACH);
+    }
+
+    private void releaseApproach() {
+        if (level instanceof ServerLevel serverLevel && planeId != null) {
+            UUID destinationId = destinationAirportId();
+            if (destinationId != null) {
+                AirportRegistry.get(serverLevel).releaseApproach(destinationId, planeId);
+            }
+        }
+    }
+
     private int cruiseAltitude() {
         return schedule.cruiseAltitude();
     }
@@ -1282,6 +1387,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         tag.put("schedule", schedule.save());
         tag.putInt("scheduleIndex", scheduleIndex);
         if (controllingPlayerId != null) tag.putUUID("controllingPlayerId", controllingPlayerId);
+        if (planeId != null) tag.putUUID("planeId", planeId);
         tag.putString("state", state.name());
         tag.putInt("currentWaypointIndex", currentWaypointIndex);
         // originAirportId, holdingEntryIndex, waitTicksRemaining and
@@ -1296,6 +1402,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (tag.contains("schedule")) schedule = FlightSchedule.load(tag.getCompound("schedule"));
         scheduleIndex = tag.getInt("scheduleIndex");
         if (tag.hasUUID("controllingPlayerId")) controllingPlayerId = tag.getUUID("controllingPlayerId");
+        if (tag.hasUUID("planeId")) planeId = tag.getUUID("planeId");
         if (tag.contains("state")) state = FlightState.valueOf(tag.getString("state"));
         currentWaypointIndex = tag.getInt("currentWaypointIndex");
         if (state != FlightState.IDLE) simulatedPosition = getBlockPos().getCenter();

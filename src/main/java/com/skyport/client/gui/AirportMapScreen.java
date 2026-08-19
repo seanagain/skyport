@@ -62,8 +62,12 @@ public class AirportMapScreen extends Screen {
     /** Zoom levels, in world blocks per screen pixel. */
     private static final int[] ZOOM_LEVELS = { 1, 2, 4, 8, 16 };
     private static final int TERRAIN_CELL_SIZE = 2; // screen px per sampled terrain cell
-    private static final int SNAP_GRID = 8;         // world blocks a clicked point snaps to
-    private static final int NODE_SNAP_BLOCKS = 24; // pull onto an existing node within this
+    // Placement is per-block: at 1 blk/px you can put a node on an exact
+    // block, and zooming out only coarsens it as far as the pixels do.
+    // Joining to an existing node is a fixed few PIXELS rather than a fixed
+    // number of blocks - a 24-block radius swallowed everything nearby at
+    // close zoom, making precise placement impossible.
+    private static final int NODE_SNAP_PIXELS = 4;
     private static final long REJECTION_VISIBLE_MS = 4000;
     // Deliberately NOT a plausible ground color - real sampled terrain and
     // "not loaded yet" need to look obviously different, the way an
@@ -330,7 +334,10 @@ public class AirportMapScreen extends Screen {
                 best = node;
             }
         }
-        return best != null && bestDist <= NODE_SNAP_BLOCKS ? best : candidate;
+        // Scaled to the zoom, so joining is always the same few pixels of
+        // slack on screen however far in or out you are.
+        double radius = (double) NODE_SNAP_PIXELS * blocksPerPixel();
+        return best != null && bestDist <= radius ? best : candidate;
     }
 
     private List<BlockPos> allNodes() {
@@ -430,20 +437,15 @@ public class AirportMapScreen extends Screen {
         return new BlockPos(stationPos.getX() + dx, stationPos.getY(), stationPos.getZ() + dz);
     }
 
-    /** As above, but snapped to the placement grid - for clicks only. */
+    /** Clicks land on the exact block under the cursor - the pixel-to-block
+     *  ratio is the only thing limiting precision, so zoom in for finer
+     *  placement. */
     private BlockPos screenToWorld(int screenX, int screenY) {
-        BlockPos raw = screenToWorldRaw(screenX, screenY);
-        return new BlockPos(snap(raw.getX()), raw.getY(), snap(raw.getZ()));
+        return screenToWorldRaw(screenX, screenY);
     }
 
     private int blocksPerPixel() {
         return ZOOM_LEVELS[zoomIndex];
-    }
-
-    /** Snaps a world coordinate to the nearest SNAP_GRID multiple, so points
-     *  land cleanly instead of wherever the pixel math happened to fall. */
-    private static int snap(int value) {
-        return Math.round(value / (float) SNAP_GRID) * SNAP_GRID;
     }
 
     private int worldToScreenX(BlockPos pos) {
