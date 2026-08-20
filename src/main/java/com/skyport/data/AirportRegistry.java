@@ -123,6 +123,13 @@ public class AirportRegistry extends SavedData {
         trafficClearances.remove(airportId, planeId);
     }
 
+    /** Who currently holds the runway here, if anyone - so a plane stuck in
+     *  the pattern can say what it's waiting for instead of just circling. */
+    @org.jetbrains.annotations.Nullable
+    public UUID trafficHolder(UUID airportId) {
+        return trafficClearances.get(airportId);
+    }
+
     /**
      * Who is on the taxiway - the stretch between the gates and the hold
      * point. Separate from the runway clearance so a plane can be waiting at

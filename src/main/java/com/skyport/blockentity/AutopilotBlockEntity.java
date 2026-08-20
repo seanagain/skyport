@@ -143,6 +143,14 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private static final double TAKEOFF_ALIGNMENT_THRESHOLD = 0.98;
     /** Seconds of travel before a turn point to start cutting the corner. */
     private static final double TURN_ANTICIPATION_SECONDS = 1.5;
+    /** Never cut more than this fraction of the leg being flown - see
+     *  turnAnticipationRadius. */
+    private static final double MAX_CORNER_CUT = 0.3;
+    /** Speed in the pattern and on approach. Slow enough to actually track
+     *  the drawn lines instead of overshooting and correcting back. */
+    private static final double CRAFT_PATTERN_SPEED = 20.0;
+    /** How many unsuccessful laps between "still waiting" reports. */
+    private static final int HOLDING_REPORT_EVERY_LAPS = 2;
     /** How often to move the force-loaded bubble; every tick would churn. */
     private static final int CHUNK_FOLLOW_INTERVAL_TICKS = 20;
     /** Traffic within this horizontal distance and altitude band counts as a
@@ -198,6 +206,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** Whether this plane has been cleared past the hold point for the leg
      *  it is currently flying. Reset per leg, not persisted. */
     private transient boolean clearedPastHoldShort = false;
+    /** Laps flown waiting for clearance, for the periodic status report. */
+    private transient int holdingLaps = 0;
 
     private FlightState state = FlightState.IDLE;
     private int currentWaypointIndex = 0;
@@ -379,6 +389,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         takeoffHoldTicks = 0;
         climbHeadingLocked = null;
         clearedPastHoldShort = false;
+        holdingLaps = 0;
         pitchDegrees = 0;
         waitTicksRemaining = 0;
         setChanged();
@@ -597,8 +608,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                     setState(FlightState.APPROACH);
                 } else {
                     // Still occupied - go round again rather than landing on
-                    // top of whoever's down there.
+                    // top of whoever's down there. Say what we're waiting for,
+                    // so a plane circling forever is diagnosable rather than
+                    // just mysterious.
                     currentWaypointIndex = 0;
+                    if (++holdingLaps % HOLDING_REPORT_EVERY_LAPS == 0) {
+                        note("Still holding - " + blockerDescription(serverLevel, destination) + ".");
+                    }
                 }
             });
             // Final leg (holding pattern -> runway far end, descending), then
@@ -773,7 +789,19 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             double distance = Math.sqrt(
                     Math.pow(target.getX() + 0.5 - simulatedPosition.x, 2)
                             + Math.pow(target.getZ() + 0.5 - simulatedPosition.z, 2));
-            if (distance <= turnAnticipationRadius()) {
+            // Measure the leg being flown, so the corner cut is proportional
+            // to it. A fixed radius is fine on long cruise legs and disastrous
+            // on a tight holding pattern: at cruise speed it exceeded whole
+            // pattern legs, so the plane "arrived" at every corner before
+            // really flying toward it, cut the entire circuit, and reached the
+            // final leg so badly placed it never captured it - going round
+            // forever. Scaling to the leg means a small pattern simply gets
+            // small anticipation rather than needing a minimum size.
+            BlockPos previous = currentWaypointIndex > 0
+                    ? targets.get(currentWaypointIndex - 1)
+                    : BlockPos.containing(simulatedPosition);
+            double legLength = horizontalDistance(previous, target);
+            if (distance <= turnAnticipationRadius(legLength)) {
                 currentWaypointIndex++;
                 return;
             }
@@ -785,10 +813,31 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         }
     }
 
-    /** How far out to begin cutting a corner. Scaled to speed, since a faster
-     *  plane needs more room to come round at the same turn rate. */
-    private double turnAnticipationRadius() {
-        return Math.max(CRAFT_ARRIVAL_RADIUS, cruiseSpeed() * TURN_ANTICIPATION_SECONDS);
+    /**
+     * How far out to begin cutting a corner: scaled to speed, because a
+     * faster plane needs more room to come round, but never more than a
+     * fraction of the leg it's actually flying, or it skips the leg entirely.
+     */
+    private double turnAnticipationRadius(double legLength) {
+        double cap = Math.max(CRAFT_ARRIVAL_RADIUS, legLength * MAX_CORNER_CUT);
+        return Math.min(currentTopSpeed() * TURN_ANTICIPATION_SECONDS, cap);
+    }
+
+    /**
+     * Target speed for whatever the plane is doing now.
+     *
+     * Cruise speed is for cruising. Flying a holding pattern or an approach
+     * at 24+ blocks/second means overshooting every turn and correcting back,
+     * which looks nothing like an aircraft in a circuit - so the pattern and
+     * the approach run at a slower fixed speed, or the schedule's cruise
+     * speed if that's already slower.
+     */
+    private double currentTopSpeed() {
+        if (isGroundState()) return CRAFT_TAXI_SPEED;
+        if (state == FlightState.HOLDING || state == FlightState.APPROACH) {
+            return Math.min(cruiseSpeed(), CRAFT_PATTERN_SPEED);
+        }
+        return cruiseSpeed();
     }
 
     /**
@@ -855,7 +904,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // Braking for every point in the route is what made it slow down,
         // arrive, and then turn sharply - a plane passing a turn point should
         // carry its speed through the corner.
-        double topSpeed = onGround ? CRAFT_TAXI_SPEED : cruiseSpeed();
+        double topSpeed = currentTopSpeed();
         double speed = steeringToLastWaypoint
                 ? Math.min(topSpeed, distance * CRAFT_APPROACH_GAIN)
                 : topSpeed;
@@ -1155,6 +1204,22 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         List<BlockPos> runway = positionsOf(origin, Waypoint.Type.RUNWAY);
         if (!runway.isEmpty() && first.equals(runway.get(0))) return null;
         return first;
+    }
+
+    /** Names whatever is keeping this plane out of the airport, so "why is it
+     *  circling" has an answer in game rather than needing a code read. */
+    private String blockerDescription(ServerLevel serverLevel, AirportLayout destination) {
+        AirportRegistry registry = AirportRegistry.get(serverLevel);
+        UUID holder = registry.trafficHolder(destination.id());
+        if (holder == null) return "waiting for the taxiway to clear";
+        TrafficReport report = registry.airborneTraffic().get(holder);
+        return report == null
+                ? "runway held by an aircraft that isn't reporting"
+                : "runway held by " + report.callsign() + " (" + prettyState(report.state()) + ")";
+    }
+
+    private static String prettyState(String state) {
+        return state.replace('_', ' ').toLowerCase(java.util.Locale.ROOT);
     }
 
     /** "Airport / Gate" for the ATC readout, or the gate alone if the airport
