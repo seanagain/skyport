@@ -32,7 +32,6 @@ public class Skyport {
         ModBlocks.register(modEventBus);
         ModBlockEntities.REGISTER.register(modEventBus);
         ModCreativeTabs.register(modEventBus);
-        com.skyport.compat.CreateCompat.register(modEventBus);
 
         modContainer.registerConfig(ModConfig.Type.COMMON, SkyportConfig.SPEC);
         // Cache the values whenever the file loads or is edited in game, so
