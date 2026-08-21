@@ -19,16 +19,11 @@ public record ScheduleEntry(UUID airportId, String gateName, WaitCondition condi
         /** Wait until a player is standing near the plane - the "don't leave
          *  without me" case, and how a passenger route works. */
         PLAYER,
-        /**
-         * Wait until the plane is carrying cargo.
-         *
-         * NOT DETECTED YET: reading a contraption's inventory needs the same
-         * contraption reference that real movement does (Create exposes
-         * MountedStorageManager for this). Until that's wired up, the
-         * autopilot says so in chat and falls back to the timer rather than
-         * silently sitting forever or silently leaving.
-         */
-        CARGO
+        /** Wait until the aircraft is carrying something - the loading end of
+         *  a delivery run. */
+        CARGO_LOADED,
+        /** Wait until it has been emptied - the unloading end. */
+        CARGO_EMPTY
     }
 
     public CompoundTag save() {

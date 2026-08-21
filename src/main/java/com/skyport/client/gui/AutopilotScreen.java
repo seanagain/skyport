@@ -254,7 +254,8 @@ public class AutopilotScreen extends Screen {
         return Component.literal(switch (entry().condition()) {
             case TIMER -> "Wait: timer";
             case PLAYER -> "Wait: player";
-            case CARGO -> "Wait: cargo";
+            case CARGO_LOADED -> "Wait: loaded";
+            case CARGO_EMPTY -> "Wait: emptied";
         });
     }
 
@@ -403,7 +404,8 @@ public class AutopilotScreen extends Screen {
         return switch (e.condition()) {
             case TIMER -> e.waitSeconds() + "s";
             case PLAYER -> "player";
-            case CARGO -> "cargo";
+            case CARGO_LOADED -> "loaded";
+            case CARGO_EMPTY -> "emptied";
         };
     }
 

@@ -225,6 +225,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private transient boolean clearedPastHoldShort = false;
     /** Laps flown waiting for clearance, for the periodic status report. */
     private transient int holdingLaps = 0;
+    /** Containers found on this craft, located once per stop. Cleared when
+     *  it leaves, since a rebuilt aircraft may have different holds. */
+    @org.jetbrains.annotations.Nullable
+    private transient java.util.List<BlockPos> cargoContainers;
     /** The pad this aircraft is parked on, so it can be released on takeoff. */
     @org.jetbrains.annotations.Nullable
     private transient UUID occupiedPadAirport;
@@ -825,12 +829,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         }
 
         waitTicksRemaining = Math.max(0, entry.waitSeconds()) * 20;
+        cargoContainers = null; // re-locate holds for this stop
         setState(FlightState.WAITING);
         message(switch (entry.condition()) {
             case TIMER -> "Holding at the gate for " + entry.waitSeconds() + "s.";
             case PLAYER -> "Waiting for a player to board.";
-            case CARGO -> "Cargo conditions aren't readable yet - holding on the timer instead ("
-                    + entry.waitSeconds() + "s).";
+            case CARGO_LOADED -> "Waiting for cargo to be loaded.";
+            case CARGO_EMPTY -> "Waiting to be unloaded.";
         });
     }
 
@@ -850,8 +855,14 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         boolean ready = switch (entry.condition()) {
             case TIMER -> waitTicksRemaining <= 0;
             case PLAYER -> isPlayerNearby(serverLevel);
-            // Falls back to the timer - see ScheduleEntry.WaitCondition.CARGO.
-            case CARGO -> waitTicksRemaining <= 0;
+            // For cargo the timer becomes a timeout rather than the condition:
+            // leave when loaded, or give up waiting after waitSeconds. A
+            // waitSeconds of 0 means wait as long as it takes, which is what
+            // you want at the loading end of a run that isn't ready yet.
+            case CARGO_LOADED -> cargoCount() > 0
+                    || (entry.waitSeconds() > 0 && waitTicksRemaining <= 0);
+            case CARGO_EMPTY -> cargoCount() == 0
+                    || (entry.waitSeconds() > 0 && waitTicksRemaining <= 0);
         };
         if (!ready) {
             if (++tickCounter % TELEMETRY_INTERVAL_TICKS == 0) sendTelemetry(serverLevel.getServer());
@@ -873,6 +884,25 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         ServerPlayer player = controllingPlayerId == null ? null
                 : serverLevel.getServer().getPlayerList().getPlayer(controllingPlayerId);
         engageCurrentLeg(serverLevel, BlockPos.containing(simulatedPosition), player);
+    }
+
+    /**
+     * How much the aircraft is currently carrying.
+     *
+     * Containers are located once per stop and remembered - see CargoSensor.
+     * Reads run against this block entity's own level, which while mounted is
+     * the craft's sub-level, so "nearby blocks" means the aircraft's own
+     * cargo hold rather than whatever happens to be under it on the ground.
+     */
+    private int cargoCount() {
+        if (level == null) return 0;
+        if (cargoContainers == null) {
+            cargoContainers = CargoSensor.findContainers(level, getBlockPos());
+            if (cargoContainers.isEmpty()) {
+                note("No cargo containers found on this aircraft.");
+            }
+        }
+        return CargoSensor.countItems(level, cargoContainers);
     }
 
     private boolean isPlayerNearby(ServerLevel serverLevel) {
