@@ -448,6 +448,18 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (simulatedPosition == null) return;
 
         if (state == FlightState.WAITING) {
+            // Parked at a gate: stop holding the world open. A stationary
+            // aircraft has nothing to fly into, and a long gate wait - or a
+            // PLAYER condition nobody comes to satisfy - would otherwise pin
+            // a patch of chunks open indefinitely for a plane that isn't
+            // going anywhere.
+            //
+            // The consequence is deliberate: a parked plane's wait only
+            // counts down while its chunk is loaded for some other reason,
+            // which is how everything else in Minecraft behaves. It resumes
+            // when someone comes near, and re-acquires its bubble the moment
+            // it starts moving again.
+            releaseChunks();
             tickWaiting(serverLevel);
             return;
         }
