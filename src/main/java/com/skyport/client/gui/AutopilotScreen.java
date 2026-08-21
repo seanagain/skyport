@@ -8,6 +8,7 @@ import com.skyport.network.EngageAutopilotPayload;
 import com.skyport.network.SaveSchedulePayload;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -34,6 +35,9 @@ public class AutopilotScreen extends Screen {
     private static final int ROW_HEIGHT = 12;
     private static final int MAX_VISIBLE_ROWS = 6;
     private static final int[] WAIT_PRESETS = { 0, 5, 10, 15, 30, 60, 120, 300 };
+    /** Top of the schedule list. Shared by init and render - they drifted
+     *  apart once already when the name field pushed everything down. */
+    private static final int LIST_TOP = 46;
 
     private final BlockPos autopilotPos;
     private final List<AirportSummary> airports;
@@ -52,6 +56,7 @@ public class AutopilotScreen extends Screen {
     private Button speedButton;
     private Button engageButton;
     private Button removeButton;
+    private EditBox nameBox;
 
     public AutopilotScreen(BlockPos autopilotPos, List<AirportSummary> airports, FlightSchedule schedule) {
         super(Component.translatable("gui.skyport.autopilot.title"));
@@ -67,9 +72,18 @@ public class AutopilotScreen extends Screen {
     protected void init() {
         int panelW = Math.min(260, width - 20);
         int left = (width - panelW) / 2;
-        int listTop = 34;
+        int listTop = LIST_TOP;
         int top = listTop + MAX_VISIBLE_ROWS * ROW_HEIGHT + 6;
         int half = (panelW - 4) / 2;
+
+        // Aircraft name, above the schedule - it identifies the machine
+        // rather than the route, and it's what shows on the tower's map.
+        nameBox = addRenderableWidget(new EditBox(font, left, 22, panelW, 18,
+                Component.literal("Aircraft name")));
+        nameBox.setValue(schedule.craftName());
+        nameBox.setMaxLength(24);
+        nameBox.setHint(Component.literal("Aircraft name (optional)"));
+        nameBox.setResponder(schedule::setCraftName);
 
         // --- stop selection + add/remove ---
         addRenderableWidget(Button.builder(Component.literal("<"), b -> select(selected - 1))
@@ -362,7 +376,7 @@ public class AutopilotScreen extends Screen {
         }
 
         // The schedule itself, newest-window-first if it's outgrown the box.
-        int listTop = 34;
+        int listTop = LIST_TOP;
         List<ScheduleEntry> entries = schedule.entries();
         int first = Math.max(0, Math.min(selected - MAX_VISIBLE_ROWS + 1, entries.size() - MAX_VISIBLE_ROWS));
         if (first < 0) first = 0;

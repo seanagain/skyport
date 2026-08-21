@@ -25,6 +25,9 @@ public class FlightSchedule {
     private int cruiseSpeed = 24;
     /** What is flying this route - decides whether it uses runways or pads. */
     private CraftType craftType = CraftType.PLANE;
+    /** Player-given name for this aircraft. Blank means fall back to the
+     *  generated callsign - see AutopilotBlockEntity#callsign. */
+    private String craftName = "";
 
     public List<ScheduleEntry> entries() {
         return entries;
@@ -62,6 +65,14 @@ public class FlightSchedule {
         this.craftType = craftType;
     }
 
+    public String craftName() {
+        return craftName;
+    }
+
+    public void setCraftName(String craftName) {
+        this.craftName = craftName;
+    }
+
     public boolean isEmpty() {
         return entries.isEmpty();
     }
@@ -87,6 +98,7 @@ public class FlightSchedule {
         tag.putInt("cruiseAltitude", cruiseAltitude);
         tag.putInt("cruiseSpeed", cruiseSpeed);
         tag.putString("craftType", craftType.name());
+        tag.putString("craftName", craftName);
         return tag;
     }
 
@@ -100,6 +112,7 @@ public class FlightSchedule {
         if (tag.contains("cruiseAltitude")) schedule.cruiseAltitude = tag.getInt("cruiseAltitude");
         if (tag.contains("cruiseSpeed")) schedule.cruiseSpeed = tag.getInt("cruiseSpeed");
         if (tag.contains("craftType")) schedule.craftType = CraftType.valueOf(tag.getString("craftType"));
+        if (tag.contains("craftName")) schedule.craftName = tag.getString("craftName");
         return schedule;
     }
 
@@ -110,6 +123,7 @@ public class FlightSchedule {
         buf.writeVarInt(cruiseAltitude);
         buf.writeVarInt(cruiseSpeed);
         buf.writeEnum(craftType);
+        buf.writeUtf(craftName);
     }
 
     public static FlightSchedule read(FriendlyByteBuf buf) {
@@ -120,6 +134,7 @@ public class FlightSchedule {
         schedule.cruiseAltitude = buf.readVarInt();
         schedule.cruiseSpeed = buf.readVarInt();
         schedule.craftType = buf.readEnum(CraftType.class);
+        schedule.craftName = buf.readUtf();
         return schedule;
     }
 }

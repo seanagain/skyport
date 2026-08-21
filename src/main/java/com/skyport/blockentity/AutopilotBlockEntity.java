@@ -1594,6 +1594,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * there are two of them.
      */
     private String callsign() {
+        // A name the player typed beats a generated one: "Cargo 1" is what
+        // they'll look for on the tower's traffic strip, not SKY-4F2A.
+        String named = schedule.craftName();
+        if (named != null && !named.isBlank()) return named;
         return "SKY-" + planeId().toString().substring(0, 4).toUpperCase(java.util.Locale.ROOT);
     }
 
