@@ -166,6 +166,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      *  than overhead, so the aircraft leaving can climb straight out. */
     private static final int HOVER_STANDOFF_BLOCKS = 24;
     private static final int HOVER_RECHECK_INTERVAL_TICKS = 20;
+    /** How the route is sampled for terrain, and how much air to insist on
+     *  above the highest ground found. */
+    private static final int TERRAIN_SCAN_SPACING = 32;
+    private static final int TERRAIN_SCAN_MAX_SAMPLES = 128;
+    private static final int TERRAIN_CLEARANCE_BLOCKS = 20;
     /** How many unsuccessful laps between "still waiting" reports. */
     private static final int HOLDING_REPORT_EVERY_LAPS = 2;
     /** How often to move the force-loaded bubble; every tick would churn. */
@@ -377,6 +382,15 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         this.currentWaypointIndex = 0;
         this.holdingEntryIndex = -1;
         this.simulatedPosition = reference.getCenter();
+
+        // Refuse a route that flies into the ground rather than discovering it
+        // the hard way somewhere over a mountain range.
+        AirportLayout target = destinationAirportId() == null ? null
+                : AirportRegistry.get(serverLevel).byId(destinationAirportId()).orElse(null);
+        if (target != null && !routeIsFlyable(serverLevel, reference, target)) {
+            setState(FlightState.IDLE);
+            return;
+        }
 
         // Rotorcraft and airships have no ground route to join - they lift
         // off from wherever they are standing. No taxiway check, and nothing
@@ -1544,6 +1558,52 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
     private CraftType craftType() {
         return schedule.craftType();
+    }
+
+    /**
+     * The highest ground between here and there, sampled along the route.
+     *
+     * Cruise altitude is a number the player picks, and nothing checked it
+     * against the world - so a route with a mountain in the middle flew
+     * straight into it. Sampling is coarse on purpose: hitting every block
+     * would be far more work for no better answer, since what matters is
+     * whether anything substantial is in the way, not its exact profile.
+     *
+     * Unloaded chunks report their heightmap from disk without loading, so
+     * this works for a route the player has never flown.
+     */
+    private int highestTerrainOnRoute(ServerLevel serverLevel, BlockPos from, BlockPos to) {
+        double distance = horizontalDistance(from, to);
+        int samples = (int) Math.min(TERRAIN_SCAN_MAX_SAMPLES,
+                Math.max(2, distance / TERRAIN_SCAN_SPACING));
+        int highest = Integer.MIN_VALUE;
+        for (int i = 0; i <= samples; i++) {
+            double t = (double) i / samples;
+            int x = (int) Math.round(from.getX() + (to.getX() - from.getX()) * t);
+            int z = (int) Math.round(from.getZ() + (to.getZ() - from.getZ()) * t);
+            highest = Math.max(highest, serverLevel.getHeight(Heightmap.Types.WORLD_SURFACE, x, z));
+        }
+        return highest;
+    }
+
+    /**
+     * Refuse to set off under a mountain.
+     *
+     * Raising the altitude automatically would be friendlier right up until
+     * it silently flew a schedule at some height the player never chose and
+     * couldn't see; telling them the number to set is both honest and
+     * actionable. Checked at engage, when there's still someone standing
+     * there to read it.
+     */
+    private boolean routeIsFlyable(ServerLevel serverLevel, BlockPos from, AirportLayout destination) {
+        BlockPos to = AirportSummary.of(destination).position();
+        int highest = highestTerrainOnRoute(serverLevel, from, to);
+        int needed = highest + TERRAIN_CLEARANCE_BLOCKS;
+        if (cruiseAltitude() >= needed) return true;
+
+        message("Terrain on this route reaches Y " + highest
+                + " - raise cruise altitude to at least Y " + needed + ".");
+        return false;
     }
 
     /**
