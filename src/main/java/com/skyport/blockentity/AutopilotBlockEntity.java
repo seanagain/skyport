@@ -48,25 +48,27 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Backs one Autopilot block. Runs a small flight state machine and, while
- * PROTOTYPE, drives a *simulated* position rather than actually moving a
- * Create Aeronautics contraption - see the big comment on
- * {@link #applyMotionTowards} for why, and what to change once you're
- * ready to wire this into a real plane.
+ * Backs one Autopilot block: the flight state machine, and the thing that
+ * actually flies the aircraft.
  *
- * Everything else here - state transitions, waypoint sequencing, arrival
- * detection, telemetry - is real logic, not a stub, and is exactly what
- * would drive real contraption movement once applyMotionTowards is swapped
- * out. Test this by watching the action bar / chat while a plane "flies"
- * in place.
+ * It runs from two places, which is worth knowing before changing anything
+ * in here. While mounted on an assembled craft, Sable calls
+ * {@link #sable$physicsTick} and hands over the craft's rigid body, and that
+ * drives everything - at the physics rate, which is NOT the 20/s game tick,
+ * so anything time-based must use game time rather than counting calls.
+ * While the block is sitting loose in the world with no craft,
+ * {@link #serverTick} drives the same logic against a simulated position
+ * instead, which stays useful for testing a layout without building a plane.
  *
- * Engaging checks where the plane currently is (see {@link #engage}):
- * parked on the ground somewhere that isn't a taxiway, runway or gate
- * refuses to engage (nothing to tow it onto a real path from); parked
- * correctly runs the full taxi-out/takeoff/climb/cruise/hold/approach/
- * taxi-in loop; already airborne (re-engaging mid-flight) skips straight
- * to climbing to a safe cruising altitude and heading for the destination's
- * holding pattern, since there's no ground path to follow from mid-air.
+ * Steering is by velocity and angular-velocity correction rather than by
+ * setting the transform: Sable is running a real rigid-body simulation, and
+ * overwriting its state each tick would fight it and discard collisions.
+ *
+ * Routes differ by craft type. A plane taxis, rolls, climbs out on the
+ * runway heading, joins a pattern and flies an approach; a helicopter or
+ * airship goes up, across and down onto a pad. Engaging checks where the
+ * aircraft is: on the ground away from any drawn infrastructure it refuses
+ * and says where to tow it, and mid-air it picks up from the climb.
  */
 public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubLevelActor {
 
@@ -188,8 +190,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     // stored separately, so there's one source of truth.
     private FlightSchedule schedule = new FlightSchedule();
     private int scheduleIndex = 0;
-    /** Ticks left of a WAITING hold; only meaningful while state == WAITING. */
-    private int waitTicksRemaining = 0;
+    /** Game time this WAITING hold ends. -1 until the hold actually starts,
+     *  so it is set from a real ServerLevel rather than guessed at. */
+    private long waitUntilGameTime = -1;
 
     @org.jetbrains.annotations.Nullable
     private UUID controllingPlayerId;
@@ -450,7 +453,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         clearedPastHoldShort = false;
         holdingLaps = 0;
         pitchDegrees = 0;
-        waitTicksRemaining = 0;
+        waitUntilGameTime = -1;
         setChanged();
     }
 
@@ -842,7 +845,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             return;
         }
 
-        waitTicksRemaining = Math.max(0, entry.waitSeconds()) * 20;
+        waitUntilGameTime = -1; // started on the first waiting tick, in game time
         cargoContainers = null; // re-locate holds for this stop
         setState(FlightState.WAITING);
         message(switch (entry.condition()) {
@@ -864,19 +867,31 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             return;
         }
 
-        if (waitTicksRemaining > 0) waitTicksRemaining--;
+        // Count in world time, not in calls.
+        //
+        // This used to decrement a counter once per pass, which is only a
+        // second's worth of passes if something calls it twenty times a
+        // second - and while mounted on a craft the driver is Sable's physics
+        // tick, which runs faster than that. A ten second wait was ending in
+        // about five. An absolute deadline in game time is immune to however
+        // often, or from where, this gets called.
+        long now = serverLevel.getGameTime();
+        if (waitUntilGameTime < 0) {
+            waitUntilGameTime = now + Math.max(0, entry.waitSeconds()) * 20L;
+        }
+        boolean timeUp = now >= waitUntilGameTime;
 
         boolean ready = switch (entry.condition()) {
-            case TIMER -> waitTicksRemaining <= 0;
+            case TIMER -> timeUp;
             case PLAYER -> isPlayerNearby(serverLevel);
             // For cargo the timer becomes a timeout rather than the condition:
             // leave when loaded, or give up waiting after waitSeconds. A
             // waitSeconds of 0 means wait as long as it takes, which is what
             // you want at the loading end of a run that isn't ready yet.
             case CARGO_LOADED -> cargoCount() > 0
-                    || (entry.waitSeconds() > 0 && waitTicksRemaining <= 0);
+                    || (entry.waitSeconds() > 0 && timeUp);
             case CARGO_EMPTY -> cargoCount() == 0
-                    || (entry.waitSeconds() > 0 && waitTicksRemaining <= 0);
+                    || (entry.waitSeconds() > 0 && timeUp);
         };
         if (!ready) {
             if (++tickCounter % TELEMETRY_INTERVAL_TICKS == 0) sendTelemetry(serverLevel.getServer());
@@ -2241,7 +2256,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (planeId != null) tag.putUUID("planeId", planeId);
         tag.putString("state", state.name());
         tag.putInt("currentWaypointIndex", currentWaypointIndex);
-        // originAirportId, holdingEntryIndex, waitTicksRemaining and
+        // originAirportId, holdingEntryIndex, waitUntilGameTime and
         // simulatedPosition are intentionally NOT persisted - transient
         // stand-ins for real contraption movement, not worth preserving
         // across a restart. They re-initialize next time it starts moving.

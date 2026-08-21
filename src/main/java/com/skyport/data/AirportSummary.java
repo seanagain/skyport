@@ -12,7 +12,7 @@ import java.util.UUID;
  * built server-side from {@link AirportLayout} (see AirportRegistry),
  * sent to the client instead of the full layout since the autopilot GUI
  * never needs the actual runway/taxiway/holding-pattern geometry, only
- * "which airports exist" and "which gates does each one have".
+ * which airports exist and which gates and pads each one has.
  */
 public record AirportSummary(UUID id, String displayName, List<String> gateNames,
                              List<String> padNames, BlockPos position) {

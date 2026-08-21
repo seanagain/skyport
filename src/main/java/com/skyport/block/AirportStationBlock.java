@@ -18,9 +18,12 @@ import net.minecraft.world.phys.BlockHitResult;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Placed near a runway. Right-clicking it opens the map editor where the
- * player draws the runway, taxiways, gates, and holding pattern for that
- * airport (see AirportMapScreen - client-side GUI, not written yet).
+ * Placed near a runway. Right-clicking it opens the station screen, where
+ * the airport is named and its layout drawn (see AirportStationScreen and
+ * AirportMapScreen).
+ *
+ * Breaking one deletes its airport - see onRemove below, and note that this
+ * deliberately is not the block entity's setRemoved.
  */
 public class AirportStationBlock extends Block implements EntityBlock {
 

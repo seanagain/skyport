@@ -30,8 +30,8 @@ import java.util.List;
  * why this one class can safely reference both client and server code -
  * a dedicated server never actually executes the client-handler methods,
  * it just has them sitting unused on the classpath. If that ever trips
- * up a stricter build setup, split the two playToClient handlers out into
- * a class under com.skyport.client instead.
+ * up a stricter build setup, split the playToClient handlers out into a
+ * class under com.skyport.client instead.
  */
 @EventBusSubscriber(modid = Skyport.MOD_ID, bus = EventBusSubscriber.Bus.MOD)
 public class ModNetworking {

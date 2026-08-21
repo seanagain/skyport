@@ -24,11 +24,10 @@ import java.util.UUID;
  * Always stored on the Overworld (see {@link #get}) so it survives even if
  * an airport itself is in the Nether/End and that dimension isn't loaded.
  *
- * NB: SavedData's exact save/load signature has moved around between
- * Minecraft versions (HolderLookup.Provider was added fairly recently).
- * Double check this against the current net.minecraft.world.level.saveddata
- * package when you get to implementing this for real - treat this file as
- * "the shape of the idea", not a guaranteed-compiling final version.
+ * Also holds the live traffic picture and the clearances that keep aircraft
+ * out of each other's way. Those are transient - see each field for why -
+ * with the exception of parked aircraft, which must survive precisely
+ * because a parked aircraft stops ticking and cannot report itself.
  */
 public class AirportRegistry extends SavedData {
 

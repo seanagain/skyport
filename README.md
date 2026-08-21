@@ -5,29 +5,34 @@ holding pattern on a map at an **Airport Station** block, then set a
 destination on an **Autopilot** block and it flies there - gate to gate,
 no pilot required.
 
-## What's real right now (the prototype)
+## What it does
 
-This is now an actual, testable loop - not just a scaffold:
+Aircraft fly themselves, for real - this drives an assembled Create
+Aeronautics craft through Sable's physics, not an animation.
 
-- Place an **Airport Station**, right-click it, draw a runway/taxiway/
-  holding pattern/gate by clicking a plain map screen, hit Save. It's
-  registered world-wide (see `AirportRegistry`), not just in loaded chunks.
-- Place an **Autopilot** block, right-click it, pick that airport and gate
-  from a simple cycle-button picker, hit Engage.
-- The autopilot's flight state machine (`TAXI_OUT -> TAKEOFF_ROLL ->
-  CRUISE -> HOLDING -> APPROACH -> TAXI_IN -> IDLE`) actually runs,
-  advancing a **simulated position** waypoint to waypoint at a fixed
-  speed, and narrates itself to you in chat/action bar as it goes.
+- Place an **Airport Station**, name the airport, and draw its layout on a
+  terrain-accurate map: runway, taxiways, holding pattern, final leg, gates,
+  helipads and a hold-short line. It registers world-wide, so any autopilot
+  anywhere can fly to it.
+- Place an **Autopilot** on the craft, pointing along the fuselage. Name it,
+  pick Plane, Heli or Blimp, and build a schedule of stops - each with a
+  departure condition (a timer, a player boarding, or cargo being loaded or
+  unloaded) and an optional loop. Engage from the screen or with redstone.
+- Place an **ATC** block to see every airport and every aircraft on one
+  live map, with a traffic strip listing what each one is doing.
 
-That last part is the one deliberate shortcut: **nothing visibly moves in
-the world yet.** `AutopilotBlockEntity` tracks a phantom `Vec3` position
-and reports it, rather than actually moving a Create Aeronautics
-contraption - see the big comment on `applyMotionTowards` for exactly
-why (this scaffold was written without access to Create Aeronautics'
-contraption-movement API) and what to change once you're ready to move a
-real plane. Every other line around it - state transitions, waypoint
-sequencing, arrival detection - is the real logic that would drive real
-movement, not a stub.
+Aircraft taxi, hold short, take off, climb out on the runway heading, cruise,
+join a pattern or go straight in when the runway's clear, land, and taxi to
+their gate. Rotorcraft skip all of that and go up, across and down onto a
+pad. They keep out of each other's way: one aircraft on the runway at a
+time, one on the taxiway, one per helipad, and altitude separation in the
+air.
+
+## Setting an airport up
+
+The map is precise but abstract, so **hold an Airport Station** after opening
+one and the layout is traced in the world in front of you - that's how you
+build a runway where you drew one, or find the taxiway to tow an aircraft to.
 
 ## How to test it
 
@@ -49,18 +54,21 @@ movement, not a stub.
    - **Final** - 2 clicks: holding-pattern side first, then the runway's
      far end. This is the descent path.
    - **Gate** - one click per gate, auto-named Gate A, Gate B, ...
+   - **Hold Line** - one point on the taxiway where aircraft wait for the
+     runway.
+   - **Pad** - helipads for rotorcraft, which need no runway at all.
 
-   Points snap to an 8-block grid; the hovered world X/Z shows under the
-   map. Closing the screen saves - there's no way to lose a drawing by
-   pressing Escape.
+   Clicks land on the exact block under the cursor, so zoom in (scroll or
+   the -/+ buttons) for finer placement; the crosshair turns green when a
+   click will join an existing point. Closing the screen saves.
 5. Back on the station screen, the summary line shows what's actually
    registered (`Runway ok   Taxiway ok   Holding 0/3 ...`). Anything not
    "ok" doesn't have enough points to fly yet.
 6. Place an Autopilot block, right-click it, pick the airport and gate,
    hit Engage Autopilot.
-7. Watch chat - a message on every state change, plus an action-bar
-   position/state update once a second, through the whole state machine
-   down to "Arrived at gate".
+7. Watch it fly. Routine progress goes to the action bar and the ATC
+   screen; chat keeps arrivals and anything needing a decision. Per-second
+   telemetry is available but off by default - see the config.
 
 Engaging is refused if the plane is sitting on the ground away from any
 marked taxiway/runway/gate - it'll tell you to tow it onto one first.
@@ -72,51 +80,51 @@ altitude instead.
 - `AirportStationBlock` / `AirportStationBlockEntity` - the station
   block. Owns one `AirportLayout` and keeps it registered in the world's
   `AirportRegistry` so any Autopilot block can look it up from anywhere.
-- `AutopilotBlock` / `AutopilotBlockEntity` - the flight state machine
-  and the simulated-movement prototype described above.
-- `data/` - `Waypoint` (four types: runway/taxiway/holding-pattern/final
-  leg - the enum's javadoc is where each one's point-count and ordering
+- `AutopilotBlock` / `AutopilotBlockEntity` - the flight state machine and
+  the steering that flies the craft, via Sable's BlockEntitySubLevelActor.
+- `AtcBlock` / `AtcBlockEntity` - the tower overview.
+- `world/` - FlightChunkLoader (a loaded bubble that follows an aircraft)
+  and FleetWake (temporarily loading parked aircraft so stalled schedules
+  can resume).
+- `data/` - `Waypoint` (runway/taxiway/holding-pattern/final leg/hold line - the enum's javadoc is where each one's point-count and ordering
   rules are written down), `AirportLayout` (those waypoint lists, a named
   `gates` map, plus holding-pattern altitude and turn direction),
   `AirportSummary` (the lightweight version sent to the autopilot picker),
   `AirportRegistry` (world-level `SavedData`).
-- `network/` - all five payloads: `EngageAutopilotPayload` /
-  `DisengageAutopilotPayload` / `SaveAirportLayoutPayload` (C2S) and
-  `OpenAirportMapPayload` / `OpenAutopilotPayload` (S2C), registered in
-  `ModNetworking`.
+- `network/` - every C2S/S2C payload, registered in `ModNetworking`.
 - `client/gui/` - `AirportStationScreen` (name the airport, see what's
   registered, open the editor), `AirportMapScreen` (the editor: terrain-
-  sampled background, snap-to-grid click-to-place, per-mode drawing rules)
-  and `AutopilotScreen` (cycle-button destination picker).
-- `registry/ModCreativeTabs` - a Skyport creative tab so both blocks are
-  reachable in your inventory.
+  sampled background, per-mode drawing rules),
+  `AutopilotScreen` (the schedule editor) and `AtcScreen` (the tower map).
+- `registry/ModCreativeTabs` - a Skyport creative tab holding all three
+  blocks. They have crafting recipes too, built on Create's andesite alloy,
+  brass and electron tubes.
+- `client/LayoutProjector` - traces a layout in the world while you hold a
+  station.
 
-## Simplifications worth knowing about
+## Known limits
 
-Kept deliberately simple so the prototype was buildable in one pass -
-each of these is a reasonable next step, not an oversight:
+Each of these is a reasonable next step rather than an oversight:
 
-- **No real movement yet** - see above. This is the big one.
-- **Ground routing doesn't pathfind** - `TAXI_OUT`/`TAXI_IN` walk *every*
-  taxiway point in the order they were drawn (reversed when arriving),
-  rather than following the specific spur belonging to the target gate.
-  Fine with one or two gates; with more, planes will visit spurs that
-  aren't theirs. Wants a real graph search - see
-  `AutopilotBlockEntity#groundTaxiPath`.
-- **Terrain sampling is coarse and client-side** - real `MapColor` values
-  now, but sampled per 4px cell from the *client's* loaded chunks via the
-  heightmap, not from `MapItemSavedData`. Unloaded chunks stay blue-gray.
-  Waypoints are still placed at a fixed 4 blocks/pixel and the station's
-  own Y; only the holding pattern has a real altitude.
-- **"On the ground" is a heightmap guess** - `isOnGround` compares the
-  block's Y against the world surface, because there's no real contraption
-  flight state to read yet. Replace it when the movement API is wired up.
-- **No ATC/queueing** - only one plane's state is tracked per Autopilot
-  block; nothing stops two planes converging on the same runway. Holding
-  is a fixed one-lap wait, not a real clearance system.
-- **No placement restriction on the Autopilot block** - it doesn't yet
-  require being placed on an assembled contraption (see the TODO on
-  `AutopilotBlock`), so you can test the whole loop without a real plane.
+- **Ground routing pathfinds, but taxi order is per-airport, not per-gate.**
+  Dijkstra picks the route across the taxiway graph, so aircraft no longer
+  zigzag - but with several gates an aircraft may still pass spurs that
+  aren't its own. See `AutopilotBlockEntity#groundTaxiPath`.
+- **Terrain on the maps is client-side.** Sampled from whatever chunks the
+  client has loaded, and remembered afterwards (`TerrainMemory`), so a
+  corner of the world nobody has visited stays blank. That's honest, but it
+  isn't a survey map.
+- **"On the ground" is a heightmap guess.** `isOnGround` compares height
+  against the world surface rather than reading a real flight state.
+- **Waypoints have no altitude of their own** except the holding pattern.
+  Everything else is placed at the station's Y.
+- **No placement restriction on the Autopilot block** - it doesn't require
+  being on an assembled craft (see the TODO on `AutopilotBlock`), which is
+  convenient for testing a layout and wrong for a finished mod.
+- **Aircraft hold the world open while flying.** A moving bubble of forced
+  chunks is the blunt answer to unloaded-chunk freezing; Create's trains
+  solve it properly by tracking position as data. All of it is configurable,
+  including off - see `config/skyport-common.toml`.
 
 ## Setting up the dev environment
 
