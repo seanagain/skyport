@@ -524,9 +524,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         AirportLayout destination = AirportRegistry.get(serverLevel).byId(destinationId).orElse(null);
         if (destination == null) {
-            // Destination vanished (deleted station?) - park it rather than
-            // fly forever toward nothing.
-            disengage();
+            handleLostDestination(serverLevel);
             return;
         }
 
@@ -1434,6 +1432,84 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
     private static AirportRegistry registry(ServerLevel level) {
         return AirportRegistry.get(level);
+    }
+
+    /**
+     * What to do when the airport this aircraft was heading for no longer
+     * exists - someone broke its station block, possibly while the aircraft
+     * was halfway there.
+     *
+     * Simply disengaging, which is what this used to do, is the worst
+     * available answer: an aircraft in the cruise stops being controlled
+     * wherever it happens to be, which for a physics-driven craft means it
+     * drops out of the sky. Something has to be done with it instead.
+     *
+     * In order of preference: continue to the next stop that still exists;
+     * failing that, divert to the nearest airport that does; and only if the
+     * world contains no airports at all, give up - because at that point
+     * there is genuinely nowhere to go.
+     */
+    private void handleLostDestination(ServerLevel serverLevel) {
+        AirportRegistry registry = AirportRegistry.get(serverLevel);
+
+        // Drop every stop whose airport is gone - keeping them would just
+        // strand the aircraft again at the next leg.
+        schedule.entries().removeIf(entry -> registry.byId(entry.airportId()).isEmpty());
+
+        if (!schedule.entries().isEmpty()) {
+            scheduleIndex = 0;
+            ScheduleEntry next = schedule.entries().get(0);
+            message("Destination removed - continuing to " + next.gateName() + ".");
+            replanFrom(serverLevel);
+            return;
+        }
+
+        AirportLayout alternate = nearestAirport(registry);
+        if (alternate == null) {
+            // Nothing left anywhere. Say so plainly rather than silently
+            // going limp - this is the one case with no good outcome.
+            message("Destination removed and no other airport exists - autopilot off.");
+            disengage();
+            return;
+        }
+
+        String stop = firstStopAt(alternate);
+        schedule.entries().add(new ScheduleEntry(alternate.id(), stop,
+                ScheduleEntry.WaitCondition.TIMER, 10));
+        schedule.setLoop(false); // a diversion is a one-off, not a new route
+        scheduleIndex = 0;
+        message("Destination removed - diverting to " + alternate.displayName() + ".");
+        replanFrom(serverLevel);
+    }
+
+    /** Re-enter the route from wherever the aircraft currently is, rather than
+     *  from a gate it may be nowhere near. */
+    private void replanFrom(ServerLevel serverLevel) {
+        ServerPlayer player = controllingPlayerId == null ? null
+                : serverLevel.getServer().getPlayerList().getPlayer(controllingPlayerId);
+        engageCurrentLeg(serverLevel, BlockPos.containing(simulatedPosition), player);
+    }
+
+    @org.jetbrains.annotations.Nullable
+    private AirportLayout nearestAirport(AirportRegistry registry) {
+        AirportLayout best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (AirportLayout candidate : registry.all()) {
+            BlockPos at = AirportSummary.of(candidate).position();
+            double distance = horizontalDistance(at, BlockPos.containing(simulatedPosition));
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
+    /** A gate or pad to aim for at a diversion airport, whichever this craft
+     *  can actually use. */
+    private String firstStopAt(AirportLayout airport) {
+        var stops = craftType().isVertical() ? airport.helipads() : airport.gates();
+        return stops.isEmpty() ? "" : stops.keySet().iterator().next();
     }
 
     private CraftType craftType() {

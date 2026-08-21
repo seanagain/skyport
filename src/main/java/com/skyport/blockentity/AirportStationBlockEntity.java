@@ -38,6 +38,21 @@ public class AirportStationBlockEntity extends BlockEntity {
     }
 
     /** Called by the map screen's "Save Layout" S2C -> C2S round trip. */
+    /**
+     * Take this airport out of the world registry - the station block that
+     * defined it has been broken.
+     *
+     * Deliberately called from the block's onRemove rather than the block
+     * entity's setRemoved: setRemoved also fires when a chunk simply
+     * unloads, so hooking there would quietly delete every airport whose
+     * chunk went out of range.
+     */
+    public void unregister(ServerLevel serverLevel) {
+        if (airportId == null) return;
+        AirportRegistry.get(serverLevel).remove(airportId);
+        airportId = null;
+    }
+
     public void saveLayout(AirportLayout updated) {
         if (!(level instanceof ServerLevel serverLevel)) return;
         AirportRegistry.get(serverLevel).put(updated);
