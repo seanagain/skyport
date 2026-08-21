@@ -74,7 +74,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         IDLE, PUSHBACK, TAXI_OUT, TAKEOFF_ROLL, CLIMB, CRUISE, HOLDING, APPROACH, TAXI_IN, WAITING,
         /** Rotorcraft and airships: straight up from the pad, and straight
          *  down onto the one at the far end. */
-        VERTICAL_CLIMB, VERTICAL_DESCENT
+        VERTICAL_CLIMB, VERTICAL_DESCENT,
+        /** Rotorcraft equivalent of the holding pattern: stop and wait for
+         *  the pad to clear. */
+        HOVERING
     }
 
     /** How near a player counts as "boarded" for WaitCondition.PLAYER. */
@@ -159,6 +162,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** How far a helicopter tips its nose down to move forward in the cruise.
      *  A blimp gets its lift from buoyancy and stays level. */
     private static final double HELI_CRUISE_PITCH_DEGREES = 8.0;
+    /** How far to one side of a busy pad to wait. Off to the side rather
+     *  than overhead, so the aircraft leaving can climb straight out. */
+    private static final int HOVER_STANDOFF_BLOCKS = 24;
+    private static final int HOVER_RECHECK_INTERVAL_TICKS = 20;
     /** How many unsuccessful laps between "still waiting" reports. */
     private static final int HOLDING_REPORT_EVERY_LAPS = 2;
     /** How often to move the force-loaded bubble; every tick would churn. */
@@ -218,6 +225,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private transient boolean clearedPastHoldShort = false;
     /** Laps flown waiting for clearance, for the periodic status report. */
     private transient int holdingLaps = 0;
+    /** The pad this aircraft is parked on, so it can be released on takeoff. */
+    @org.jetbrains.annotations.Nullable
+    private transient UUID occupiedPadAirport;
+    @org.jetbrains.annotations.Nullable
+    private transient String occupiedPadName;
     /** Route for the current phase; see path(). */
     @org.jetbrains.annotations.Nullable
     private transient List<BlockPos> cachedPath;
@@ -404,6 +416,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
     public void disengage() {
         releaseApproach();
+        releasePad();
         releaseChunks();
         setState(FlightState.IDLE);
         controllingPlayerId = null;
@@ -629,8 +642,34 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // leaving a rooftop wants to clear whatever it's sitting between
             // before going anywhere.
             case VERTICAL_CLIMB -> {
+                // Clear of the pad now - free it for the next arrival.
+                releasePad();
                 climbVertically(cruiseAltitude());
                 if (simulatedPosition.y >= cruiseAltitude() - 2) setState(FlightState.CRUISE);
+            }
+            /*
+             * Waiting for a pad, holding station just off to one side of it.
+             *
+             * Offset rather than directly overhead on purpose: the aircraft
+             * on the pad has to be able to lift straight up to leave, and
+             * parking in that column is precisely where it would collide.
+             * A helicopter can simply stop and wait, which is the whole
+             * advantage it has over a plane in a holding pattern.
+             */
+            case HOVERING -> {
+                BlockPos pad = destinationPad(destination);
+                if (pad == null) {
+                    arrive();
+                } else {
+                    BlockPos standoff = new BlockPos(
+                            pad.getX() + HOVER_STANDOFF_BLOCKS, cruiseAltitude(), pad.getZ());
+                    applyMotionTowards(standoff);
+                    if (tickCounter % HOVER_RECHECK_INTERVAL_TICKS == 0
+                            && claimDestinationPad(serverLevel, destination)) {
+                        note("Pad clear - descending.");
+                        setState(FlightState.VERTICAL_DESCENT);
+                    }
+                }
             }
             // Straight down onto the pad, and parked once it's there.
             case VERTICAL_DESCENT -> {
@@ -652,7 +691,12 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                         BlockPos overhead = withY(pad, cruiseAltitude());
                         applyMotionTowards(overhead);
                         if (horizontalDistance(overhead, BlockPos.containing(simulatedPosition)) <= CRAFT_ARRIVAL_RADIUS) {
-                            setState(FlightState.VERTICAL_DESCENT);
+                            // Only start down if the pad is actually free.
+                            if (claimDestinationPad(serverLevel, destination)) {
+                                setState(FlightState.VERTICAL_DESCENT);
+                            } else {
+                                setState(FlightState.HOVERING);
+                            }
                         }
                     }
                     break;
@@ -839,6 +883,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             case PUSHBACK -> "Pushing back from the gate.";
             case VERTICAL_CLIMB -> "Lifting off.";
             case VERTICAL_DESCENT -> "Descending onto the pad.";
+            case HOVERING -> "Holding clear - pad occupied.";
             case TAKEOFF_ROLL -> "On the runway, taking off.";
             case CLIMB -> "Climbing to cruising altitude.";
             case CRUISE -> "Airborne, cruising toward destination.";
@@ -1140,9 +1185,20 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (flatLen < 1.0e-6) return new Vector3d(); // pointing straight up/down; nothing sane to yaw about
 
         // --- yaw: turn about the world vertical, always the short way round.
-        double noseYaw = Math.atan2(nose.x / flatLen, nose.z / flatLen);
-        double targetYaw = Math.atan2(target.x, target.z);
-        double yawError = Math.atan2(Math.sin(targetYaw - noseYaw), Math.cos(targetYaw - noseYaw));
+        //
+        // A straight-up or straight-down target has no heading to speak of,
+        // and atan2(0, 0) quietly answers "north" - so a descending helicopter
+        // was being told to swing its nose round to face north, and to bank
+        // into that turn, which is exactly the wobble you'd see on the way
+        // down. With no horizontal component there is nothing to aim at, so
+        // hold whatever heading the craft already has.
+        double targetFlat = Math.sqrt(target.x * target.x + target.z * target.z);
+        double yawError = 0;
+        if (targetFlat > 1.0e-4) {
+            double noseYaw = Math.atan2(nose.x / flatLen, nose.z / flatLen);
+            double targetYaw = Math.atan2(target.x, target.z);
+            yawError = Math.atan2(Math.sin(targetYaw - noseYaw), Math.cos(targetYaw - noseYaw));
+        }
 
         // --- pitch: about the craft's wing axis. Level on the ground.
         double nosePitch = Math.asin(Math.max(-1, Math.min(1, nose.y)));
@@ -1348,6 +1404,47 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
     private CraftType craftType() {
         return schedule.craftType();
+    }
+
+    /**
+     * Take the destination pad if it's free, remembering which one so it can
+     * be given back on departure.
+     *
+     * Held right through the landing and the gate wait, not just the descent:
+     * a parked helicopter is still occupying that pad, and the next one
+     * arriving needs to know.
+     */
+    private boolean claimDestinationPad(ServerLevel serverLevel, AirportLayout destination) {
+        String padName = destinationPadName(destination);
+        if (padName == null) return true; // nothing named to contend over
+        boolean granted = AirportRegistry.get(serverLevel)
+                .tryClaimPad(destination.id(), padName, planeId(), serverLevel.getGameTime());
+        if (granted) {
+            occupiedPadAirport = destination.id();
+            occupiedPadName = padName;
+        }
+        return granted;
+    }
+
+    /** Give back whichever pad this aircraft is sitting on - it's leaving. */
+    private void releasePad() {
+        if (occupiedPadName == null || occupiedPadAirport == null || planeId == null) return;
+        ServerLevel serverLevel = level instanceof ServerLevel direct ? direct
+                : (activeSubLevel != null && activeSubLevel.getLevel() instanceof ServerLevel parent ? parent : null);
+        if (serverLevel != null) {
+            AirportRegistry.get(serverLevel).releasePad(occupiedPadAirport, occupiedPadName, planeId);
+        }
+        occupiedPadAirport = null;
+        occupiedPadName = null;
+    }
+
+    /** The pad name this leg targets, if the destination actually has it. */
+    @org.jetbrains.annotations.Nullable
+    private String destinationPadName(AirportLayout destination) {
+        String name = destinationGateName();
+        if (name != null && destination.helipads().containsKey(name)) return name;
+        return destination.helipads().isEmpty() ? null
+                : destination.helipads().keySet().iterator().next();
     }
 
     /** The pad this leg is heading for. Falls back to the airport's only pad

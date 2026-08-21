@@ -123,6 +123,46 @@ public class AirportRegistry extends SavedData {
         trafficClearances.remove(airportId, planeId);
     }
 
+    /**
+     * Who is on each helipad, keyed by airport and pad name.
+     *
+     * Deliberately its own thing, sharing nothing with the runway and taxiway
+     * clearances. A helicopter landing on a pad doesn't stop a plane using
+     * the runway, and vice versa - they don't occupy the same ground - so
+     * folding pads into the airport-wide clearance would serialise aircraft
+     * that never actually conflict. One pad, one aircraft; nothing more.
+     */
+    private final transient Map<String, UUID> padClaims = new HashMap<>();
+
+    private static String padKey(UUID airportId, String padName) {
+        return airportId + "/" + padName;
+    }
+
+    /** Claim a pad to land on, or keep one already held. Refused if another
+     *  aircraft is parked there and still reporting. */
+    public boolean tryClaimPad(UUID airportId, String padName, UUID planeId, long now) {
+        String key = padKey(airportId, padName);
+        UUID holder = padClaims.get(key);
+        if (holder != null && !holder.equals(planeId)) {
+            Long seen = clearanceSeen.get(holder);
+            if (seen != null && now - seen <= CLEARANCE_TIMEOUT_TICKS) return false;
+        }
+        padClaims.put(key, planeId);
+        clearanceSeen.put(planeId, now);
+        return true;
+    }
+
+    /** Free a pad - on lifting off from it, or on disengaging. */
+    public void releasePad(UUID airportId, String padName, UUID planeId) {
+        padClaims.remove(padKey(airportId, padName), planeId);
+    }
+
+    /** Who is sitting on this pad, if anyone. */
+    @org.jetbrains.annotations.Nullable
+    public UUID padHolder(UUID airportId, String padName) {
+        return padClaims.get(padKey(airportId, padName));
+    }
+
     /** Who currently holds the runway here, if anyone - so a plane stuck in
      *  the pattern can say what it's waiting for instead of just circling. */
     @org.jetbrains.annotations.Nullable
