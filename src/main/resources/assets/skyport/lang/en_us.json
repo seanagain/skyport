@@ -16,14 +16,30 @@
 
   "gui.skyport.atc.title": "Air Traffic Control",
 
-  "ponder.skyport.airport_station.title": "Laying out an airport",
-  "ponder.skyport.autopilot.title": "Flying a schedule",
-  "ponder.skyport.atc.title": "Watching the traffic",
 
   "gui.skyport.autopilot.title": "Autopilot",
   "gui.skyport.autopilot.no_airports": "No airports registered yet",
   "gui.skyport.autopilot.engage": "Engage Autopilot",
   "gui.skyport.autopilot.disengage": "Disengage",
   "gui.skyport.autopilot.add_stop": "Add Stop",
-  "gui.skyport.autopilot.remove_stop": "Remove"
+  "gui.skyport.autopilot.remove_stop": "Remove",
+
+  "skyport.ponder.airport_station.header": "Laying out an airport",
+  "skyport.ponder.airport_station.text_1": "The Airport Station defines one airport. Name it, then draw its layout on a map of the surrounding terrain.",
+  "skyport.ponder.airport_station.text_2": "Draw the runway first - two points, gate end then far end. Everything else connects to it.",
+  "skyport.ponder.airport_station.text_3": "Taxiway clicks are read in PAIRS. Each pair is one segment: a backbone from the runway, then a spur out to each gate.",
+  "skyport.ponder.airport_station.text_4": "A Hold Line on the taxiway is where aircraft queue for the runway. Gates and Pads are where they park.",
+  "skyport.ponder.airport_station.text_5": "Hold this block to see the layout traced in the world, so you can build a runway where you drew one.",
+
+  "skyport.ponder.autopilot.header": "Flying a schedule",
+  "skyport.ponder.autopilot.text_1": "The Autopilot flies one aircraft. Place it on the craft with the arrow on top pointing along the fuselage.",
+  "skyport.ponder.autopilot.text_2": "That arrow is how it knows which way the nose faces - a craft is just a pile of blocks otherwise.",
+  "skyport.ponder.autopilot.text_3": "Build a schedule of stops, like a train's. Each stop waits for a timer, a player, or cargo to be loaded or unloaded.",
+  "skyport.ponder.autopilot.text_4": "Choose Plane, Heli or Blimp. Planes need a runway; the other two lift straight off a pad.",
+  "skyport.ponder.autopilot.text_5": "Engage from the screen, or with a redstone signal - powered flies the saved schedule, unpowered stops it.",
+
+  "skyport.ponder.atc.header": "Watching the traffic",
+  "skyport.ponder.atc.text_1": "Air Traffic Control shows every airport and every aircraft under autopilot on one live map.",
+  "skyport.ponder.atc.text_2": "Drag to pan, scroll to zoom. The strip on the right lists each aircraft and what it is doing right now.",
+  "skyport.ponder.atc.text_3": "Opening it also wakes aircraft parked at airports nobody is visiting, so their schedules pick up again."
 }

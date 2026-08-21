@@ -49,7 +49,10 @@ public class SkyportPonder implements PonderPlugin {
         scene.title("airport_station", "Laying out an airport");
         scene.configureBasePlate(0, 0, 5);
         scene.showBasePlate();
-        scene.idle(10);
+        // showBasePlate only reveals the ground layer - without this the
+        // block being explained never appears.
+        scene.world().showSection(util.select().layersFrom(1), net.minecraft.core.Direction.DOWN);
+        scene.idle(20);
 
         scene.overlay().showText(90)
                 .text("The Airport Station defines one airport. Name it, then draw its "
@@ -86,7 +89,10 @@ public class SkyportPonder implements PonderPlugin {
         scene.title("autopilot", "Flying a schedule");
         scene.configureBasePlate(0, 0, 5);
         scene.showBasePlate();
-        scene.idle(10);
+        // showBasePlate only reveals the ground layer - without this the
+        // block being explained never appears.
+        scene.world().showSection(util.select().layersFrom(1), net.minecraft.core.Direction.DOWN);
+        scene.idle(20);
 
         scene.overlay().showText(90)
                 .text("The Autopilot flies one aircraft. Place it on the craft with "
@@ -123,7 +129,10 @@ public class SkyportPonder implements PonderPlugin {
         scene.title("atc", "Watching the traffic");
         scene.configureBasePlate(0, 0, 5);
         scene.showBasePlate();
-        scene.idle(10);
+        // showBasePlate only reveals the ground layer - without this the
+        // block being explained never appears.
+        scene.world().showSection(util.select().layersFrom(1), net.minecraft.core.Direction.DOWN);
+        scene.idle(20);
 
         scene.overlay().showText(90)
                 .text("Air Traffic Control shows every airport and every aircraft "
