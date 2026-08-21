@@ -418,6 +418,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         releaseApproach();
         releasePad();
         releaseChunks();
+        // Drop out of the parked list too. That list is persisted, and an
+        // aircraft with no schedule left to fly would otherwise be woken by
+        // every ATC visit for the rest of the world's life.
+        forgetParked();
         setState(FlightState.IDLE);
         controllingPlayerId = null;
         originAirportId = null;
@@ -492,6 +496,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // which is how everything else in Minecraft behaves. It resumes
             // when someone comes near, and re-acquires its bubble the moment
             // it starts moving again.
+            // Write down where we are before going to sleep, so the ATC
+            // block can find and wake us with these chunks unloaded.
+            registry(serverLevel).reportParked(planeId(),
+                    serverLevel.dimension().location().toString(),
+                    BlockPos.containing(simulatedPosition));
             releaseChunks();
             tickWaiting(serverLevel);
             return;
@@ -761,6 +770,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // Publish our position for other planes' separation checks, and work
         // out whether we're the one that has to give way.
         AirportRegistry registry = AirportRegistry.get(serverLevel);
+        // Moving again - drop out of the parked list the ATC wake uses.
+        registry.clearParked(planeId());
         // Keep any clearance we hold alive. Going quiet is what lets another
         // plane reclaim it, so a flight that ends abruptly can't lock a field.
         registry.heartbeat(planeId(), serverLevel.getGameTime());
@@ -1402,6 +1413,19 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 .orElse(gate);
     }
 
+    /** Remove this aircraft from the persisted parked list, wherever we can
+     *  reach a real level from. */
+    private void forgetParked() {
+        if (planeId == null) return;
+        ServerLevel serverLevel = level instanceof ServerLevel direct ? direct
+                : (activeSubLevel != null && activeSubLevel.getLevel() instanceof ServerLevel parent ? parent : null);
+        if (serverLevel != null) AirportRegistry.get(serverLevel).clearParked(planeId);
+    }
+
+    private static AirportRegistry registry(ServerLevel level) {
+        return AirportRegistry.get(level);
+    }
+
     private CraftType craftType() {
         return schedule.craftType();
     }
@@ -1532,6 +1556,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     public void setRemoved() {
         super.setRemoved();
         releaseChunks();
+        forgetParked();
         // Hand back any clearance too. Breaking an autopilot mid-flight used
         // to leave its airport locked with no plane left to release it, so
         // everyone else circled a field that was actually empty. The lease

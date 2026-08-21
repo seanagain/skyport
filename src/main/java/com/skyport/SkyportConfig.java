@@ -36,6 +36,14 @@ public final class SkyportConfig {
                      "default; higher only helps at very high cruise speeds.")
             .defineInRange("performance.chunkRadius", 2, 0, 4);
 
+    public static final ModConfigSpec.IntValue FLEET_WAKE_MINUTES = BUILDER
+            .comment("How long opening the ATC block keeps parked aircraft loaded, in minutes.",
+                     "Parked aircraft release their chunks and stop ticking, so their gate",
+                     "waits stall until something wakes them. This is that something: long",
+                     "enough for a schedule to get moving, and it lapses on its own once",
+                     "airborne aircraft are holding their own chunks. 0 disables waking.")
+            .defineInRange("performance.fleetWakeMinutes", 5, 0, 30);
+
     public static final ModConfigSpec.IntValue TERRAIN_MEMORY_LIMIT = BUILDER
             .comment("How many terrain samples the ATC map remembers (client-side).",
                      "Each is a few bytes; this caps how far the remembered map can grow",
@@ -53,6 +61,7 @@ public final class SkyportConfig {
     public static boolean telemetry = false;
     public static int chunkRadius = 2;
     public static int terrainMemoryLimit = 200_000;
+    public static int fleetWakeMinutes = 5;
 
     public static void refresh() {
         chatMessages = CHAT_MESSAGES.get();
@@ -60,5 +69,6 @@ public final class SkyportConfig {
         telemetry = TELEMETRY.get();
         chunkRadius = CHUNK_RADIUS.get();
         terrainMemoryLimit = TERRAIN_MEMORY_LIMIT.get();
+        fleetWakeMinutes = FLEET_WAKE_MINUTES.get();
     }
 }

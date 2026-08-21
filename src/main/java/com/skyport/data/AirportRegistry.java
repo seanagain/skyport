@@ -1,6 +1,7 @@
 package com.skyport.data;
 
 import com.skyport.Skyport;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -209,6 +210,36 @@ public class AirportRegistry extends SavedData {
     }
 
     /**
+     * Where aircraft are parked with a schedule still to fly.
+     *
+     * Unlike everything else in this class's runtime state, this IS persisted
+     * - and it has to be. A parked aircraft releases its chunks, so its block
+     * entity stops ticking entirely, so it cannot report itself, wake itself,
+     * or be found by anything that only looks at loaded chunks. Without a
+     * written-down list, a fleet parked at airports nobody is standing in
+     * would be invisible and unreachable until a player walked there.
+     */
+    private final Map<UUID, ParkedAircraft> parked = new HashMap<>();
+
+    /** A parked aircraft: enough to find it again with the world unloaded. */
+    public record ParkedAircraft(UUID planeId, String dimension, BlockPos position) { }
+
+    public void reportParked(UUID planeId, String dimension, BlockPos position) {
+        ParkedAircraft existing = parked.get(planeId);
+        if (existing != null && existing.position().equals(position)) return;
+        parked.put(planeId, new ParkedAircraft(planeId, dimension, position));
+        setDirty();
+    }
+
+    public void clearParked(UUID planeId) {
+        if (parked.remove(planeId) != null) setDirty();
+    }
+
+    public Collection<ParkedAircraft> parked() {
+        return parked.values();
+    }
+
+    /**
      * Where every airborne plane currently is, for separation checks.
      *
      * Transient for the same reason as the clearances: a stale position from
@@ -235,6 +266,18 @@ public class AirportRegistry extends SavedData {
             list.add(layout.save());
         }
         tag.put("airports", list);
+
+        ListTag parkedList = new ListTag();
+        for (ParkedAircraft aircraft : parked.values()) {
+            CompoundTag entry = new CompoundTag();
+            entry.putUUID("planeId", aircraft.planeId());
+            entry.putString("dimension", aircraft.dimension());
+            entry.putInt("x", aircraft.position().getX());
+            entry.putInt("y", aircraft.position().getY());
+            entry.putInt("z", aircraft.position().getZ());
+            parkedList.add(entry);
+        }
+        tag.put("parked", parkedList);
         return tag;
     }
 
@@ -244,6 +287,14 @@ public class AirportRegistry extends SavedData {
         for (int i = 0; i < list.size(); i++) {
             AirportLayout layout = AirportLayout.load(list.getCompound(i));
             registry.airports.put(layout.id(), layout);
+        }
+
+        ListTag parkedList = tag.getList("parked", 10);
+        for (int i = 0; i < parkedList.size(); i++) {
+            CompoundTag entry = parkedList.getCompound(i);
+            UUID id = entry.getUUID("planeId");
+            registry.parked.put(id, new ParkedAircraft(id, entry.getString("dimension"),
+                    new BlockPos(entry.getInt("x"), entry.getInt("y"), entry.getInt("z"))));
         }
         return registry;
     }
