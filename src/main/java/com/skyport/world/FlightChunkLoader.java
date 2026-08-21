@@ -57,8 +57,19 @@ public final class FlightChunkLoader {
      * @param held the chunks currently forced for this plane; updated in place
      */
     public static void follow(ServerLevel level, UUID planeId, ChunkPos centre, Set<ChunkPos> held) {
+        follow(level, planeId, centre, held, SkyportConfig.chunkRadius);
+    }
+
+    /** As above, with an explicit radius - a parked aircraft needs far less
+     *  than a flying one. */
+    public static void follow(ServerLevel level, UUID planeId, ChunkPos centre, Set<ChunkPos> held, int radius) {
+        // Master switch: a server may prefer to handle loading itself, or to
+        // accept aircraft freezing when unobserved.
+        if (!SkyportConfig.chunkLoading) {
+            releaseAll(level, planeId, held);
+            return;
+        }
         Set<ChunkPos> wanted = new HashSet<>();
-        int radius = SkyportConfig.chunkRadius;
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 wanted.add(new ChunkPos(centre.x + dx, centre.z + dz));

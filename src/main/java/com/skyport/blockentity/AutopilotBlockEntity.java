@@ -496,12 +496,22 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // which is how everything else in Minecraft behaves. It resumes
             // when someone comes near, and re-acquires its bubble the moment
             // it starts moving again.
-            // Write down where we are before going to sleep, so the ATC
-            // block can find and wake us with these chunks unloaded.
+            // Write down where we are, so the ATC block can find and wake us
+            // even with these chunks unloaded.
             registry(serverLevel).reportParked(planeId(),
                     serverLevel.dimension().location().toString(),
                     BlockPos.containing(simulatedPosition));
-            releaseChunks();
+
+            if (SkyportConfig.keepParkedLoaded) {
+                // Server has opted into schedules that run unattended: hold a
+                // small area rather than sleeping, so the gate wait keeps
+                // counting down with nobody around.
+                FlightChunkLoader.follow(serverLevel, planeId(),
+                        new ChunkPos(BlockPos.containing(simulatedPosition)), heldChunks,
+                        SkyportConfig.parkedChunkRadius);
+            } else {
+                releaseChunks();
+            }
             tickWaiting(serverLevel);
             return;
         }

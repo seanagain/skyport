@@ -36,7 +36,7 @@ public class AtcBlockEntity extends BlockEntity {
         // standing have released their chunks and stopped ticking, so their
         // schedules are stalled; checking on them is exactly the moment you'd
         // want them running. See FleetWake - it lapses on its own.
-        int woken = FleetWake.wakeAll(serverLevel.getServer());
+        int woken = SkyportConfig.wakeOnAtcOpen ? FleetWake.wakeAll(serverLevel.getServer()) : 0;
         if (woken > 0 && SkyportConfig.chatMessages) {
             player.sendSystemMessage(Component.literal("[Skyport] Woke " + woken
                     + " parked aircraft for " + SkyportConfig.fleetWakeMinutes + " minutes."));

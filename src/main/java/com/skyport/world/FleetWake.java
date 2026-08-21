@@ -39,8 +39,12 @@ import java.util.UUID;
  * runs out simply goes back to sleep.
  *
  * The cost is bounded and deliberate: it only happens when a player asks
- * for it, it covers one chunk per aircraft rather than a flying bubble, and
- * it expires on its own rather than needing anyone to turn it off.
+ * for it, it covers a parked aircraft's own chunk (or a small radius, see
+ * SkyportConfig) rather than a flying bubble, and it expires on its own
+ * rather than needing anyone to turn it off.
+ *
+ * A server that would rather aircraft never sleep can set keepParkedLoaded
+ * instead, and skip this entirely.
  */
 @EventBusSubscriber(modid = Skyport.MOD_ID)
 public final class FleetWake {
@@ -81,9 +85,15 @@ public final class FleetWake {
             ServerLevel level = levelFor(server, aircraft.dimension());
             if (level == null) continue;
 
-            ChunkPos chunk = new ChunkPos(aircraft.position());
-            CONTROLLER.forceChunk(level, aircraft.planeId(), chunk.x, chunk.z, true, true);
-            ACTIVE.add(new Waking(level.dimension(), chunk, aircraft.planeId(), expiry));
+            ChunkPos centre = new ChunkPos(aircraft.position());
+            int radius = SkyportConfig.parkedChunkRadius;
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    ChunkPos chunk = new ChunkPos(centre.x + dx, centre.z + dz);
+                    CONTROLLER.forceChunk(level, aircraft.planeId(), chunk.x, chunk.z, true, true);
+                    ACTIVE.add(new Waking(level.dimension(), chunk, aircraft.planeId(), expiry));
+                }
+            }
             woken++;
         }
         return woken;
