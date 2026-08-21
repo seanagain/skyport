@@ -5,7 +5,10 @@ import com.skyport.registry.ModBlockEntities;
 import com.skyport.registry.ModBlocks;
 import com.skyport.registry.ModCreativeTabs;
 import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.config.ModConfig;
+import net.neoforged.fml.event.config.ModConfigEvent;
 
 /**
  * Mod entry point. NeoForge finds this class because its package matches
@@ -25,10 +28,21 @@ public class Skyport {
     // NeoForge injects whichever of these constructor parameters you ask
     // for, in any order - IEventBus, ModContainer, FMLModContainer, Dist.
     // We only need the event bus to wire up our registries.
-    public Skyport(IEventBus modEventBus) {
+    public Skyport(IEventBus modEventBus, ModContainer modContainer) {
         ModBlocks.register(modEventBus);
         ModBlockEntities.REGISTER.register(modEventBus);
         ModCreativeTabs.register(modEventBus);
+
+        modContainer.registerConfig(ModConfig.Type.COMMON, SkyportConfig.SPEC);
+        // Cache the values whenever the file loads or is edited in game, so
+        // the flight code can read plain fields rather than going through the
+        // config machinery on every message and every tick.
+        modEventBus.addListener((ModConfigEvent.Loading event) -> {
+            if (event.getConfig().getSpec() == SkyportConfig.SPEC) SkyportConfig.refresh();
+        });
+        modEventBus.addListener((ModConfigEvent.Reloading event) -> {
+            if (event.getConfig().getSpec() == SkyportConfig.SPEC) SkyportConfig.refresh();
+        });
 
         // ModNetworking listens for RegisterPayloadHandlersEvent itself
         // (see @EventBusSubscriber on that class) so nothing to call here -

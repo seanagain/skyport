@@ -1,6 +1,7 @@
 package com.skyport.world;
 
 import com.skyport.Skyport;
+import com.skyport.SkyportConfig;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
@@ -26,17 +27,17 @@ import java.util.UUID;
  *
  * The cost is real: every plane in the air holds a patch of world loaded,
  * which is exactly the server load this addon set out to avoid. It's kept
- * as small as it can be - a radius around the plane, only while a flight is
- * actually engaged, released the moment it lands or disengages - and the
- * tickets are non-ticking where possible so entities elsewhere in those
- * chunks don't start running too.
+ * as small as it can be: a configurable radius around the plane (see
+ * SkyportConfig), only while a flight is actually engaged, and released the
+ * moment it lands or disengages. The tickets ARE ticking ones, because the
+ * autopilot block entity has to keep running to fly the aircraft - which
+ * also means everything else in those chunks ticks, and is why the radius is
+ * worth keeping small.
  */
 @EventBusSubscriber(modid = Skyport.MOD_ID, bus = EventBusSubscriber.Bus.MOD)
 public final class FlightChunkLoader {
 
-    /** Chunks either side of the plane to keep loaded. 2 gives a 5x5 block
-     *  of chunks - enough for the craft plus somewhere to arrive. */
-    private static final int RADIUS_CHUNKS = 2;
+
 
     public static final TicketController CONTROLLER =
             new TicketController(ResourceLocation.fromNamespaceAndPath(Skyport.MOD_ID, "flight"));
@@ -57,8 +58,9 @@ public final class FlightChunkLoader {
      */
     public static void follow(ServerLevel level, UUID planeId, ChunkPos centre, Set<ChunkPos> held) {
         Set<ChunkPos> wanted = new HashSet<>();
-        for (int dx = -RADIUS_CHUNKS; dx <= RADIUS_CHUNKS; dx++) {
-            for (int dz = -RADIUS_CHUNKS; dz <= RADIUS_CHUNKS; dz++) {
+        int radius = SkyportConfig.chunkRadius;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
                 wanted.add(new ChunkPos(centre.x + dx, centre.z + dz));
             }
         }

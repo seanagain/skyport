@@ -1,13 +1,13 @@
 package com.skyport.client;
 
+import com.skyport.SkyportConfig;
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.material.MapColor;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Remembers terrain colours the client has seen, so a map can still draw
@@ -28,12 +28,21 @@ public final class TerrainMemory {
 
     /** World blocks per remembered sample. */
     private static final int GRID = 4;
-    /** Enough for a very large area at this grid; old entries are dropped
-     *  wholesale rather than tracked individually, which is cruder than an
-     *  LRU but costs nothing to maintain. */
-    private static final int MAX_ENTRIES = 400_000;
 
-    private static final Map<Long, Integer> REMEMBERED = new HashMap<>();
+    /**
+     * Primitive long -> int rather than HashMap&lt;Long, Integer&gt;.
+     *
+     * The boxed version costs roughly 60 bytes per entry once the Long, the
+     * Integer and the map node are counted - tens of megabytes at the sizes
+     * this can reach on a long session. fastutil ships with Minecraft and
+     * stores the same data in flat arrays, an order of magnitude smaller,
+     * for a map that is written constantly and never iterated.
+     */
+    private static final Long2IntOpenHashMap REMEMBERED = new Long2IntOpenHashMap();
+
+    static {
+        REMEMBERED.defaultReturnValue(0);
+    }
     /** The world these colours came from, so they can be dropped on leaving
      *  it - coordinates from one save mean nothing in the next. */
     @Nullable
@@ -64,20 +73,28 @@ public final class TerrainMemory {
     public static int colorAt(@Nullable Level level, int x, int z) {
         forgetIfWorldChanged(level);
         long k = key(x, z);
-        if (level != null && level.hasChunkAt(new BlockPos(x, 0, z))) {
+        // hasChunk(chunkX, chunkZ) rather than hasChunkAt(BlockPos): this runs
+        // thousands of times per map refresh and the BlockPos was pure garbage.
+        if (level != null && level.hasChunk(x >> 4, z >> 4)) {
             int color = sample(level, x, z);
             if (color != 0) {
-                if (REMEMBERED.size() >= MAX_ENTRIES) REMEMBERED.clear();
+                int limit = SkyportConfig.terrainMemoryLimit;
+                if (limit <= 0) return color; // remembering disabled
+                if (REMEMBERED.size() >= limit) REMEMBERED.clear();
                 REMEMBERED.put(k, color);
                 return color;
             }
         }
-        return REMEMBERED.getOrDefault(k, 0);
+        return REMEMBERED.get(k);
     }
+
+    /** Reused across samples - client-side and single-threaded, so one
+     *  mutable position beats allocating thousands. */
+    private static final BlockPos.MutableBlockPos SCRATCH = new BlockPos.MutableBlockPos();
 
     private static int sample(Level level, int x, int z) {
         int surfaceY = level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
-        BlockPos surface = new BlockPos(x, surfaceY - 1, z);
+        BlockPos.MutableBlockPos surface = SCRATCH.set(x, surfaceY - 1, z);
         MapColor mapColor = level.getBlockState(surface).getMapColor(level, surface);
         if (mapColor == MapColor.NONE) return 0;
 

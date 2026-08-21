@@ -1,5 +1,6 @@
 package com.skyport.blockentity;
 
+import com.skyport.SkyportConfig;
 import com.skyport.data.AirportLayout;
 import com.skyport.data.AirportRegistry;
 import com.skyport.data.AirportSummary;
@@ -208,6 +209,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private transient boolean clearedPastHoldShort = false;
     /** Laps flown waiting for clearance, for the periodic status report. */
     private transient int holdingLaps = 0;
+    /** Route for the current phase; see path(). */
+    @org.jetbrains.annotations.Nullable
+    private transient List<BlockPos> cachedPath;
 
     private FlightState state = FlightState.IDLE;
     private int currentWaypointIndex = 0;
@@ -519,14 +523,19 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                     }
                 } else if (!clearedPastHoldShort) {
                     // Roll up to the line first...
-                    List<BlockPos> toHold = new ArrayList<>();
-                    if (joinPoint != null) toHold.add(joinPoint);
-                    toHold.add(holdShort);
-                    followWaypoints(toHold, () -> {
+                    final BlockPos holdTarget = holdShort;
+                    followWaypoints(path(() -> {
+                        List<BlockPos> toHold = new ArrayList<>();
+                        if (joinPoint != null) toHold.add(joinPoint);
+                        toHold.add(holdTarget);
+                        return toHold;
+                    }), () -> {
                         // ...and only ask for the runway once we're sitting on it.
                         if (claimTraffic(serverLevel, origin)) {
                             clearedPastHoldShort = true;
                             currentWaypointIndex = 0;
+                            // The route past the line is a different one.
+                            invalidatePath();
                             // Off the taxiway and onto the runway - the next
                             // aircraft can start taxiing out behind us.
                             releaseTaxiway(serverLevel, origin);
@@ -538,10 +547,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                     break;
                 }
 
-                List<BlockPos> path = new ArrayList<>();
-                if (joinPoint != null && !clearedPastHoldShort) path.add(joinPoint);
-                if (origin != null) path.addAll(groundTaxiPath(origin, false));
-                followWaypoints(path, () -> setState(FlightState.TAKEOFF_ROLL));
+                final AirportLayout departureAirport = origin;
+                followWaypoints(path(() -> {
+                    List<BlockPos> out = new ArrayList<>();
+                    if (joinPoint != null && !clearedPastHoldShort) out.add(joinPoint);
+                    if (departureAirport != null) out.addAll(groundTaxiPath(departureAirport, false));
+                    return out;
+                }), () -> setState(FlightState.TAKEOFF_ROLL));
             }
             // Accelerate along the runway centreline, reaching rotation speed
             // by the halfway point, then pitch up and fly.
@@ -603,7 +615,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // entered from, in the layout's configured direction, then
             // cleared to land - no real ATC/queueing yet (see DESIGN.md).
             // Circle until the runway frees up, re-asking each lap.
-            case HOLDING -> followWaypoints(holdingLap(destination), () -> {
+            case HOLDING -> followWaypoints(path(() -> holdingLap(destination)), () -> {
                 if (claimArrival(serverLevel, destination)) {
                     setState(FlightState.APPROACH);
                 } else {
@@ -619,7 +631,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             });
             // Final leg (holding pattern -> runway far end, descending), then
             // roll down the runway to the gate end, ready to taxi in.
-            case APPROACH -> followWaypoints(approachPath(destination), () -> setState(FlightState.TAXI_IN));
+            case APPROACH -> followWaypoints(path(() -> approachPath(destination)), () -> setState(FlightState.TAXI_IN));
             // Once back past the hold point the plane is clear of the runway,
             // so release then rather than at the gate - that's the whole
             // reason the hold point exists. Without one, hold the clearance
@@ -633,7 +645,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                     releaseApproach();
                     note("Runway vacated.");
                 }
-                followWaypoints(groundTaxiPath(destination, true), this::arrive);
+                followWaypoints(path(() -> groundTaxiPath(destination, true)), this::arrive);
             }
             default -> { }
         }
@@ -746,6 +758,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private void setState(FlightState newState) {
         this.state = newState;
         this.currentWaypointIndex = 0;
+        invalidatePath();
         // Each ground phase starts on the near side of the hold point again:
         // taxiing out hasn't been cleared onto the runway yet, and taxiing in
         // hasn't yet crossed back off it.
@@ -768,6 +781,28 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             case TAXI_IN -> "Landed, taxiing to gate.";
             default -> null;
         });
+    }
+
+    /**
+     * The route for the current phase, worked out once instead of every tick.
+     *
+     * These paths don't change while a phase runs, but they were being
+     * rebuilt on every single tick - and for taxiing that meant a full
+     * Dijkstra over the ground network, with its maps and priority queue,
+     * sixty times a second per aircraft. All of it immediately discarded.
+     * Computing on entry and reusing turns the busiest allocation in the mod
+     * into nothing.
+     *
+     * Invalidated by {@link #setState} and anywhere the route genuinely
+     * changes mid-phase (crossing the hold line, for instance).
+     */
+    private List<BlockPos> path(java.util.function.Supplier<List<BlockPos>> compute) {
+        if (cachedPath == null) cachedPath = compute.get();
+        return cachedPath;
+    }
+
+    private void invalidatePath() {
+        cachedPath = null;
     }
 
     /** Walks `targets` in order, one at a time, calling onFinished once the last is reached. */
@@ -1747,6 +1782,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     }
 
     private void sendTelemetry(MinecraftServer server) {
+        if (!SkyportConfig.telemetry) return;
         if (controllingPlayerId == null || simulatedPosition == null) return;
         ServerPlayer player = server.getPlayerList().getPlayer(controllingPlayerId);
         if (player == null) return;
@@ -1772,6 +1808,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** Progress update - action bar rather than chat, so a fleet of planes
      *  doesn't bury everything else the player is reading. */
     private void note(@org.jetbrains.annotations.Nullable String text) {
+        if (!SkyportConfig.actionBarMessages) return;
         if (text == null || level == null || level.isClientSide || controllingPlayerId == null) return;
         ServerPlayer player = ((ServerLevel) level).getServer().getPlayerList().getPlayer(controllingPlayerId);
         if (player == null) return;
@@ -1779,6 +1816,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     }
 
     private void message(@org.jetbrains.annotations.Nullable ServerPlayer player, @org.jetbrains.annotations.Nullable String text) {
+        if (!SkyportConfig.chatMessages) return;
         if (player == null || text == null) return;
         player.sendSystemMessage(Component.literal("[" + callsign() + "] " + text));
     }
