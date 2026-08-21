@@ -37,7 +37,12 @@ public class AirportStationBlockEntity extends BlockEntity {
         PacketDistributor.sendToPlayer(player, new OpenAirportMapPayload(getBlockPos(), layout));
     }
 
-    /** Called by the map screen's "Save Layout" S2C -> C2S round trip. */
+    /** Which airport this station owns, if its layout has been saved. */
+    @org.jetbrains.annotations.Nullable
+    public UUID airportId() {
+        return airportId;
+    }
+
     /**
      * Take this airport out of the world registry - the station block that
      * defined it has been broken.

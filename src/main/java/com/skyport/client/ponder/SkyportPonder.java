@@ -47,7 +47,7 @@ public class SkyportPonder implements PonderPlugin {
 
     private static void airportStation(SceneBuilder scene, SceneBuildingUtil util) {
         scene.title("airport_station", "Laying out an airport");
-        scene.configureBasePlate(0, 0, 5);
+        scene.configureBasePlate(0, 0, 9);
         scene.showBasePlate();
         // showBasePlate only reveals the ground layer - without this the
         // block being explained never appears.
@@ -87,7 +87,7 @@ public class SkyportPonder implements PonderPlugin {
 
     private static void autopilot(SceneBuilder scene, SceneBuildingUtil util) {
         scene.title("autopilot", "Flying a schedule");
-        scene.configureBasePlate(0, 0, 5);
+        scene.configureBasePlate(0, 0, 9);
         scene.showBasePlate();
         // showBasePlate only reveals the ground layer - without this the
         // block being explained never appears.
@@ -127,7 +127,7 @@ public class SkyportPonder implements PonderPlugin {
 
     private static void atc(SceneBuilder scene, SceneBuildingUtil util) {
         scene.title("atc", "Watching the traffic");
-        scene.configureBasePlate(0, 0, 5);
+        scene.configureBasePlate(0, 0, 9);
         scene.showBasePlate();
         // showBasePlate only reveals the ground layer - without this the
         // block being explained never appears.
