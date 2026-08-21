@@ -16,6 +16,10 @@
 
   "gui.skyport.atc.title": "Air Traffic Control",
 
+  "ponder.skyport.airport_station.title": "Laying out an airport",
+  "ponder.skyport.autopilot.title": "Flying a schedule",
+  "ponder.skyport.atc.title": "Watching the traffic",
+
   "gui.skyport.autopilot.title": "Autopilot",
   "gui.skyport.autopilot.no_airports": "No airports registered yet",
   "gui.skyport.autopilot.engage": "Engage Autopilot",

@@ -1,13 +1,15 @@
 modLoader = "javafml"
 loaderVersion = "${loader_version_range}"
 license = "${mod_license}"
-issueTrackerURL = ""
+issueTrackerURL = "https://github.com/seanagain/skyport/issues"
 
 [[mods]]
 modId = "${mod_id}"
 version = "${mod_version}"
 displayName = "${mod_name}"
 authors = "${mod_authors}"
+logoFile = "skyport_logo.png"
+displayURL = "https://github.com/seanagain/skyport"
 description = '''${mod_description}'''
 
 [[dependencies.${mod_id}]]
