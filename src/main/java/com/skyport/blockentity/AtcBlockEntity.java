@@ -28,9 +28,35 @@ public class AtcBlockEntity extends BlockEntity {
         super(ModBlockEntities.ATC.get(), pos, state);
     }
 
+    /**
+     * Forget airports whose station block is no longer there.
+     *
+     * Breaking a station unregisters its airport, but that only covers
+     * removals that go through the block's own callbacks. WorldEdit and
+     * friends write blocks straight into the world, so a station can vanish
+     * without the mod ever hearing about it - and the airport would linger
+     * on the map and in every destination list forever. The tower is the
+     * natural place to notice.
+     *
+     * Only checks stations in loaded chunks: an airport whose chunk is simply
+     * out of range is perfectly real, and deleting it would be the same
+     * mistake as hooking chunk unload.
+     */
+    public static void pruneGhostAirports(ServerLevel serverLevel, AirportRegistry registry) {
+        for (AirportLayout airport : List.copyOf(registry.all())) {
+            BlockPos station = airport.stationPos();
+            if (station.equals(BlockPos.ZERO)) continue; // predates position stamping
+            if (!serverLevel.isLoaded(station)) continue;
+            if (!(serverLevel.getBlockEntity(station) instanceof AirportStationBlockEntity)) {
+                registry.remove(airport.id());
+            }
+        }
+    }
+
     public void openScreen(ServerPlayer player) {
         ServerLevel serverLevel = player.serverLevel();
         AirportRegistry registry = AirportRegistry.get(serverLevel);
+        pruneGhostAirports(serverLevel, registry);
 
         // Opening the tower wakes the fleet. Aircraft parked where nobody is
         // standing have released their chunks and stopped ticking, so their

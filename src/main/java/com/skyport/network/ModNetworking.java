@@ -113,15 +113,17 @@ public class ModNetworking {
         context.enqueueWork(() -> {
             ServerPlayer player = (ServerPlayer) context.player();
             var registry = com.skyport.data.AirportRegistry.get(player.serverLevel());
-            PacketDistributor.sendToPlayer(player,
-                    new AtcTrafficPayload(List.copyOf(registry.airborneTraffic().values())));
+            com.skyport.blockentity.AtcBlockEntity.pruneGhostAirports(player.serverLevel(), registry);
+            PacketDistributor.sendToPlayer(player, new AtcTrafficPayload(
+                    List.copyOf(registry.all()),
+                    List.copyOf(registry.airborneTraffic().values())));
         });
     }
 
     private static void handleAtcTraffic(AtcTrafficPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             if (Minecraft.getInstance().screen instanceof AtcScreen atc) {
-                atc.updateTraffic(payload.traffic());
+                atc.refresh(payload.airports(), payload.traffic());
             }
         });
     }

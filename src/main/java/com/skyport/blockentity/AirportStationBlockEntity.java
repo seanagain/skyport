@@ -54,6 +54,9 @@ public class AirportStationBlockEntity extends BlockEntity {
     }
 
     public void saveLayout(AirportLayout updated) {
+        // Stamp where this station stands, so a layout whose station has
+        // been removed by any means can be recognised as a ghost.
+        updated.setStationPos(getBlockPos());
         if (!(level instanceof ServerLevel serverLevel)) return;
         AirportRegistry.get(serverLevel).put(updated);
         this.airportId = updated.id();

@@ -55,7 +55,9 @@ public class AtcScreen extends Screen {
     private static final long REFRESH_INTERVAL_MS = 500;
 
     private final BlockPos atcPos;
-    private final List<AirportLayout> airports;
+    /** Replaced on each refresh too - breaking a station deletes an airport,
+     *  and the map should stop drawing it. */
+    private List<AirportLayout> airports;
     /** Replaced wholesale by each refresh, so aircraft move while you watch. */
     private List<TrafficReport> traffic;
     private long lastRefreshMs;
@@ -121,7 +123,8 @@ public class AtcScreen extends Screen {
      * rebuilt each refresh and planes drop out of it when they park, so a
      * remembered index would quietly start describing a different aeroplane.
      */
-    public void updateTraffic(List<TrafficReport> updated) {
+    public void refresh(List<AirportLayout> updatedAirports, List<TrafficReport> updated) {
+        this.airports = updatedAirports;
         java.util.UUID selectedId = (selected >= 0 && selected < traffic.size())
                 ? traffic.get(selected).planeId() : null;
         this.traffic = updated;

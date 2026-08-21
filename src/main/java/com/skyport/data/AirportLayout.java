@@ -29,6 +29,9 @@ public class AirportLayout {
     private final UUID id;
     private String displayName;
     private ResourceKey<Level> dimension;
+    /** Where the station block that owns this airport stands, so a layout
+     *  whose station has gone can be spotted and cleaned up. */
+    private BlockPos stationPos = BlockPos.ZERO;
 
     // Waypoints grouped by type, each list already sorted by Waypoint#order.
     private final Map<Waypoint.Type, List<Waypoint>> waypoints = new EnumMap<>(Waypoint.Type.class);
@@ -74,6 +77,14 @@ public class AirportLayout {
 
     public ResourceKey<Level> dimension() {
         return dimension;
+    }
+
+    public BlockPos stationPos() {
+        return stationPos;
+    }
+
+    public void setStationPos(BlockPos stationPos) {
+        this.stationPos = stationPos;
     }
 
     public List<Waypoint> waypoints(Waypoint.Type type) {
@@ -147,6 +158,7 @@ public class AirportLayout {
         tag.putString("dimension", dimension.location().toString());
         tag.putInt("holdingPatternHeight", holdingPatternHeight);
         tag.putBoolean("holdingPatternClockwise", holdingPatternClockwise);
+        tag.putLong("stationPos", stationPos.asLong());
 
         for (Waypoint.Type type : Waypoint.Type.values()) {
             ListTag list = new ListTag();
@@ -191,6 +203,7 @@ public class AirportLayout {
         AirportLayout layout = new AirportLayout(id, name, dimension);
         layout.holdingPatternHeight = tag.contains("holdingPatternHeight") ? tag.getInt("holdingPatternHeight") : layout.holdingPatternHeight;
         layout.holdingPatternClockwise = !tag.contains("holdingPatternClockwise") || tag.getBoolean("holdingPatternClockwise");
+        if (tag.contains("stationPos")) layout.stationPos = BlockPos.of(tag.getLong("stationPos"));
         for (Waypoint.Type type : Waypoint.Type.values()) {
             ListTag list = tag.getList(type.name(), 10); // 10 = CompoundTag id
             List<Waypoint> points = new ArrayList<>();
@@ -225,6 +238,7 @@ public class AirportLayout {
         buf.writeUtf(dimension.location().toString());
         buf.writeVarInt(holdingPatternHeight);
         buf.writeBoolean(holdingPatternClockwise);
+        buf.writeBlockPos(stationPos);
 
         for (Waypoint.Type type : Waypoint.Type.values()) {
             List<Waypoint> list = waypoints.get(type);
@@ -253,10 +267,12 @@ public class AirportLayout {
                 ResourceLocation.parse(buf.readUtf()));
         int holdingPatternHeight = buf.readVarInt();
         boolean holdingPatternClockwise = buf.readBoolean();
+        BlockPos stationPos = buf.readBlockPos();
 
         AirportLayout layout = new AirportLayout(id, name, dimension);
         layout.holdingPatternHeight = holdingPatternHeight;
         layout.holdingPatternClockwise = holdingPatternClockwise;
+        layout.stationPos = stationPos;
         for (Waypoint.Type type : Waypoint.Type.values()) {
             int count = buf.readVarInt();
             List<Waypoint> points = new ArrayList<>(count);
