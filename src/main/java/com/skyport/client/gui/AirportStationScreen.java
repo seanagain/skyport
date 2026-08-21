@@ -29,6 +29,9 @@ public class AirportStationScreen extends Screen {
         super(Component.translatable("gui.skyport.airport_station.title"));
         this.stationPos = stationPos;
         this.layout = layout;
+        // Let the world projector trace this airport while the player holds
+        // a station - see LayoutProjector.
+        com.skyport.client.LayoutProjector.show(layout);
     }
 
     @Override
