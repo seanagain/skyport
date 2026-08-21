@@ -2,6 +2,7 @@ package com.skyport.blockentity;
 
 import com.skyport.SkyportConfig;
 import com.skyport.data.AirportLayout;
+import com.skyport.data.CraftType;
 import com.skyport.data.AirportRegistry;
 import com.skyport.data.AirportSummary;
 import com.skyport.data.FlightSchedule;
@@ -70,7 +71,10 @@ import java.util.UUID;
 public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubLevelActor {
 
     public enum FlightState {
-        IDLE, PUSHBACK, TAXI_OUT, TAKEOFF_ROLL, CLIMB, CRUISE, HOLDING, APPROACH, TAXI_IN, WAITING
+        IDLE, PUSHBACK, TAXI_OUT, TAKEOFF_ROLL, CLIMB, CRUISE, HOLDING, APPROACH, TAXI_IN, WAITING,
+        /** Rotorcraft and airships: straight up from the pad, and straight
+         *  down onto the one at the far end. */
+        VERTICAL_CLIMB, VERTICAL_DESCENT
     }
 
     /** How near a player counts as "boarded" for WaitCondition.PLAYER. */
@@ -150,6 +154,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** Speed in the pattern and on approach. Slow enough to actually track
      *  the drawn lines instead of overshooting and correcting back. */
     private static final double CRAFT_PATTERN_SPEED = 20.0;
+    /** Vertical rate for rotorcraft and airships, up and down. */
+    private static final double CRAFT_VERTICAL_SPEED = 8.0;
+    /** How far a helicopter tips its nose down to move forward in the cruise.
+     *  A blimp gets its lift from buoyancy and stays level. */
+    private static final double HELI_CRUISE_PITCH_DEGREES = 8.0;
     /** How many unsuccessful laps between "still waiting" reports. */
     private static final int HOLDING_REPORT_EVERY_LAPS = 2;
     /** How often to move the force-loaded bubble; every tick would churn. */
@@ -352,6 +361,17 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         this.currentWaypointIndex = 0;
         this.holdingEntryIndex = -1;
         this.simulatedPosition = reference.getCenter();
+
+        // Rotorcraft and airships have no ground route to join - they lift
+        // off from wherever they are standing. No taxiway check, and nothing
+        // to claim: they use pads, not the runway everyone else queues for.
+        if (craftType().isVertical()) {
+            this.originAirportId = null;
+            setState(isOnGround(serverLevel, reference)
+                    ? FlightState.VERTICAL_CLIMB : FlightState.CRUISE);
+            message(player, "Autopilot engaged - lifting off.");
+            return;
+        }
 
         if (isOnGround(serverLevel, reference)) {
             AirportRegistry registry = AirportRegistry.get(serverLevel);
@@ -605,7 +625,39 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // Head for the holding pattern, but if the runway is free by the
             // time we get near it, go straight in - circling an empty airport
             // is just a delay. Holding is for when someone else is landing.
+            // Straight up off the pad. No forward speed at all - a helicopter
+            // leaving a rooftop wants to clear whatever it's sitting between
+            // before going anywhere.
+            case VERTICAL_CLIMB -> {
+                climbVertically(cruiseAltitude());
+                if (simulatedPosition.y >= cruiseAltitude() - 2) setState(FlightState.CRUISE);
+            }
+            // Straight down onto the pad, and parked once it's there.
+            case VERTICAL_DESCENT -> {
+                BlockPos pad = destinationPad(destination);
+                if (pad == null) {
+                    arrive();
+                } else if (applyMotionTowards(pad)) {
+                    arrive();
+                }
+            }
             case CRUISE -> {
+                // Rotorcraft don't hold or fly approaches: cross to the pad at
+                // altitude, then go straight down onto it.
+                if (craftType().isVertical()) {
+                    BlockPos pad = destinationPad(destination);
+                    if (pad == null) {
+                        arrive();
+                    } else {
+                        BlockPos overhead = withY(pad, cruiseAltitude());
+                        applyMotionTowards(overhead);
+                        if (horizontalDistance(overhead, BlockPos.containing(simulatedPosition)) <= CRAFT_ARRIVAL_RADIUS) {
+                            setState(FlightState.VERTICAL_DESCENT);
+                        }
+                    }
+                    break;
+                }
+
                 List<BlockPos> loop = positionsOf(destination, Waypoint.Type.HOLDING_PATTERN);
                 if (loop.isEmpty()) {
                     beginApproach(serverLevel, destination);
@@ -785,6 +837,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // decision - refusals, and arriving somewhere.
         note(switch (newState) {
             case PUSHBACK -> "Pushing back from the gate.";
+            case VERTICAL_CLIMB -> "Lifting off.";
+            case VERTICAL_DESCENT -> "Descending onto the pad.";
             case TAKEOFF_ROLL -> "On the runway, taking off.";
             case CLIMB -> "Climbing to cruising altitude.";
             case CRUISE -> "Airborne, cruising toward destination.";
@@ -1096,7 +1150,19 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // holds its attitude and descends, rather than aiming its nose at the
         // threshold. Only the climb actually pitches.
         boolean holdLevel = onGround || state == FlightState.APPROACH;
-        double targetPitch = holdLevel ? 0 : Math.asin(Math.max(-1, Math.min(1, target.y)));
+        double targetPitch;
+        if (craftType().isVertical()) {
+            // A helicopter tips its nose down to push itself along, and holds
+            // that attitude in the cruise; an airship just floats level. Both
+            // stay level going straight up or down, where there's no forward
+            // motion to lean into.
+            boolean movingAlong = state == FlightState.CRUISE;
+            targetPitch = (movingAlong && craftType() == CraftType.HELICOPTER)
+                    ? -Math.toRadians(HELI_CRUISE_PITCH_DEGREES)
+                    : 0;
+        } else {
+            targetPitch = holdLevel ? 0 : Math.asin(Math.max(-1, Math.min(1, target.y)));
+        }
         double pitchError = targetPitch - nosePitch;
 
         Vector3d right = new Vector3d(nose).cross(worldUp);
@@ -1278,6 +1344,34 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return registry.byId(entry.airportId())
                 .map(layout -> layout.displayName() + " / " + gate)
                 .orElse(gate);
+    }
+
+    private CraftType craftType() {
+        return schedule.craftType();
+    }
+
+    /** The pad this leg is heading for. Falls back to the airport's only pad
+     *  if the schedule names one that has since been renamed or removed. */
+    @org.jetbrains.annotations.Nullable
+    private BlockPos destinationPad(AirportLayout destination) {
+        String name = destinationGateName();
+        BlockPos pad = name == null ? null : destination.helipads().get(name);
+        if (pad != null) return pad;
+        return destination.helipads().isEmpty() ? null : destination.helipads().values().iterator().next();
+    }
+
+    /**
+     * Rise straight up, no forward component.
+     *
+     * The pitch cap that keeps a plane from climbing like a rocket is
+     * deliberately not applied - that rule exists because wings need airflow,
+     * and a rotor or a gasbag doesn't care. This is the one place a craft is
+     * allowed to gain height without covering ground.
+     */
+    private void climbVertically(int targetY) {
+        double remaining = targetY - simulatedPosition.y;
+        double speed = Math.min(CRAFT_VERTICAL_SPEED, Math.max(1.0, Math.abs(remaining)));
+        flyHeading(new Vec3(0, Math.signum(remaining), 0), speed);
     }
 
     /** The airport's hold-short point, if one is drawn. */

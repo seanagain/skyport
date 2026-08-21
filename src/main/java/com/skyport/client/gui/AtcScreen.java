@@ -41,6 +41,7 @@ public class AtcScreen extends Screen {
     private static final int COLOR_FINAL_LEG = 0xFF7FD1E0;
     private static final int COLOR_GATE = 0xFFE0812F;
     private static final int COLOR_HOLD_SHORT = 0xFFD64550;
+    private static final int COLOR_HELIPAD = 0xFF63D66B;
     private static final int COLOR_LABEL = 0xFF5AD7E0;
     private static final int COLOR_AIRCRAFT = 0xFFE0812F;
     /** Taxiing aircraft, dimmer so they read as "on the ground" against the
@@ -402,6 +403,11 @@ public class AtcScreen extends Screen {
             int x = worldToScreenX(gate.getX());
             int y = worldToScreenY(gate.getZ());
             guiGraphics.fill(x - 1, y - 1, x + 2, y + 2, COLOR_GATE);
+        }
+        for (BlockPos pad : airport.helipads().values()) {
+            int x = worldToScreenX(pad.getX());
+            int y = worldToScreenY(pad.getZ());
+            drawBorder(guiGraphics, x - 3, y - 3, 7, 7, COLOR_HELIPAD);
         }
         for (Waypoint hold : airport.waypoints(Waypoint.Type.HOLD_SHORT)) {
             int x = worldToScreenX(hold.pos().getX());

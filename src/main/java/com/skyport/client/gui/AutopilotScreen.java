@@ -47,6 +47,7 @@ public class AutopilotScreen extends Screen {
     private Button conditionButton;
     private Button waitButton;
     private Button loopButton;
+    private Button craftButton;
     private Button altitudeButton;
     private Button speedButton;
     private Button engageButton;
@@ -91,14 +92,17 @@ public class AutopilotScreen extends Screen {
                 .bounds(left + half + 4, top + 48, half, 20).build());
 
         // --- schedule-wide ---
+        int third = (panelW - 8) / 3;
+        craftButton = addRenderableWidget(Button.builder(craftLabel(), b -> cycleCraftType())
+                .bounds(left, top + 72, third, 20).build());
         loopButton = addRenderableWidget(Button.builder(loopLabel(), b -> toggleLoop())
-                .bounds(left, top + 72, half, 20).build());
+                .bounds(left + third + 4, top + 72, third, 20).build());
         addRenderableWidget(Button.builder(Component.translatable("gui.skyport.autopilot.disengage"),
                         b -> {
                             PacketDistributor.sendToServer(new DisengageAutopilotPayload(autopilotPos));
                             onClose();
                         })
-                .bounds(left + half + 4, top + 72, half, 20).build());
+                .bounds(left + (third + 4) * 2, top + 72, panelW - (third + 4) * 2, 20).build());
 
         // Cruise altitude and speed: the settings that describe the flight
         // rather than a particular stop.
@@ -155,7 +159,8 @@ public class AutopilotScreen extends Screen {
     private void addStop() {
         if (airports.isEmpty()) return;
         AirportSummary airport = airports.get(0);
-        String gate = airport.gateNames().isEmpty() ? "" : airport.gateNames().get(0);
+        List<String> stops = stopsAt(airport);
+        String gate = stops.isEmpty() ? "" : stops.get(0);
         schedule.entries().add(new ScheduleEntry(airport.id(), gate, ScheduleEntry.WaitCondition.TIMER, 10));
         select(schedule.entries().size() - 1);
     }
@@ -170,13 +175,14 @@ public class AutopilotScreen extends Screen {
         if (!hasSelection() || airports.isEmpty()) return;
         int current = indexOfAirport(entry().airportId());
         AirportSummary next = airports.get(Math.floorMod(current + 1, airports.size()));
-        String gate = next.gateNames().isEmpty() ? "" : next.gateNames().get(0);
+        List<String> stops = stopsAt(next);
+        String gate = stops.isEmpty() ? "" : stops.get(0);
         replaceEntry(new ScheduleEntry(next.id(), gate, entry().condition(), entry().waitSeconds()));
     }
 
     private void cycleGate() {
         if (!hasSelection()) return;
-        List<String> gates = airportOf(entry().airportId()).gateNames();
+        List<String> gates = stopsAt(airportOf(entry().airportId()));
         if (gates.isEmpty()) return;
         int current = gates.indexOf(entry().gateName());
         String next = gates.get(Math.floorMod(current + 1, gates.size()));
@@ -225,7 +231,7 @@ public class AutopilotScreen extends Screen {
         if (!hasSelection()) return Component.empty();
         String gate = entry().gateName();
         return gate.isEmpty()
-                ? Component.translatable("gui.skyport.autopilot.no_gates")
+                ? Component.literal(schedule.craftType().isVertical() ? "No pads here" : "No gates here")
                 : Component.literal(gate);
     }
 
@@ -245,6 +251,36 @@ public class AutopilotScreen extends Screen {
 
     private Component loopLabel() {
         return Component.literal(schedule.loop() ? "Loop: on" : "Loop: off");
+    }
+
+    private Component craftLabel() {
+        return Component.literal(schedule.craftType().label());
+    }
+
+    /**
+     * Which stops this aircraft can be sent to: gates for a plane, helipads
+     * for anything that lands vertically.
+     */
+    private List<String> stopsAt(AirportSummary airport) {
+        return schedule.craftType().isVertical() ? airport.padNames() : airport.gateNames();
+    }
+
+    /**
+     * Switching craft type re-points every stop, because a gate name is not a
+     * pad name - leaving "Gate A" on a helicopter's schedule would just fail
+     * to resolve at every airport on the route.
+     */
+    private void cycleCraftType() {
+        schedule.setCraftType(schedule.craftType().next());
+        for (int i = 0; i < schedule.entries().size(); i++) {
+            ScheduleEntry entry = schedule.entries().get(i);
+            List<String> valid = stopsAt(airportOf(entry.airportId()));
+            if (!valid.contains(entry.gateName())) {
+                schedule.entries().set(i, new ScheduleEntry(entry.airportId(),
+                        valid.isEmpty() ? "" : valid.get(0), entry.condition(), entry.waitSeconds()));
+            }
+        }
+        refresh();
     }
 
     private Component altitudeLabel() {
@@ -273,11 +309,12 @@ public class AutopilotScreen extends Screen {
         conditionButton.setMessage(conditionLabel());
         waitButton.setMessage(waitLabel());
         loopButton.setMessage(loopLabel());
+        craftButton.setMessage(craftLabel());
         altitudeButton.setMessage(altitudeLabel());
         speedButton.setMessage(speedLabel());
 
         airportButton.active = sel && airports.size() > 1;
-        gateButton.active = sel && airportOf(entry().airportId()).gateNames().size() > 1;
+        gateButton.active = sel && stopsAt(airportOf(entry().airportId())).size() > 1;
         conditionButton.active = sel;
         // A player-boarding stop has no timer to set; cargo currently falls
         // back to the timer, so it still does.

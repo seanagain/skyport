@@ -92,7 +92,8 @@ public class AirportStationScreen extends Screen {
                 + "   Taxiway " + tick(Waypoint.Type.TAXIWAY, 2)
                 + "   Holding " + tick(Waypoint.Type.HOLDING_PATTERN, 3)
                 + "   Final " + tick(Waypoint.Type.FINAL_LEG, 2)
-                + "   Gates " + layout.gates().size();
+                + "   Gates " + layout.gates().size()
+                + "   Pads " + layout.helipads().size();
         guiGraphics.drawCenteredString(font, summary, width / 2, Math.max(20, height / 2 - 60), 0xFFAAAAAA);
     }
 

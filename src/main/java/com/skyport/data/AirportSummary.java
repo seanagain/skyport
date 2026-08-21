@@ -14,11 +14,13 @@ import java.util.UUID;
  * never needs the actual runway/taxiway/holding-pattern geometry, only
  * "which airports exist" and "which gates does each one have".
  */
-public record AirportSummary(UUID id, String displayName, List<String> gateNames, BlockPos position) {
+public record AirportSummary(UUID id, String displayName, List<String> gateNames,
+                             List<String> padNames, BlockPos position) {
 
     public static AirportSummary of(AirportLayout layout) {
         return new AirportSummary(layout.id(), layout.displayName(),
-                List.copyOf(layout.gates().keySet()), locate(layout));
+                List.copyOf(layout.gates().keySet()),
+                List.copyOf(layout.helipads().keySet()), locate(layout));
     }
 
     /**
@@ -41,6 +43,8 @@ public record AirportSummary(UUID id, String displayName, List<String> gateNames
         buf.writeUtf(displayName);
         buf.writeVarInt(gateNames.size());
         for (String name : gateNames) buf.writeUtf(name);
+        buf.writeVarInt(padNames.size());
+        for (String name : padNames) buf.writeUtf(name);
         buf.writeBlockPos(position);
     }
 
@@ -50,6 +54,9 @@ public record AirportSummary(UUID id, String displayName, List<String> gateNames
         int count = buf.readVarInt();
         List<String> gates = new ArrayList<>(count);
         for (int i = 0; i < count; i++) gates.add(buf.readUtf());
-        return new AirportSummary(id, name, gates, buf.readBlockPos());
+        int padCount = buf.readVarInt();
+        List<String> pads = new ArrayList<>(padCount);
+        for (int i = 0; i < padCount; i++) pads.add(buf.readUtf());
+        return new AirportSummary(id, name, gates, pads, buf.readBlockPos());
     }
 }

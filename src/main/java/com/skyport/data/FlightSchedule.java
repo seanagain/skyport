@@ -23,6 +23,8 @@ public class FlightSchedule {
     /** Airborne speed in blocks/second. Ground speeds stay fixed - taxiing
      *  fast is just a way to overshoot waypoints. */
     private int cruiseSpeed = 24;
+    /** What is flying this route - decides whether it uses runways or pads. */
+    private CraftType craftType = CraftType.PLANE;
 
     public List<ScheduleEntry> entries() {
         return entries;
@@ -52,6 +54,14 @@ public class FlightSchedule {
         this.cruiseSpeed = cruiseSpeed;
     }
 
+    public CraftType craftType() {
+        return craftType;
+    }
+
+    public void setCraftType(CraftType craftType) {
+        this.craftType = craftType;
+    }
+
     public boolean isEmpty() {
         return entries.isEmpty();
     }
@@ -76,6 +86,7 @@ public class FlightSchedule {
         tag.putBoolean("loop", loop);
         tag.putInt("cruiseAltitude", cruiseAltitude);
         tag.putInt("cruiseSpeed", cruiseSpeed);
+        tag.putString("craftType", craftType.name());
         return tag;
     }
 
@@ -88,6 +99,7 @@ public class FlightSchedule {
         schedule.loop = tag.getBoolean("loop");
         if (tag.contains("cruiseAltitude")) schedule.cruiseAltitude = tag.getInt("cruiseAltitude");
         if (tag.contains("cruiseSpeed")) schedule.cruiseSpeed = tag.getInt("cruiseSpeed");
+        if (tag.contains("craftType")) schedule.craftType = CraftType.valueOf(tag.getString("craftType"));
         return schedule;
     }
 
@@ -97,6 +109,7 @@ public class FlightSchedule {
         buf.writeBoolean(loop);
         buf.writeVarInt(cruiseAltitude);
         buf.writeVarInt(cruiseSpeed);
+        buf.writeEnum(craftType);
     }
 
     public static FlightSchedule read(FriendlyByteBuf buf) {
@@ -106,6 +119,7 @@ public class FlightSchedule {
         schedule.loop = buf.readBoolean();
         schedule.cruiseAltitude = buf.readVarInt();
         schedule.cruiseSpeed = buf.readVarInt();
+        schedule.craftType = buf.readEnum(CraftType.class);
         return schedule;
     }
 }

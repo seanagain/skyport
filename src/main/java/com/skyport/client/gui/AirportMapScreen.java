@@ -54,7 +54,7 @@ public class AirportMapScreen extends Screen {
 
     private enum EditMode {
         RUNWAY("Runway"), TAXIWAY("Taxiway"), HOLDING_PATTERN("Pattern"),
-        FINAL_LEG("Final"), GATE("Gate"), HOLD_SHORT("Hold Line");
+        FINAL_LEG("Final"), GATE("Gate"), HOLD_SHORT("Hold Line"), HELIPAD("Pad");
 
         final String label;
         EditMode(String label) { this.label = label; }
@@ -83,6 +83,7 @@ public class AirportMapScreen extends Screen {
     private static final int COLOR_GATE = 0xFFE0812F;
     private static final int COLOR_PLAYER = 0xFFE33A3A;
     private static final int COLOR_HOLD_SHORT = 0xFFD64550;
+    private static final int COLOR_HELIPAD = 0xFF63D66B;
 
     private final BlockPos stationPos;
     private final AirportLayout layout;
@@ -253,6 +254,11 @@ public class AirportMapScreen extends Screen {
             if (!names.isEmpty()) layout.gates().remove(names.get(names.size() - 1));
             return;
         }
+        if (mode == EditMode.HELIPAD) {
+            List<String> names = new ArrayList<>(layout.helipads().keySet());
+            if (!names.isEmpty()) layout.helipads().remove(names.get(names.size() - 1));
+            return;
+        }
         List<Waypoint> points = layout.waypoints(toWaypointType(mode));
         if (!points.isEmpty()) points.remove(points.size() - 1);
     }
@@ -260,6 +266,8 @@ public class AirportMapScreen extends Screen {
     private void clearCurrent() {
         if (mode == EditMode.GATE) {
             layout.gates().clear();
+        } else if (mode == EditMode.HELIPAD) {
+            layout.helipads().clear();
         } else {
             layout.waypoints(toWaypointType(mode)).clear();
         }
@@ -290,7 +298,7 @@ public class AirportMapScreen extends Screen {
             case HOLDING_PATTERN -> Waypoint.Type.HOLDING_PATTERN;
             case FINAL_LEG -> Waypoint.Type.FINAL_LEG;
             case HOLD_SHORT -> Waypoint.Type.HOLD_SHORT;
-            case GATE -> throw new IllegalArgumentException("GATE is not a Waypoint.Type");
+            case GATE, HELIPAD -> throw new IllegalArgumentException(mode + " is a named point, not a Waypoint.Type");
         };
     }
 
@@ -309,6 +317,8 @@ public class AirportMapScreen extends Screen {
 
             if (mode == EditMode.GATE) {
                 layout.gates().put(layout.nextGateName(), world);
+            } else if (mode == EditMode.HELIPAD) {
+                layout.helipads().put(layout.nextHelipadName(), world);
             } else {
                 Waypoint.Type type = toWaypointType(mode);
                 List<Waypoint> points = layout.waypoints(type);
@@ -409,6 +419,10 @@ public class AirportMapScreen extends Screen {
             }
 
             case HOLDING_PATTERN -> null;
+
+            // Pads stand alone - rotorcraft arrive vertically, so a helipad
+            // needs no taxiway, no runway and nothing to connect to.
+            case HELIPAD -> null;
 
             // One per airport, on the taxiway - it marks where the taxiway
             // stops being safe and the runway's protected area begins.
@@ -573,6 +587,14 @@ public class AirportMapScreen extends Screen {
             guiGraphics.fill(gx - 2, gy - 2, gx + 2, gy + 2, COLOR_GATE);
         }
 
+        // Pads: a square with a dot, distinct from a gate's solid marker.
+        for (BlockPos pad : layout.helipads().values()) {
+            int px = worldToScreenX(pad);
+            int py = worldToScreenY(pad);
+            drawBorder(guiGraphics, px - 4, py - 4, 9, 9, COLOR_HELIPAD);
+            guiGraphics.fill(px - 1, py - 1, px + 2, py + 2, COLOR_HELIPAD);
+        }
+
         for (Waypoint hold : layout.waypoints(Waypoint.Type.HOLD_SHORT)) {
             int hx = worldToScreenX(hold.pos());
             int hy = worldToScreenY(hold.pos());
@@ -638,6 +660,7 @@ public class AirportMapScreen extends Screen {
             case FINAL_LEG -> "2 points: from holding pattern, to runway";
             case GATE -> "click the end of a runway or taxiway line";
             case HOLD_SHORT -> "the ground stop line - planes wait here for the runway";
+            case HELIPAD -> "click anywhere - helicopters and blimps land here";
         };
     }
 

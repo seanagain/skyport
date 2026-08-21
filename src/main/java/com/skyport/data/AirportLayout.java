@@ -45,6 +45,12 @@ public class AirportLayout {
     // map editor auto-names them in ("Gate A", "Gate B", ...).
     private final Map<String, BlockPos> gates = new LinkedHashMap<>();
 
+    // Helipads, named and ordered the same way gates are - they serve the
+    // same purpose for rotorcraft and airships, which never touch a runway.
+    // Kept separate rather than mixed in with gates so a schedule can only
+    // ever send a plane to a gate and a helicopter to a pad.
+    private final Map<String, BlockPos> helipads = new LinkedHashMap<>();
+
     public AirportLayout(UUID id, String displayName, ResourceKey<Level> dimension) {
         this.id = id;
         this.displayName = displayName;
@@ -98,6 +104,26 @@ public class AirportLayout {
         return gates;
     }
 
+    public Map<String, BlockPos> helipads() {
+        return helipads;
+    }
+
+    public void setHelipads(Map<String, BlockPos> newPads) {
+        helipads.clear();
+        helipads.putAll(newPads);
+    }
+
+    /** "Pad A", "Pad B", ... matching the gate naming scheme. */
+    public String nextHelipadName() {
+        int index = helipads.size();
+        StringBuilder suffix = new StringBuilder();
+        do {
+            suffix.insert(0, (char) ('A' + index % 26));
+            index = index / 26 - 1;
+        } while (index >= 0);
+        return "Pad " + suffix;
+    }
+
     public void setGates(Map<String, BlockPos> newGates) {
         gates.clear();
         gates.putAll(newGates);
@@ -141,6 +167,17 @@ public class AirportLayout {
         }
         tag.put("gates", gateList);
 
+        ListTag padList = new ListTag();
+        for (Map.Entry<String, BlockPos> entry : helipads.entrySet()) {
+            CompoundTag padTag = new CompoundTag();
+            padTag.putString("name", entry.getKey());
+            padTag.putInt("x", entry.getValue().getX());
+            padTag.putInt("y", entry.getValue().getY());
+            padTag.putInt("z", entry.getValue().getZ());
+            padList.add(padTag);
+        }
+        tag.put("helipads", padList);
+
         return tag;
     }
 
@@ -170,6 +207,13 @@ public class AirportLayout {
                     new BlockPos(gateTag.getInt("x"), gateTag.getInt("y"), gateTag.getInt("z")));
         }
 
+        ListTag padList = tag.getList("helipads", 10);
+        for (int i = 0; i < padList.size(); i++) {
+            CompoundTag padTag = padList.getCompound(i);
+            layout.helipads.put(padTag.getString("name"),
+                    new BlockPos(padTag.getInt("x"), padTag.getInt("y"), padTag.getInt("z")));
+        }
+
         return layout;
     }
 
@@ -190,6 +234,12 @@ public class AirportLayout {
 
         buf.writeVarInt(gates.size());
         for (Map.Entry<String, BlockPos> entry : gates.entrySet()) {
+            buf.writeUtf(entry.getKey());
+            buf.writeBlockPos(entry.getValue());
+        }
+
+        buf.writeVarInt(helipads.size());
+        for (Map.Entry<String, BlockPos> entry : helipads.entrySet()) {
             buf.writeUtf(entry.getKey());
             buf.writeBlockPos(entry.getValue());
         }
@@ -220,6 +270,13 @@ public class AirportLayout {
             gates.put(buf.readUtf(), buf.readBlockPos());
         }
         layout.setGates(gates);
+
+        int padCount = buf.readVarInt();
+        Map<String, BlockPos> pads = new LinkedHashMap<>();
+        for (int i = 0; i < padCount; i++) {
+            pads.put(buf.readUtf(), buf.readBlockPos());
+        }
+        layout.setHelipads(pads);
 
         return layout;
     }
