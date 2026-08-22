@@ -3,15 +3,14 @@ package com.skyport.network;
 import com.skyport.Skyport;
 import com.skyport.blockentity.AirportStationBlockEntity;
 import com.skyport.blockentity.AutopilotBlockEntity;
-import com.skyport.client.gui.AirportStationScreen;
-import com.skyport.client.gui.AtcScreen;
-import com.skyport.client.gui.AutopilotScreen;
+import com.skyport.client.ClientPayloadHandlers;
 import com.skyport.data.Waypoint;
 import net.minecraft.network.chat.Component;
-import net.minecraft.client.Minecraft;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.api.distmarker.Dist;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.fml.loading.FMLEnvironment;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.PacketDistributor;
@@ -25,13 +24,14 @@ import java.util.List;
  * need to be referenced anywhere except being imported once (Skyport does
  * this) so the classloader picks it up.
  *
- * Client-only calls (Minecraft.getInstance(), setScreen(...)) live inside
- * handler method bodies below, never at class/field-init time, which is
- * why this one class can safely reference both client and server code -
- * a dedicated server never actually executes the client-handler methods,
- * it just has them sitting unused on the classpath. If that ever trips
- * up a stricter build setup, split the playToClient handlers out into a
- * class under com.skyport.client instead.
+ * The screen-opening half lives in {@link com.skyport.client.ClientPayloadHandlers}
+ * and is reached only through the dist guard below. This class used to hold
+ * those bodies itself, on the theory that a dedicated server would never
+ * execute them and could carry them unused on the classpath. It cannot:
+ * @EventBusSubscriber makes FML load this class by name during mod
+ * construction, and verifying a body that calls setScreen(ourScreen) forces
+ * Screen to load, which a dedicated server refuses. That crashed startup
+ * outright until the first server was actually run.
  */
 @EventBusSubscriber(modid = Skyport.MOD_ID, bus = EventBusSubscriber.Bus.MOD)
 public class ModNetworking {
@@ -120,12 +120,24 @@ public class ModNetworking {
         });
     }
 
+    /**
+     * Every screen-opening handler goes through here.
+     *
+     * The dist check is not belt-and-braces - a dedicated server does load
+     * this class (FML resolves @EventBusSubscriber classes by name during mod
+     * construction) and would verify these method bodies. Calling into
+     * ClientPayloadHandlers by plain invokestatic leaves the reference
+     * unresolved until something actually runs it, which on a server is
+     * never. Putting a screen type in a signature here instead would load it
+     * and crash the server at startup, which is exactly what happened.
+     */
+    private static boolean onClient() {
+        return FMLEnvironment.dist == Dist.CLIENT;
+    }
+
     private static void handleAtcTraffic(AtcTrafficPayload payload, IPayloadContext context) {
-        context.enqueueWork(() -> {
-            if (Minecraft.getInstance().screen instanceof AtcScreen atc) {
-                atc.refresh(payload.airports(), payload.traffic());
-            }
-        });
+        if (!onClient()) return;
+        ClientPayloadHandlers.atcTraffic(payload, context);
     }
 
     private static void handleSaveSchedule(SaveSchedulePayload payload, IPayloadContext context) {
@@ -163,19 +175,17 @@ public class ModNetworking {
     // ---- S2C: server -> player ----
 
     private static void handleOpenAirportMap(OpenAirportMapPayload payload, IPayloadContext context) {
-        context.enqueueWork(() ->
-                Minecraft.getInstance().setScreen(new AirportStationScreen(payload.stationPos(), payload.layout())));
+        if (!onClient()) return;
+        ClientPayloadHandlers.openAirportMap(payload, context);
     }
 
     private static void handleOpenAtc(OpenAtcPayload payload, IPayloadContext context) {
-        context.enqueueWork(() ->
-                Minecraft.getInstance().setScreen(
-                        new AtcScreen(payload.atcPos(), payload.airports(), payload.traffic())));
+        if (!onClient()) return;
+        ClientPayloadHandlers.openAtc(payload, context);
     }
 
     private static void handleOpenAutopilot(OpenAutopilotPayload payload, IPayloadContext context) {
-        context.enqueueWork(() ->
-                Minecraft.getInstance().setScreen(new AutopilotScreen(
-                        payload.autopilotPos(), payload.airports(), payload.schedule())));
+        if (!onClient()) return;
+        ClientPayloadHandlers.openAutopilot(payload, context);
     }
 }

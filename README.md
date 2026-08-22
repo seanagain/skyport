@@ -152,6 +152,12 @@ Each of these is a reasonable next step rather than an oversight:
 
 This **builds and runs** (`./gradlew build`, `./gradlew runClient`) against
 a real NeoForge/Create toolchain, and both blocks show up and work in game.
+
+`./gradlew runServer` runs a dedicated server, in its own `run-server/`
+directory so it doesn't fight `runClient` over the world session lock. Worth
+running after any change that touches networking or screens: it caught a
+startup crash that the client never could, because a dedicated server refuses
+to load client-only classes and the integrated one is happy to.
 The scaffold's original "I couldn't compile this, check it yourself" list
 has been worked through - what it flagged, and what turned out to be true:
 

@@ -55,6 +55,10 @@ neoForge {
         server {
             server()
             programArgument '--nogui'
+            // Its own directory: a dedicated-server test that shared run/
+            // with the client would fight it for the world session lock,
+            // and the whole point is to be able to run both.
+            gameDirectory = file('run-server')
             systemProperty 'neoforge.enabledGameTestNamespaces', mod_id
         }
         data {

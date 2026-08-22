@@ -21,7 +21,10 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.minecraft.world.phys.Vec3;
@@ -180,8 +183,15 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private static final int HOLD_LINE_STANDOFF_BLOCKS = 8;
     /** How the route is sampled for terrain, and how much air to insist on
      *  above the highest ground found. */
-    private static final int TERRAIN_SCAN_SPACING = 32;
-    private static final int TERRAIN_SCAN_MAX_SAMPLES = 128;
+    /** Tighter than it was: a one-block-wide line sampled every 32 blocks
+     *  reliably finds a mountain range, and reliably threads straight
+     *  between floating islands. */
+    private static final int TERRAIN_SCAN_SPACING = 12;
+    private static final int TERRAIN_SCAN_MAX_SAMPLES = 256;
+    /** Chunks the scan may generate before it settles for reading whatever
+     *  is already loaded. Generating one costs tens of milliseconds and this
+     *  runs on the server thread with a player waiting. */
+    private static final int TERRAIN_SCAN_MAX_GENERATED_CHUNKS = 64;
     private static final int TERRAIN_CLEARANCE_BLOCKS = 20;
     /** How many unsuccessful laps between "still waiting" reports. */
     private static final int HOLDING_REPORT_EVERY_LAPS = 2;
@@ -1678,49 +1688,135 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return schedule.craftType();
     }
 
+    /** What a route scan found: whether the cruise band is clear, and if not,
+     *  the lowest altitude that clears everything sampled. */
+    private record RouteScan(boolean clear, int blockedAtY, BlockPos blockedNear, int clearAbove,
+                             boolean partial) {}
+
     /**
-     * The highest ground between here and there, sampled along the route.
+     * Is the cruise altitude band clear the whole way there?
      *
-     * Cruise altitude is a number the player picks, and nothing checked it
-     * against the world - so a route with a mountain in the middle flew
-     * straight into it. Sampling is coarse on purpose: hitting every block
-     * would be far more work for no better answer, since what matters is
-     * whether anything substantial is in the way, not its exact profile.
+     * This used to ask "how high is the ground" via the WORLD_SURFACE
+     * heightmap and demand the plane fly above it. Two things were wrong with
+     * that. Level#getHeight returns getMinBuildHeight() for a chunk that
+     * isn't loaded rather than reading it off disk, so on any route through
+     * terrain nobody had loaded - the normal case - every sample came back as
+     * the world floor and the check passed trivially. And a heightmap only
+     * knows the topmost block in a column, so on a world with floating
+     * islands it reported an island's roof and refused routes that would fly
+     * safely underneath.
      *
-     * Unloaded chunks report their heightmap from disk without loading, so
-     * this works for a route the player has never flown.
+     * So: scan the band the aircraft will actually occupy, and load chunks
+     * far enough to have real blocks in them. Anything outside the band is
+     * not this check's business.
      */
-    private int highestTerrainOnRoute(ServerLevel serverLevel, BlockPos from, BlockPos to) {
+    private RouteScan scanRoute(ServerLevel serverLevel, BlockPos from, BlockPos to, int altitude) {
         double distance = horizontalDistance(from, to);
         int samples = (int) Math.min(TERRAIN_SCAN_MAX_SAMPLES,
                 Math.max(2, distance / TERRAIN_SCAN_SPACING));
-        int highest = Integer.MIN_VALUE;
+
+        int bandBottom = Math.max(serverLevel.getMinBuildHeight(), altitude - TERRAIN_CLEARANCE_BLOCKS);
+        int bandTop = Math.min(serverLevel.getMaxBuildHeight() - 1, altitude + TERRAIN_CLEARANCE_BLOCKS);
+
+        boolean clear = true;
+        int blockedAtY = 0;
+        BlockPos blockedNear = null;
+        int highestSolid = serverLevel.getMinBuildHeight();
+
+        ChunkAccess chunk = null;
+        long chunkKey = Long.MIN_VALUE;
+        int generated = 0;
+        boolean partial = false;
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+
         for (int i = 0; i <= samples; i++) {
             double t = (double) i / samples;
             int x = (int) Math.round(from.getX() + (to.getX() - from.getX()) * t);
             int z = (int) Math.round(from.getZ() + (to.getZ() - from.getZ()) * t);
-            highest = Math.max(highest, serverLevel.getHeight(Heightmap.Types.WORLD_SURFACE, x, z));
+
+            // Consecutive samples usually land in the same chunk - fetching it
+            // once per chunk rather than once per sample is the difference
+            // between a hitch and a stall on a long route.
+            long key = ChunkPos.asLong(SectionPos.blockToSectionCoord(x), SectionPos.blockToSectionCoord(z));
+            if (key != chunkKey) {
+                chunkKey = key;
+                // SURFACE, not FULL: enough to have the landmass in place,
+                // without running features, structures and spawning for every
+                // chunk along a route the player is merely flying over.
+                //
+                // Generating one is still tens of milliseconds, and a long
+                // route crosses hundreds of chunks - enough to freeze the
+                // server outright while someone stands at a gate. So there's
+                // a budget: past it the scan reads chunks that happen to be
+                // loaded and reports itself as partial rather than stalling
+                // the tick to be thorough.
+                boolean mayGenerate = generated < TERRAIN_SCAN_MAX_GENERATED_CHUNKS;
+                chunk = serverLevel.getChunk(SectionPos.blockToSectionCoord(x),
+                        SectionPos.blockToSectionCoord(z),
+                        ChunkStatus.SURFACE, mayGenerate);
+                if (chunk == null) partial = true;
+                else if (mayGenerate) generated++;
+            }
+            if (chunk == null) continue;
+
+            for (int y = bandBottom; y <= bandTop; y++) {
+                cursor.set(x, y, z);
+                if (chunk.getBlockState(cursor).isAir()) continue;
+                if (clear) {
+                    clear = false;
+                    blockedAtY = y;
+                    blockedNear = new BlockPos(x, y, z);
+                }
+                highestSolid = Math.max(highestSolid, y);
+            }
+
+            // Only worth finding a clear altitude to suggest once something
+            // has actually blocked the way.
+            if (!clear) {
+                for (int y = bandTop; y < serverLevel.getMaxBuildHeight(); y++) {
+                    cursor.set(x, y, z);
+                    if (!chunk.getBlockState(cursor).isAir()) highestSolid = Math.max(highestSolid, y);
+                }
+            }
         }
-        return highest;
+
+        return new RouteScan(clear, blockedAtY, blockedNear,
+                highestSolid + TERRAIN_CLEARANCE_BLOCKS + 1, partial);
     }
 
     /**
-     * Refuse to set off under a mountain.
+     * Refuse to set off into a mountain - or an island.
      *
      * Raising the altitude automatically would be friendlier right up until
      * it silently flew a schedule at some height the player never chose and
      * couldn't see; telling them the number to set is both honest and
      * actionable. Checked at engage, when there's still someone standing
      * there to read it.
+     *
+     * Note the asymmetry: the check permits any altitude whose band is clear,
+     * including one that threads under a floating island, but the number it
+     * suggests always clears everything on the route. Permissive about what
+     * you fly, conservative about what it advises.
      */
     private boolean routeIsFlyable(ServerLevel serverLevel, BlockPos from, AirportLayout destination) {
         BlockPos to = AirportSummary.of(destination).position();
-        int highest = highestTerrainOnRoute(serverLevel, from, to);
-        int needed = highest + TERRAIN_CLEARANCE_BLOCKS;
-        if (cruiseAltitude() >= needed) return true;
+        RouteScan scan = scanRoute(serverLevel, from, to, cruiseAltitude());
+        if (scan.clear()) {
+            // Let it go, but don't pretend the route was checked end to end -
+            // silently approving an unverified route is how a plane ends up
+            // inside a hill the scan never looked at.
+            if (scan.partial()) {
+                message("Route is clear as far as could be checked - part of it "
+                        + "runs through unloaded terrain.");
+            }
+            return true;
+        }
 
-        message("Terrain on this route reaches Y " + highest
-                + " - raise cruise altitude to at least Y " + needed + ".");
+        String where = scan.blockedNear() == null ? "on this route"
+                : "near " + scan.blockedNear().getX() + ", " + scan.blockedNear().getZ();
+        message("Cruising at Y " + cruiseAltitude() + " runs into terrain at Y "
+                + scan.blockedAtY() + " " + where
+                + " - set cruise altitude to at least Y " + scan.clearAbove() + ".");
         return false;
     }
 
