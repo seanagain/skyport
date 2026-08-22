@@ -5,6 +5,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.phys.Vec3;
@@ -221,13 +223,44 @@ public class AirportRegistry extends SavedData {
     private final Map<UUID, ParkedAircraft> parked = new HashMap<>();
 
     /** A parked aircraft: enough to find it again with the world unloaded. */
-    public record ParkedAircraft(UUID planeId, String dimension, BlockPos position) { }
+    /**
+     * A parked aircraft: enough to find it again with the world unloaded,
+     * and enough to list it.
+     *
+     * Carries a callsign and a destination as well as a position because a
+     * parked aircraft used to vanish from the tower entirely. It stops
+     * ticking, so it stops publishing a TrafficReport, so it dropped off the
+     * ATC map and the departure boards until something woke it - which read
+     * as aircraft randomly disappearing and reappearing. It is still traffic;
+     * it is just traffic that is standing still.
+     */
+    public record ParkedAircraft(UUID planeId, String dimension, BlockPos position,
+                                 String callsign, String destination) { }
 
-    public void reportParked(UUID planeId, String dimension, BlockPos position) {
+    public void reportParked(UUID planeId, String dimension, BlockPos position,
+                             String callsign, String destination) {
         ParkedAircraft existing = parked.get(planeId);
-        if (existing != null && existing.position().equals(position)) return;
-        parked.put(planeId, new ParkedAircraft(planeId, dimension, position));
+        if (existing != null && existing.position().equals(position)
+                && existing.callsign().equals(callsign)
+                && existing.destination().equals(destination)) return;
+        parked.put(planeId, new ParkedAircraft(planeId, dimension, position, callsign, destination));
         setDirty();
+    }
+
+    /**
+     * Everything the tower should be able to see: what is moving, plus what
+     * is standing at a gate. Parked entries are synthesised rather than
+     * stored as reports, since a TrafficReport is explicitly a live snapshot
+     * and these aircraft are not running.
+     */
+    public List<TrafficReport> allTraffic() {
+        List<TrafficReport> all = new ArrayList<>(airborneTraffic.values());
+        for (ParkedAircraft aircraft : parked.values()) {
+            if (airborneTraffic.containsKey(aircraft.planeId())) continue;
+            all.add(new TrafficReport(aircraft.planeId(), aircraft.callsign(), "WAITING",
+                    Vec3.atCenterOf(aircraft.position()), aircraft.destination(), false));
+        }
+        return all;
     }
 
     public void clearParked(UUID planeId) {
@@ -274,6 +307,8 @@ public class AirportRegistry extends SavedData {
             entry.putInt("x", aircraft.position().getX());
             entry.putInt("y", aircraft.position().getY());
             entry.putInt("z", aircraft.position().getZ());
+            entry.putString("callsign", aircraft.callsign());
+            entry.putString("destination", aircraft.destination());
             parkedList.add(entry);
         }
         tag.put("parked", parkedList);
@@ -292,8 +327,11 @@ public class AirportRegistry extends SavedData {
         for (int i = 0; i < parkedList.size(); i++) {
             CompoundTag entry = parkedList.getCompound(i);
             UUID id = entry.getUUID("planeId");
+            // Worlds saved before parked aircraft carried a callsign read as
+            // empty strings rather than failing to load.
             registry.parked.put(id, new ParkedAircraft(id, entry.getString("dimension"),
-                    new BlockPos(entry.getInt("x"), entry.getInt("y"), entry.getInt("z"))));
+                    new BlockPos(entry.getInt("x"), entry.getInt("y"), entry.getInt("z")),
+                    entry.getString("callsign"), entry.getString("destination")));
         }
         return registry;
     }

@@ -2,6 +2,7 @@ package com.skyport.client.gui;
 
 import com.skyport.data.AirportLayout;
 import com.skyport.data.Waypoint;
+import com.skyport.logic.GroundNetwork;
 import com.skyport.network.SaveAirportLayoutPayload;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -54,7 +55,10 @@ public class AirportMapScreen extends Screen {
 
     private enum EditMode {
         RUNWAY("Runway"), TAXIWAY("Taxiway"), HOLDING_PATTERN("Pattern"),
-        FINAL_LEG("Final"), GATE("Gate"), HOLD_SHORT("Hold Line"), HELIPAD("Pad");
+        FINAL_LEG("Final"), GATE("Gate"), HOLD_SHORT("Hold Line"), HELIPAD("Pad"),
+        /** Not a drawing mode: clicking an existing taxiway segment cycles
+         *  which way traffic may run along it. */
+        FLOW("Flow");
 
         final String label;
         EditMode(String label) { this.label = label; }
@@ -69,6 +73,9 @@ public class AirportMapScreen extends Screen {
     // number of blocks - a 24-block radius swallowed everything nearby at
     // close zoom, making precise placement impossible.
     private static final int NODE_SNAP_PIXELS = 4;
+    /** How near a click has to land to count as "on" a taxiway segment. */
+    private static final int FLOW_PICK_PIXELS = 6;
+    private static final int COLOR_FLOW_ARROW = 0xFF2B2B22;
     private static final long REJECTION_VISIBLE_MS = 4000;
     // Deliberately NOT a plausible ground color - real sampled terrain and
     // "not loaded yet" need to look obviously different, the way an
@@ -103,6 +110,11 @@ public class AirportMapScreen extends Screen {
     @Nullable
     private String rejection;
     private long rejectionShownAtMs;
+    /** Confirmation of the last direction change, so a click that only
+     *  alters an arrowhead still visibly did something. */
+    @Nullable
+    private String flowNotice;
+    private long flowNoticeShownAtMs;
 
     public AirportMapScreen(BlockPos stationPos, AirportLayout layout) {
         super(Component.translatable("gui.skyport.airport_map.title"));
@@ -130,9 +142,14 @@ public class AirportMapScreen extends Screen {
         int row2Y = row1Y + rowH + gap;
 
         // --- row 1: edit modes, split evenly across the map's width ---
+        // The mode row spans the whole screen rather than just the map:
+        // eight buttons across 320px leaves 38px each, which is narrower
+        // than the words "Hold Line" and "Pattern" actually are.
         int modeCount = EditMode.values().length;
-        int modeW = (mapW - (modeCount - 1) * 2) / modeCount;
-        int btnX = mapX;
+        int modeRowX = 10;
+        int modeRowW = width - 20;
+        int modeW = (modeRowW - (modeCount - 1) * 2) / modeCount;
+        int btnX = modeRowX;
         for (EditMode candidate : EditMode.values()) {
             addRenderableWidget(Button.builder(Component.literal(candidate.label), b -> mode = candidate)
                     .bounds(btnX, row1Y, modeW, rowH)
@@ -298,7 +315,7 @@ public class AirportMapScreen extends Screen {
             case HOLDING_PATTERN -> Waypoint.Type.HOLDING_PATTERN;
             case FINAL_LEG -> Waypoint.Type.FINAL_LEG;
             case HOLD_SHORT -> Waypoint.Type.HOLD_SHORT;
-            case GATE, HELIPAD -> throw new IllegalArgumentException(mode + " is a named point, not a Waypoint.Type");
+            case GATE, HELIPAD, FLOW -> throw new IllegalArgumentException(mode + " is not a Waypoint.Type");
         };
     }
 
@@ -306,6 +323,11 @@ public class AirportMapScreen extends Screen {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button == 0 && isInsideMap(mouseX, mouseY)) {
             BlockPos world = snapToExistingNode(screenToWorld((int) mouseX, (int) mouseY));
+
+            if (mode == EditMode.FLOW) {
+                cycleFlowAt(world);
+                return true;
+            }
 
             String refusal = whyCantPlace(world);
             if (refusal != null) {
@@ -390,6 +412,70 @@ public class AirportMapScreen extends Screen {
      * reason a click is refused, or null to allow it.
      */
     @Nullable
+    /**
+     * Cycle the direction of whichever taxiway segment was clicked.
+     *
+     * Picks by distance to the segment itself rather than to its endpoints:
+     * the natural thing to click is the middle of the line you want to make
+     * one-way, not one of the two dots at its ends.
+     */
+    private void cycleFlowAt(BlockPos clicked) {
+        List<Waypoint> taxiway = layout.waypoints(Waypoint.Type.TAXIWAY);
+        int best = -1;
+        double bestDistance = Double.MAX_VALUE;
+        for (int i = 0; i + 1 < taxiway.size(); i += 2) {
+            double distance = distanceToSegment(clicked,
+                    taxiway.get(i).pos(), taxiway.get(i + 1).pos());
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = i;
+            }
+        }
+
+        // In blocks, but scaled by zoom, so "near enough to mean that one"
+        // stays the same apparent distance however far out you are.
+        double tolerance = Math.max(4, FLOW_PICK_PIXELS * (double) blocksPerPixel());
+        if (best < 0 || bestDistance > tolerance) {
+            rejection = "Click on a taxiway segment to change its direction.";
+            rejectionShownAtMs = System.currentTimeMillis();
+            return;
+        }
+
+        rejection = null;
+        Waypoint start = taxiway.get(best);
+        Waypoint.Flow next = start.flow().next();
+        // The direction lives on the pair's first point; the second is
+        // rewritten too so the two never disagree if this ever changes.
+        taxiway.set(best, start.withFlow(next));
+        taxiway.set(best + 1, taxiway.get(best + 1).withFlow(next));
+        // One-way segments make it genuinely easy to draw a network where an
+        // aircraft can reach a gate but never leave it, and that is not
+        // visible by looking at the arrows. Say so straight away rather than
+        // letting it be discovered by a stuck aircraft later.
+        List<String> stranded = GroundNetwork.strandedGates(layout);
+        if (stranded.isEmpty()) {
+            flowNotice = "Segment " + (best / 2 + 1) + ": " + next.label();
+            flowNoticeShownAtMs = System.currentTimeMillis();
+        } else {
+            rejection = "One-way as drawn strands " + String.join(", ", stranded)
+                    + " - aircraft can't get there and back.";
+            rejectionShownAtMs = System.currentTimeMillis();
+        }
+    }
+
+    /** Perpendicular distance from a point to a line segment, in blocks. */
+    private static double distanceToSegment(BlockPos p, BlockPos a, BlockPos b) {
+        double dx = b.getX() - a.getX();
+        double dz = b.getZ() - a.getZ();
+        double lengthSq = dx * dx + dz * dz;
+        double t = lengthSq == 0 ? 0
+                : ((p.getX() - a.getX()) * dx + (p.getZ() - a.getZ()) * dz) / lengthSq;
+        t = Math.max(0, Math.min(1, t));
+        double ddx = p.getX() - (a.getX() + t * dx);
+        double ddz = p.getZ() - (a.getZ() + t * dz);
+        return Math.sqrt(ddx * ddx + ddz * ddz);
+    }
+
     private String whyCantPlace(BlockPos p) {
         boolean hasRunway = layout.waypoints(Waypoint.Type.RUNWAY).size() >= 2;
         List<Waypoint> taxiway = layout.waypoints(Waypoint.Type.TAXIWAY);
@@ -419,6 +505,10 @@ public class AirportMapScreen extends Screen {
             }
 
             case HOLDING_PATTERN -> null;
+
+            // Not placing anything - the click retargets an existing
+            // segment, and mouseClicked handles the "nothing there" case.
+            case FLOW -> null;
 
             // Pads stand alone - rotorcraft arrive vertically, so a helipad
             // needs no taxiway, no runway and nothing to connect to.
@@ -626,6 +716,9 @@ public class AirportMapScreen extends Screen {
         // a click that did work would be more confusing than no message.
         if (rejection != null && System.currentTimeMillis() - rejectionShownAtMs < REJECTION_VISIBLE_MS) {
             guiGraphics.drawString(font, rejection, mapX + 2, mapY + mapH + 12, 0xFFE0603A);
+        } else if (flowNotice != null
+                && System.currentTimeMillis() - flowNoticeShownAtMs < REJECTION_VISIBLE_MS) {
+            guiGraphics.drawString(font, flowNotice, mapX + 2, mapY + mapH + 12, 0xFFE8C34A);
         }
 
         guiGraphics.drawString(font, mode.label + " - " + hint(), mapX + 2, 3, 0xFFAAAAAA);
@@ -661,6 +754,7 @@ public class AirportMapScreen extends Screen {
             case GATE -> "click the end of a runway or taxiway line";
             case HOLD_SHORT -> "the ground stop line - planes wait here for the runway";
             case HELIPAD -> "click anywhere - helicopters and blimps land here";
+            case FLOW -> "click a taxiway segment to cycle two-way / one-way / reversed";
         };
     }
 
@@ -676,12 +770,56 @@ public class AirportMapScreen extends Screen {
             guiGraphics.fill(ax - 2, ay - 2, ax + 2, ay + 2, color);
             guiGraphics.fill(bx - 2, by - 2, bx + 2, by + 2, color);
             drawPixelLine(guiGraphics, ax, ay, bx, by, color);
+
+            // A one-way segment gets an arrowhead at its midpoint. Drawn on
+            // top of the line in a dark colour rather than beside it, so the
+            // direction is legible without a key and without moving the line
+            // itself off where it actually is.
+            Waypoint.Flow flow = points.get(i).flow();
+            if (flow == Waypoint.Flow.FORWARD) {
+                drawFlowArrow(guiGraphics, ax, ay, bx, by);
+            } else if (flow == Waypoint.Flow.REVERSE) {
+                drawFlowArrow(guiGraphics, bx, by, ax, ay);
+            }
         }
         if (points.size() % 2 == 1) {
             BlockPos last = points.get(points.size() - 1).pos();
             int lx = worldToScreenX(last), ly = worldToScreenY(last);
             guiGraphics.fill(lx - 2, ly - 2, lx + 2, ly + 2, color);
         }
+    }
+
+    /**
+     * An arrowhead at the middle of a segment, pointing from -> to.
+     *
+     * Built from two short lines swept back off the direction of travel,
+     * which is the cheapest thing that still reads as an arrow at the two or
+     * three pixels of width these lines actually get.
+     */
+    private void drawFlowArrow(GuiGraphics guiGraphics, int fromX, int fromY, int toX, int toY) {
+        double dx = toX - fromX;
+        double dy = toY - fromY;
+        double length = Math.sqrt(dx * dx + dy * dy);
+        if (length < 6) return; // too short to draw anything legible on
+
+        dx /= length;
+        dy /= length;
+        int midX = (fromX + toX) / 2;
+        int midY = (fromY + toY) / 2;
+
+        int size = 4;
+        // Rotate the reversed direction by +/- 40 degrees for the two barbs.
+        double angle = Math.toRadians(40);
+        double cos = Math.cos(angle), sin = Math.sin(angle);
+        double backX = -dx * size, backY = -dy * size;
+
+        int leftX = midX + (int) Math.round(backX * cos - backY * sin);
+        int leftY = midY + (int) Math.round(backX * sin + backY * cos);
+        int rightX = midX + (int) Math.round(backX * cos + backY * sin);
+        int rightY = midY + (int) Math.round(-backX * sin + backY * cos);
+
+        drawPixelLine(guiGraphics, midX, midY, leftX, leftY, COLOR_FLOW_ARROW);
+        drawPixelLine(guiGraphics, midX, midY, rightX, rightY, COLOR_FLOW_ARROW);
     }
 
     private void drawPath(GuiGraphics guiGraphics, List<Waypoint> points, int color) {

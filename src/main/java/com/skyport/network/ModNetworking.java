@@ -116,7 +116,7 @@ public class ModNetworking {
             com.skyport.blockentity.AtcBlockEntity.pruneGhostAirports(player.serverLevel(), registry);
             PacketDistributor.sendToPlayer(player, new AtcTrafficPayload(
                     List.copyOf(registry.all()),
-                    List.copyOf(registry.airborneTraffic().values())));
+                    List.copyOf(registry.allTraffic())));
         });
     }
 

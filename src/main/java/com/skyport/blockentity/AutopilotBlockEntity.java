@@ -11,6 +11,7 @@ import com.skyport.data.TrafficReport;
 import com.skyport.data.Waypoint;
 import com.skyport.network.OpenAutopilotPayload;
 import com.skyport.registry.ModBlockEntities;
+import com.skyport.logic.GroundNetwork;
 import com.skyport.world.FlightChunkLoader;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
@@ -41,12 +42,11 @@ import org.joml.Vector3d;
 import org.joml.Vector3dc;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.HashSet;
-import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.UUID;
 
@@ -193,6 +193,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      *  runs on the server thread with a player waiting. */
     private static final int TERRAIN_SCAN_MAX_GENERATED_CHUNKS = 64;
     private static final int TERRAIN_CLEARANCE_BLOCKS = 20;
+    /** How often to repeat a "this airport is missing something" warning
+     *  while an aircraft holds waiting for the player to fix it. */
+    private static final int MISSING_FACILITY_REPEAT_TICKS = 200;
     /** How many unsuccessful laps between "still waiting" reports. */
     private static final int HOLDING_REPORT_EVERY_LAPS = 2;
     /** How often to move the force-loaded bubble; every tick would churn. */
@@ -420,6 +423,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // the hard way somewhere over a mountain range.
         AirportLayout target = destinationAirportId() == null ? null
                 : AirportRegistry.get(serverLevel).byId(destinationAirportId()).orElse(null);
+        if (target != null && !destinationIsUsable(target)) {
+            setState(FlightState.IDLE);
+            return;
+        }
         if (target != null && !routeIsFlyable(serverLevel, reference, target)) {
             setState(FlightState.IDLE);
             return;
@@ -555,7 +562,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // even with these chunks unloaded.
             registry(serverLevel).reportParked(planeId(),
                     serverLevel.dimension().location().toString(),
-                    BlockPos.containing(simulatedPosition));
+                    BlockPos.containing(simulatedPosition),
+                    callsign(), destinationLabel(registry(serverLevel)));
 
             if (SkyportConfig.keepParkedLoaded) {
                 // Server has opted into schedules that run unattended: hold a
@@ -742,7 +750,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             case HOVERING -> {
                 BlockPos pad = destinationPad(destination);
                 if (pad == null) {
-                    arrive();
+                    holdForMissingPad(destination);
                 } else {
                     BlockPos standoff = new BlockPos(
                             pad.getX() + HOVER_STANDOFF_BLOCKS, cruiseAltitude(), pad.getZ());
@@ -758,7 +766,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             case VERTICAL_DESCENT -> {
                 BlockPos pad = destinationPad(destination);
                 if (pad == null) {
-                    arrive();
+                    holdForMissingPad(destination);
                 } else if (applyMotionTowards(pad)) {
                     arrive();
                 }
@@ -769,7 +777,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 if (craftType().isVertical()) {
                     BlockPos pad = destinationPad(destination);
                     if (pad == null) {
-                        arrive();
+                        holdForMissingPad(destination);
                     } else {
                         BlockPos overhead = withY(pad, cruiseAltitude());
                         applyMotionTowards(overhead);
@@ -1864,6 +1872,52 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** The pad this leg is heading for. Falls back to the airport's only pad
      *  if the schedule names one that has since been renamed or removed. */
     @org.jetbrains.annotations.Nullable
+    /**
+     * The destination has no pad to land on. Hold, don't pretend to arrive.
+     *
+     * This used to call arrive(), which is how a helicopter ended up taking
+     * off and immediately landing back on the pad it left. arrive() parks the
+     * aircraft: it sets WAITING, which stops issuing any motion at all, so
+     * the craft simply fell out of the air onto whatever was beneath it -
+     * usually its own departure pad, because the fake arrival happened the
+     * moment it reached cruise altitude overhead. Worse, it counted the leg
+     * as flown, so the schedule advanced past a stop the aircraft never
+     * reached.
+     *
+     * Now it holds altitude and keeps saying so. There is no correct
+     * automatic recovery - the layout is missing something only the player
+     * can draw - so the useful behaviour is to stay safely airborne and be
+     * loud about why.
+     */
+    private void holdForMissingPad(AirportLayout destination) {
+        climbVertically(cruiseAltitude());
+        if (tickCounter % MISSING_FACILITY_REPEAT_TICKS == 0) {
+            message("No landing pad at " + destination.displayName()
+                    + " - holding. Draw a pad there, or send this craft somewhere else.");
+        }
+    }
+
+    /**
+     * Can this craft actually land where it is being sent?
+     *
+     * Checked at engage alongside the terrain scan, for the same reason: the
+     * player is standing there and can fix it. A rotorcraft needs a pad and a
+     * plane needs a runway, and neither can be improvised on arrival.
+     */
+    private boolean destinationIsUsable(AirportLayout destination) {
+        if (craftType().isVertical()) {
+            if (!destination.helipads().isEmpty()) return true;
+            message(destination.displayName() + " has no landing pad - "
+                    + "draw one on its map before sending a " + craftType().name().toLowerCase(Locale.ROOT)
+                    + " there.");
+            return false;
+        }
+        if (positionsOf(destination, Waypoint.Type.RUNWAY).size() >= 2) return true;
+        message(destination.displayName() + " has no runway drawn - "
+                + "a plane cannot land there.");
+        return false;
+    }
+
     private BlockPos destinationPad(AirportLayout destination) {
         String name = destinationGateName();
         BlockPos pad = name == null ? null : destination.helipads().get(name);
@@ -2158,80 +2212,16 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return route.isEmpty() ? List.of(to) : route;
     }
 
-    /** Taxiway segments plus the runway, as an adjacency map keyed by node. */
-    private static Map<BlockPos, List<BlockPos>> groundGraph(AirportLayout layout) {
-        Map<BlockPos, List<BlockPos>> graph = new HashMap<>();
-        List<BlockPos> taxiway = positionsOf(layout, Waypoint.Type.TAXIWAY);
-        for (int i = 0; i + 1 < taxiway.size(); i += 2) {
-            link(graph, taxiway.get(i), taxiway.get(i + 1));
-        }
-        List<BlockPos> runway = positionsOf(layout, Waypoint.Type.RUNWAY);
-        if (runway.size() == 2) link(graph, runway.get(0), runway.get(1));
-        return graph;
-    }
-
-    private static void link(Map<BlockPos, List<BlockPos>> graph, BlockPos a, BlockPos b) {
-        graph.computeIfAbsent(a, k -> new ArrayList<>()).add(b);
-        graph.computeIfAbsent(b, k -> new ArrayList<>()).add(a);
-    }
-
     /**
-     * Dijkstra over the ground network. `from` and `to` are snapped to the
-     * nearest node first, since the plane is parked somewhere near the line
-     * rather than exactly on a drawn point.
+     * Route across the ground network.
+     *
+     * The graph and the search live in {@link GroundNetwork} because the map
+     * editor needs the same answers - once taxiway segments can be one-way,
+     * "can an aircraft still get to that gate" is a question the editor has
+     * to be able to ask before the player closes the screen.
      */
     private static List<BlockPos> shortestGroundRoute(AirportLayout layout, BlockPos from, BlockPos to) {
-        Map<BlockPos, List<BlockPos>> graph = groundGraph(layout);
-        if (graph.isEmpty()) return List.of();
-
-        BlockPos start = nearestNode(graph.keySet(), from);
-        BlockPos goal = nearestNode(graph.keySet(), to);
-        if (start == null || goal == null) return List.of();
-
-        Map<BlockPos, Double> best = new HashMap<>();
-        Map<BlockPos, BlockPos> cameFrom = new HashMap<>();
-        PriorityQueue<BlockPos> queue = new PriorityQueue<>(Comparator.comparingDouble(p -> best.getOrDefault(p, Double.MAX_VALUE)));
-        best.put(start, 0.0);
-        queue.add(start);
-
-        while (!queue.isEmpty()) {
-            BlockPos node = queue.poll();
-            if (node.equals(goal)) break;
-            double baseCost = best.getOrDefault(node, Double.MAX_VALUE);
-            for (BlockPos neighbour : graph.getOrDefault(node, List.of())) {
-                double cost = baseCost + horizontalDistance(node, neighbour);
-                if (cost < best.getOrDefault(neighbour, Double.MAX_VALUE)) {
-                    best.put(neighbour, cost);
-                    cameFrom.put(neighbour, node);
-                    queue.add(neighbour);
-                }
-            }
-        }
-        if (!best.containsKey(goal)) return List.of();
-
-        List<BlockPos> path = new ArrayList<>();
-        for (BlockPos at = goal; at != null; at = cameFrom.get(at)) {
-            path.add(at);
-            if (at.equals(start)) break;
-        }
-        java.util.Collections.reverse(path);
-        // The real destination (a gate) may sit slightly off its node.
-        if (!path.isEmpty() && !path.get(path.size() - 1).equals(to)) path.add(to);
-        return path;
-    }
-
-    @org.jetbrains.annotations.Nullable
-    private static BlockPos nearestNode(java.util.Collection<BlockPos> nodes, BlockPos to) {
-        BlockPos best = null;
-        double bestDist = Double.MAX_VALUE;
-        for (BlockPos node : nodes) {
-            double d = horizontalDistance(node, to);
-            if (d < bestDist) {
-                bestDist = d;
-                best = node;
-            }
-        }
-        return best;
+        return GroundNetwork.route(layout, from, to);
     }
 
     /**

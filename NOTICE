@@ -1,0 +1,31 @@
+Skyport
+Copyright (C) 2026 seanagain
+
+An airport and air-logistics system for Create Aeronautics.
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation, either version 3 of the License, or (at your
+option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public
+License for more details.
+
+You should have received a copy of the GNU Lesser General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+LGPL-3.0 is the GPL-3.0 plus a set of additional permissions, so both texts
+are included: LICENSE is the LGPL, COPYING is the GPL it refers to.
+
+In practice, for anyone using this mod:
+
+  - Playing with it, and including it in a modpack (free or paid), is fine
+    and needs no permission.
+  - Shipping it alongside your own mod is fine; your mod does not become
+    LGPL by depending on this one.
+  - Modifying Skyport itself and distributing the result means publishing
+    those changes under the LGPL as well.
+
+Third-party material bundled or relied upon is credited in CREDITS.md.

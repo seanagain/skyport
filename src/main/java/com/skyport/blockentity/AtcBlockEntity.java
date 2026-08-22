@@ -69,7 +69,7 @@ public class AtcBlockEntity extends BlockEntity {
         }
 
         List<AirportLayout> airports = List.copyOf(registry.all());
-        List<TrafficReport> traffic = List.copyOf(registry.airborneTraffic().values());
+        List<TrafficReport> traffic = List.copyOf(registry.allTraffic());
 
         PacketDistributor.sendToPlayer(player, new OpenAtcPayload(getBlockPos(), airports, traffic));
     }

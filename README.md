@@ -57,6 +57,11 @@ build a runway where you drew one, or find the taxiway to tow an aircraft to.
    - **Hold Line** - one point on the taxiway where aircraft wait for the
      runway.
    - **Pad** - helipads for rotorcraft, which need no runway at all.
+   - **Flow** - not a drawing mode. Click a taxiway segment to cycle it
+     two-way -> one-way -> one-way reversed; one-way segments get an
+     arrowhead. Aircraft route around them, so a loop with an inbound and an
+     outbound half lets arrivals and departures pass instead of queueing on
+     one shared strip. The editor refuses a change that would strand a gate.
 
    Clicks land on the exact block under the cursor, so zoom in (scroll or
    the -/+ buttons) for finer placement; the crosshair turns green when a
@@ -228,3 +233,13 @@ while and several GB).
   [Create: Lift n' Load](https://modrinth.com/mod/create-lift-n-load),
   [Create Aeronautics: Gadgets & Gizmos](https://modrinth.com/mod/create-aeronautics-gadgets-and-gizmos),
   [buoyancy-tweaks source](https://github.com/jreynolds72/create-aeronautics-buoyancy-tweaks)
+
+## License
+
+LGPL-3.0-or-later. `LICENSE` is the LGPL text and `COPYING` is the GPL it
+builds on; `NOTICE` summarises what that means in practice. The short version:
+use it, ship it in a modpack, and depend on it from your own mod freely -
+your mod does not become LGPL by depending on this one. Modify Skyport itself
+and redistribute that, and those changes have to be published too.
+
+Bundled third-party data is credited in `CREDITS.md`.

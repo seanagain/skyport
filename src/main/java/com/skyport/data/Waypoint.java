@@ -14,7 +14,56 @@ import net.minecraft.network.FriendlyByteBuf;
  * deciding when to switch from RUNWAY to TAXIWAY, etc.) belongs in the
  * autopilot's flight state machine, not here.
  */
-public record Waypoint(BlockPos pos, Type type, int order) {
+public record Waypoint(BlockPos pos, Type type, int order, Flow flow) {
+
+    /**
+     * Which way traffic may move along a taxiway segment.
+     *
+     * Only meaningful on the FIRST point of a TAXIWAY pair, and ignored
+     * everywhere else - a runway is flown in the direction the wind and the
+     * layout dictate, not the direction it was drawn.
+     *
+     * One-way taxiways exist because a two-way ground network turns into a
+     * standoff the moment two aircraft want the same strip from opposite
+     * ends. Marking the inbound and outbound halves of a loop separately
+     * lets arrivals and departures pass each other instead of queueing on
+     * one shared line.
+     */
+    public enum Flow {
+        /** Traffic may move either way. The default, and right for a spur
+         *  that dead-ends at a gate - there is nothing to conflict with. */
+        BOTH,
+        /** Only first point -> second point, in drawing order. */
+        FORWARD,
+        /** Only second point -> first point. */
+        REVERSE;
+
+        public Flow next() {
+            return switch (this) {
+                case BOTH -> FORWARD;
+                case FORWARD -> REVERSE;
+                case REVERSE -> BOTH;
+            };
+        }
+
+        public String label() {
+            return switch (this) {
+                case BOTH -> "two-way";
+                case FORWARD -> "one-way";
+                case REVERSE -> "one-way (reversed)";
+            };
+        }
+    }
+
+    /** Most waypoints have no direction to speak of. */
+    public Waypoint(BlockPos pos, Type type, int order) {
+        this(pos, type, order, Flow.BOTH);
+    }
+
+    public Waypoint withFlow(Flow newFlow) {
+        return new Waypoint(pos, type, order, newFlow);
+    }
+
 
     public enum Type {
         /**
@@ -72,6 +121,7 @@ public record Waypoint(BlockPos pos, Type type, int order) {
         tag.putInt("z", pos.getZ());
         tag.putString("type", type.name());
         tag.putInt("order", order);
+        if (flow != Flow.BOTH) tag.putString("flow", flow.name());
         return tag;
     }
 
@@ -79,7 +129,10 @@ public record Waypoint(BlockPos pos, Type type, int order) {
         return new Waypoint(
                 new BlockPos(tag.getInt("x"), tag.getInt("y"), tag.getInt("z")),
                 Type.valueOf(tag.getString("type")),
-                tag.getInt("order"));
+                tag.getInt("order"),
+                // Absent on layouts drawn before one-way taxiways existed,
+                // which is exactly the two-way behaviour they had.
+                tag.contains("flow") ? Flow.valueOf(tag.getString("flow")) : Flow.BOTH);
     }
 
     /** Network (de)serialization - separate from save()/load() (NBT) so
@@ -88,9 +141,11 @@ public record Waypoint(BlockPos pos, Type type, int order) {
         buf.writeBlockPos(pos);
         buf.writeEnum(type);
         buf.writeVarInt(order);
+        buf.writeEnum(flow);
     }
 
     public static Waypoint read(FriendlyByteBuf buf) {
-        return new Waypoint(buf.readBlockPos(), buf.readEnum(Type.class), buf.readVarInt());
+        return new Waypoint(buf.readBlockPos(), buf.readEnum(Type.class), buf.readVarInt(),
+                buf.readEnum(Flow.class));
     }
 }
