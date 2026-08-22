@@ -580,6 +580,12 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 if (back == null) {
                     setState(FlightState.TAXI_OUT);
                 } else if (applyMotionTowards(back)) {
+                    // Reversing onto the taxiway IS joining the network, so
+                    // forget where we joined from. Leaving it set made the
+                    // taxi route start beside the gate again - the aircraft
+                    // backed out, turned, drove back to the stand it had just
+                    // left, turned once more, and only then set off.
+                    joinPoint = null;
                     note("Pushback complete.");
                     setState(FlightState.TAXI_OUT);
                 }
