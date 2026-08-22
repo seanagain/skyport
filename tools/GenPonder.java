@@ -25,52 +25,85 @@ public class GenPonder {
         // Each scene is a small apron of andesite with the block being
         // explained sitting on it, plus a strip of concrete standing in for
         // a runway so the scenes read as an airfield.
-        // The station sits beside its airfield, overlooking the apron.
+        // The station sits clear of the movement areas, beside its airfield.
         Structure station = airfield();
-        station.set(2, 1, 6, "skyport:airport_station");
+        station.set(1, 1, 9, "skyport:airport_station");
         write(new File(dir, "airport_station.nbt"), station);
 
-        // The autopilot sits on a stub of aircraft parked at the gate.
+        // An actual little aeroplane, parked at the threshold, with the
+        // autopilot on its back. The scene flies it, so it has to read as an
+        // aircraft rather than as a block on a slab.
         Structure autopilot = airfield();
-        autopilot.set(5, 1, 6, "minecraft:iron_block");
-        autopilot.set(6, 1, 6, "minecraft:iron_block");
-        autopilot.set(5, 2, 6, "skyport:autopilot");
+        plane(autopilot, 2, 1, 5);
         write(new File(dir, "autopilot.nbt"), autopilot);
 
-        // The tower stands clear of the movement areas, raised to look over.
+        // The tower, raised so it overlooks the field.
         Structure atc = airfield();
-        atc.set(1, 1, 7, "minecraft:stone_bricks");
-        atc.set(1, 2, 7, "skyport:atc");
+        atc.set(1, 1, 9, "minecraft:stone_bricks");
+        atc.set(1, 2, 9, "minecraft:stone_bricks");
+        atc.set(1, 3, 9, "skyport:atc");
         write(new File(dir, "atc.nbt"), atc);
         System.out.println("wrote 3 ponder structures to " + dir);
     }
 
     /**
-     * A 9x9 patch of airfield: a concrete runway with a dashed centreline, a
-     * yellow taxiway leading off it, and an orange gate pad.
+     * An 11x11 airfield: runway with a dashed centreline, a taxiway to a
+     * gate, a holding pattern marked out as a loop, and the final leg that
+     * joins the two.
      *
-     * The scenes previously showed an identical bare plate for all three
-     * blocks, which taught nothing - the point of a Ponder scene is to look
-     * like the thing being explained.
+     * The pattern and final leg are flown in the air, not driven on the
+     * ground - painting them here is a cheat, but it is the only way to show
+     * their shape in a scene that cannot depict altitude.
      */
     static Structure airfield() {
-        Structure s = new Structure(9, 3, 9);
-        for (int x = 0; x < 9; x++) {
-            for (int z = 0; z < 9; z++) {
+        Structure s = new Structure(11, 4, 11);
+        for (int x = 0; x < 11; x++) {
+            for (int z = 0; z < 11; z++) {
                 s.set(x, 0, z, "minecraft:grass_block");
             }
         }
-        // Runway along the far edge, centreline dashed down the middle.
-        for (int x = 0; x < 9; x++) {
-            s.set(x, 1, 1, "minecraft:light_gray_concrete");
-            s.set(x, 1, 2, x % 2 == 0 ? "minecraft:white_concrete" : "minecraft:light_gray_concrete");
-            s.set(x, 1, 3, "minecraft:light_gray_concrete");
+        // Runway across the middle, dashed centreline.
+        for (int x = 1; x < 10; x++) {
+            s.set(x, 1, 4, "minecraft:light_gray_concrete");
+            s.set(x, 1, 5, x % 2 == 0 ? "minecraft:white_concrete" : "minecraft:light_gray_concrete");
+            s.set(x, 1, 6, "minecraft:light_gray_concrete");
         }
-        // Taxiway down to a gate apron.
-        for (int z = 4; z < 7; z++) s.set(6, 1, z, "minecraft:yellow_concrete");
-        s.set(6, 1, 7, "minecraft:orange_concrete");
-        s.set(5, 1, 7, "minecraft:orange_concrete");
+        // Taxiway down from the runway to a gate apron.
+        for (int z = 7; z < 10; z++) s.set(8, 1, z, "minecraft:yellow_concrete");
+        s.set(7, 1, 9, "minecraft:orange_concrete");
+        s.set(8, 1, 10, "minecraft:red_concrete"); // hold line
+        // Holding pattern: a racetrack off the approach end.
+        for (int x = 1; x < 5; x++) {
+            s.set(x, 1, 0, "minecraft:blue_concrete");
+            s.set(x, 1, 2, "minecraft:blue_concrete");
+        }
+        s.set(0, 1, 1, "minecraft:blue_concrete");
+        s.set(4, 1, 1, "minecraft:blue_concrete");
+        // Final leg: pattern down onto the runway threshold.
+        s.set(3, 1, 3, "minecraft:light_blue_concrete");
+        s.set(2, 1, 2, "minecraft:light_blue_concrete");
         return s;
+    }
+
+    /**
+     * A small aeroplane: fuselage, swept wings, a tail fin, and the
+     * Autopilot sitting on top pointing along it.
+     *
+     * Built from iron so it reads as a machine rather than scenery, and
+     * kept to five blocks long so the whole thing fits in a scene and can be
+     * flown across it without leaving the plate.
+     */
+    static void plane(Structure s, int x, int y, int z) {
+        for (int i = 0; i < 4; i++) s.set(x + i, y + 1, z, "minecraft:iron_block");
+        // Wings, one block back from the nose.
+        s.set(x + 1, y + 1, z - 1, "minecraft:iron_block");
+        s.set(x + 1, y + 1, z + 1, "minecraft:iron_block");
+        // Tailplane and fin at the back.
+        s.set(x, y + 1, z - 1, "minecraft:light_gray_concrete");
+        s.set(x, y + 1, z + 1, "minecraft:light_gray_concrete");
+        s.set(x, y + 2, z, "minecraft:light_gray_concrete");
+        // The block being explained, facing along the fuselage.
+        s.set(x + 2, y + 2, z, "skyport:autopilot");
     }
 
     static void write(File file, Structure structure) throws IOException {

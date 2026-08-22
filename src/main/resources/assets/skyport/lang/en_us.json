@@ -30,7 +30,9 @@
   "skyport.ponder.airport_station.text_2": "Draw the runway first - two points, gate end then far end. Everything else connects to it.",
   "skyport.ponder.airport_station.text_3": "Taxiway clicks are read in PAIRS. Each pair is one segment: a backbone from the runway, then a spur out to each gate.",
   "skyport.ponder.airport_station.text_4": "A Hold Line on the taxiway is where aircraft queue for the runway. Gates and Pads are where they park.",
-  "skyport.ponder.airport_station.text_5": "Hold this block to see the layout traced in the world, so you can build a runway where you drew one.",
+  "skyport.ponder.airport_station.text_5": "The Holding Pattern is a loop flown in the air, at its own altitude. Arrivals circle here when the runway is busy.",
+  "skyport.ponder.airport_station.text_6": "The Final Leg runs FROM the pattern TO the runway - draw it that way round. Aircraft descend along it to land.",
+  "skyport.ponder.airport_station.text_7": "Hold this block to see the layout traced in the world, so you can build a runway where you drew one.",
 
   "skyport.ponder.autopilot.header": "Flying a schedule",
   "skyport.ponder.autopilot.text_1": "The Autopilot flies one aircraft. Place it on the craft with the arrow on top pointing along the fuselage.",
@@ -42,5 +44,6 @@
   "skyport.ponder.atc.header": "Watching the traffic",
   "skyport.ponder.atc.text_1": "Air Traffic Control shows every airport and every aircraft under autopilot on one live map.",
   "skyport.ponder.atc.text_2": "Drag to pan, scroll to zoom. The strip on the right lists each aircraft and what it is doing right now.",
-  "skyport.ponder.atc.text_3": "Opening it also wakes aircraft parked at airports nobody is visiting, so their schedules pick up again."
+  "skyport.ponder.atc.text_3": "Point a Create Display Link at this block, or at a station, to put the same traffic on a departures board.",
+  "skyport.ponder.atc.text_4": "Opening it also wakes aircraft parked at airports nobody is visiting, so their schedules pick up again."
 }

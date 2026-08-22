@@ -52,11 +52,13 @@ public class FlightBoardDisplaySource extends DisplaySource {
             if (airportId == null) return List.of(line("No airport drawn", ChatFormatting.GRAY));
             AirportLayout layout = registry.byId(airportId).orElse(null);
             if (layout == null) return List.of(line("No airport drawn", ChatFormatting.GRAY));
-            return board(layout.displayName(), forAirport(traffic, layout), stats);
+            // Airport board: gates, since the airport is a given here.
+            return board(layout.displayName(), forAirport(traffic, layout), stats, false);
         }
 
         if (source instanceof AtcBlockEntity) {
-            return board("All traffic", traffic, stats);
+            // Tower board: airports, since that is what differs.
+            return board("All traffic", traffic, stats, true);
         }
 
         return EMPTY;
@@ -71,8 +73,23 @@ public class FlightBoardDisplaySource extends DisplaySource {
         return mine;
     }
 
+    /**
+     * Where an aircraft is going, worded for whichever board is asking.
+     *
+     * At an airport the airport name is redundant - everything on that board
+     * is coming here - so it shows the gate, which is what someone standing
+     * in the terminal actually wants. The tower board shows the airport,
+     * since that is the part that varies.
+     */
+    private static String destination(TrafficReport report, boolean showAirport) {
+        String where = report.destination();
+        int split = where.indexOf(" / ");
+        if (split < 0) return where;
+        return showAirport ? where.substring(0, split) : where.substring(split + 3);
+    }
+
     private static List<MutableComponent> board(String heading, List<TrafficReport> traffic,
-                                                DisplayTargetStats stats) {
+                                                DisplayTargetStats stats, boolean showAirport) {
         List<MutableComponent> lines = new ArrayList<>();
         lines.add(line(heading, ChatFormatting.WHITE));
 
@@ -86,7 +103,8 @@ public class FlightBoardDisplaySource extends DisplaySource {
         int room = Math.max(1, stats.maxRows() - 1);
         for (int i = 0; i < traffic.size() && i < room; i++) {
             TrafficReport report = traffic.get(i);
-            lines.add(Component.literal(report.callsign() + "  " + phase(report.state()))
+            lines.add(Component.literal(report.callsign() + "  " + destination(report, showAirport)
+                            + "  " + phase(report.state()))
                     .withStyle(report.airborne() ? ChatFormatting.AQUA : ChatFormatting.GOLD));
         }
         if (traffic.size() > room) {

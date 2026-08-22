@@ -354,6 +354,16 @@ public class AtcScreen extends Screen {
             status = airports.size() + " airport(s), " + traffic.size() + " flying";
         }
         guiGraphics.drawString(font, status, mapX, mapY + mapH + 4, 0xFFAAAAAA);
+
+        // Cursor position in world coordinates - the map is the only place
+        // you can read off where to put something before you fly there.
+        if (overMap(mouseX, mouseY)) {
+            int worldX = centreX + (int) Math.round((mouseX - (mapX + mapW / 2.0)) * blocksPerPixel);
+            int worldZ = centreZ + (int) Math.round((mouseY - (mapY + mapH / 2.0)) * blocksPerPixel);
+            String coords = "X " + worldX + "   Z " + worldZ;
+            guiGraphics.drawString(font, coords,
+                    mapX + mapW - font.width(coords) - 2, mapY + mapH - 10, 0xFFD9D9D9);
+        }
     }
 
     /**

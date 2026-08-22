@@ -168,6 +168,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      *  than overhead, so the aircraft leaving can climb straight out. */
     private static final int HOVER_STANDOFF_BLOCKS = 24;
     private static final int HOVER_RECHECK_INTERVAL_TICKS = 20;
+    /** How far back from the hold line to wait, so the junction stays clear
+     *  for anything that needs to pass. */
+    private static final int HOLD_LINE_STANDOFF_BLOCKS = 8;
     /** How the route is sampled for terrain, and how much air to insist on
      *  above the highest ground found. */
     private static final int TERRAIN_SCAN_SPACING = 32;
@@ -611,12 +614,17 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                         break;
                     }
                 } else if (!clearedPastHoldShort) {
-                    // Roll up to the line first...
+                    // Roll up to just short of the line, not onto it. Stopping
+                    // exactly on the hold point parks the aircraft in the
+                    // junction itself, where it blocks anything trying to get
+                    // past; a real one waits back from the line and leaves the
+                    // intersection clear.
+                    final AirportLayout departure = origin;
                     final BlockPos holdTarget = holdShort;
                     followWaypoints(path(() -> {
                         List<BlockPos> toHold = new ArrayList<>();
                         if (joinPoint != null) toHold.add(joinPoint);
-                        toHold.add(holdTarget);
+                        toHold.add(standoffBefore(departure, holdTarget));
                         return toHold;
                     }), () -> {
                         // ...and only ask for the runway once we're sitting on it.
@@ -1450,13 +1458,50 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * nothing to back out of, so the plane just turns and goes.
      */
     @org.jetbrains.annotations.Nullable
+    /**
+     * A waiting spot short of the hold line, backed off along the route the
+     * aircraft arrived on.
+     *
+     * Falls back to the line itself if there's no route to measure a
+     * direction from - being on the line beats not knowing where to stop.
+     */
+    private BlockPos standoffBefore(AirportLayout origin, BlockPos holdShort) {
+        List<BlockPos> route = groundTaxiPath(origin, false);
+        BlockPos previous = null;
+        for (BlockPos node : route) {
+            if (node.equals(holdShort)) break;
+            previous = node;
+        }
+        if (previous == null) previous = joinPoint;
+        if (previous == null) return holdShort;
+
+        double dx = previous.getX() - holdShort.getX();
+        double dz = previous.getZ() - holdShort.getZ();
+        double length = Math.sqrt(dx * dx + dz * dz);
+        if (length < 1.0) return holdShort;
+
+        return new BlockPos(
+                (int) Math.round(holdShort.getX() + dx / length * HOLD_LINE_STANDOFF_BLOCKS),
+                holdShort.getY(),
+                (int) Math.round(holdShort.getZ() + dz / length * HOLD_LINE_STANDOFF_BLOCKS));
+    }
+
     private BlockPos pushbackTarget(AirportLayout origin) {
         List<BlockPos> route = groundTaxiPath(origin, false);
         if (route.size() < 2) return null; // straight onto the runway
-        BlockPos first = route.get(0);
+
+        // The SECOND node, not the first. The first is whatever node the
+        // aircraft is already parked on, so reversing to it barely moves -
+        // which is why pushback used to be a nudge and a pirouette. A real
+        // pushback runs the length of the stand's spur, back to the junction
+        // where it can turn and drive forward.
+        BlockPos junction = route.get(1);
+
+        // Unless that junction is the runway itself: a stand that opens
+        // straight onto it has nothing to back along, so just turn and go.
         List<BlockPos> runway = positionsOf(origin, Waypoint.Type.RUNWAY);
-        if (!runway.isEmpty() && first.equals(runway.get(0))) return null;
-        return first;
+        if (!runway.isEmpty() && junction.equals(runway.get(0))) return null;
+        return junction;
     }
 
     /** Names whatever is keeping this plane out of the airport, so "why is it
