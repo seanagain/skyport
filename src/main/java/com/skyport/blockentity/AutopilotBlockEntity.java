@@ -112,6 +112,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** Taxi speed - slower, so the craft actually settles on tightly spaced
      *  ground waypoints instead of sailing past them and turning back. */
     private static final double CRAFT_TAXI_SPEED = 4.0;
+    /** Pushback, a little below taxi speed. Reversing should read as
+     *  deliberate rather than brisk, but it was a crawl before - see
+     *  alignmentFactor, which was throttling it for facing "the wrong way". */
+    private static final double CRAFT_PUSHBACK_SPEED = 3.0;
     /** Rotation speed, reached by half the runway's length. */
     private static final double CRAFT_TAKEOFF_SPEED = 14.0;
     /** Climb-out angle. Shallower than the 30-degree structural cap because
@@ -123,6 +127,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** Fraction of the velocity error corrected per physics tick. Low on
      *  purpose: a heavy contraption yanked to a new velocity looks wrong. */
     private static final double CRAFT_STEER_GAIN = 0.25;
+    /** One server tick. The steering gains were tuned per physics step, so
+     *  this is what they are re-scaled against when a step runs long. */
+    private static final double NOMINAL_STEP_SECONDS = 0.05;
     /** Slows the craft as it closes on a waypoint so it settles rather than
      *  overshooting - speed is capped at distance * this. */
     private static final double CRAFT_APPROACH_GAIN = 0.6;
@@ -226,6 +233,16 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** Whether the waypoint being steered to is one to stop at, rather than
      *  a turn point to carry speed through. */
     private boolean steeringToLastWaypoint = true;
+    /** Length of the last physics step, in seconds. Held between the tick
+     *  callback and the steering code, which needs it to stay lag-neutral. */
+    private double physicsStepSeconds = NOMINAL_STEP_SECONDS;
+    /** The waypoint the distance below belongs to. Compared by value so that
+     *  every way of changing target - arriving, cutting a corner, changing
+     *  state - resets the memory, rather than only the ones we remembered. */
+    private BlockPos lastWaypointTarget;
+    /** Distance to the current waypoint on the previous steering pass, for
+     *  spotting one that was flown straight past - see steerCraftTowards. */
+    private double lastWaypointDistance = Double.MAX_VALUE;
     /** Chunks this plane is currently force-loading. Transient: tickets do
      *  not survive a restart, and neither should our record of them. */
     private final transient Set<ChunkPos> heldChunks = new HashSet<>();
@@ -478,6 +495,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         this.activeSubLevel = subLevel;
         this.lastPhysicsTickGameTime = serverLevel.getGameTime();
+        // Clamped, not trusted: a stalled server can hand back a huge step,
+        // and scaling a velocity correction by it would fire the craft off
+        // the map on the first tick after the hitch.
+        this.physicsStepSeconds = Math.max(0.005, Math.min(0.25, deltaSeconds));
 
         // The craft's real world position: this block sits at local
         // coordinates inside the sub-level, and the sub-level's pose maps
@@ -1071,6 +1092,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * speed if that's already slower.
      */
     private double currentTopSpeed() {
+        if (state == FlightState.PUSHBACK) return CRAFT_PUSHBACK_SPEED;
         if (isGroundState()) return CRAFT_TAXI_SPEED;
         if (state == FlightState.HOLDING || state == FlightState.APPROACH) {
             return Math.min(cruiseSpeed(), CRAFT_PATTERN_SPEED);
@@ -1110,10 +1132,29 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         Vec3 position = simulatedPosition;
         Vec3 delta = Vec3.atCenterOf(target).subtract(position);
         double distance = delta.length();
-        if (distance <= CRAFT_ARRIVAL_RADIUS) {
+
+        // A new waypoint starts with no history, or the check below would
+        // read "further than last time" off the point we were flying to
+        // before and count the new one as already reached.
+        if (!target.equals(lastWaypointTarget)) {
+            lastWaypointTarget = target;
+            lastWaypointDistance = Double.MAX_VALUE;
+        }
+
+        // Arrival is a sphere, and a sphere can be jumped clean over: one
+        // long physics step - a server hitch, a chunk load - moves the craft
+        // further than the radius and it never registers, so it turns around
+        // and comes back for a point it has already passed. Receding from a
+        // waypoint it had got close to counts as reaching it.
+        boolean passed = distance > lastWaypointDistance
+                && lastWaypointDistance <= CRAFT_ARRIVAL_RADIUS * 2.5;
+        if (distance <= CRAFT_ARRIVAL_RADIUS || passed) {
             pitchDegrees = 0;
+            lastWaypointTarget = null;
+            lastWaypointDistance = Double.MAX_VALUE;
             return true;
         }
+        lastWaypointDistance = distance;
 
         Vec3 heading = delta.normalize();
         boolean onGround = isGroundState();
@@ -1150,7 +1191,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         Vec3 desired = heading.scale(speed);
 
         Vector3dc v = activeBody.getLinearVelocity();
-        Vec3 correction = desired.subtract(new Vec3(v.x(), v.y(), v.z())).scale(CRAFT_STEER_GAIN);
+        // Correct a fixed fraction of the error per SECOND rather than per
+        // call. At the nominal 20 ticks a second this is exactly the old
+        // behaviour; when the server is running long steps it stops the
+        // craft steering sluggishly just because it is being asked less
+        // often. Capped at 1 so it converges instead of overshooting.
+        double gain = Math.min(1.0, CRAFT_STEER_GAIN * physicsStepSeconds / NOMINAL_STEP_SECONDS);
+        Vec3 correction = desired.subtract(new Vec3(v.x(), v.y(), v.z())).scale(gain);
 
         // Pushing back: keep the nose where it is and roll backwards. Steering
         // toward the heading would have the plane pirouette on the stand.
@@ -1193,6 +1240,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (noseLen < 1.0e-6 || headLen < 1.0e-6) return 1.0;
 
         double dot = (nose.x * heading.x + nose.z * heading.z) / (noseLen * headLen);
+        // Reversing off a stand is nose-backwards on purpose, so a dot of -1
+        // there means perfectly aligned, not perfectly wrong. Without this
+        // the whole pushback ran at the misalignment floor - a crawl - which
+        // only became obvious once pushback covered the full gate spur.
+        if (state == FlightState.PUSHBACK) dot = Math.abs(dot);
         // 1 when pointing straight at it, tapering to a crawl when sideways -
         // never zero, or a craft that starts badly aligned could never build
         // the speed it needs for the turn to bite.

@@ -168,22 +168,33 @@ public class SkyportPonder implements PonderPlugin {
                 .placeNearTarget();
         scene.idle(80);
 
-        // Engaged: roll down the runway and climb away. Detaching the
-        // aircraft from the world section is what lets it be moved at all -
-        // Ponder can animate a section, but only once it is independent of
-        // the structure it was loaded as part of.
+        // Engaged by redstone, then away. Showing the lever thrown beats
+        // asserting that redstone works, and it is the same control players
+        // will wire a schedule or a clock into.
+        scene.overlay().showControls(new Vec3(5.5, 3.5, 5.5), Pointing.DOWN, 30).rightClick();
         scene.overlay().showText(70)
-                .text("Engage from the screen, or with a redstone signal - powered "
-                        + "flies the saved schedule, unpowered stops it.")
+                .text("Engage it from that screen, or feed the block a redstone signal.")
                 .colored(PonderPalette.RED)
+                .pointAt(new Vec3(5.5, 3.5, 5.5))
                 .placeNearTarget();
-        scene.idle(40);
+        scene.idle(35);
+        scene.world().toggleRedstonePower(util.select().position(5, 3, 5));
+        scene.idle(45);
 
+        // Detaching the aircraft from the loaded structure is what lets it be
+        // moved at all - Ponder animates a section only once it is
+        // independent of the structure it came in as part of.
         ElementLink<WorldSectionElement> flying = scene.world().makeSectionIndependent(aircraft);
         scene.world().moveSection(flying, new Vec3(4, 0, 0), 40);   // takeoff roll
-        scene.idle(40);
+        scene.idle(45);
         scene.world().moveSection(flying, new Vec3(5, 4, 0), 50);   // rotate and climb out
-        scene.idle(55);
+        scene.overlay().showText(80)
+                .text("Cutting that signal disengages the autopilot, even mid-flight, "
+                        + "and hands the craft back. It reads the level, not a pulse, so "
+                        + "a lever left on still means \"flying\" after a reload.")
+                .colored(PonderPalette.MEDIUM)
+                .placeNearTarget();
+        scene.idle(85);
     }
 
     private static void atc(SceneBuilder scene, SceneBuildingUtil util) {

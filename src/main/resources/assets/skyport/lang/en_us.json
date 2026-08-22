@@ -39,7 +39,8 @@
   "skyport.ponder.autopilot.text_2": "That arrow is how it knows which way the nose faces - a craft is just a pile of blocks otherwise.",
   "skyport.ponder.autopilot.text_3": "Build a schedule of stops, like a train's. Each stop waits for a timer, a player, or cargo to be loaded or unloaded.",
   "skyport.ponder.autopilot.text_4": "Choose Plane, Heli or Blimp. Planes need a runway; the other two lift straight off a pad.",
-  "skyport.ponder.autopilot.text_5": "Engage from the screen, or with a redstone signal - powered flies the saved schedule, unpowered stops it.",
+  "skyport.ponder.autopilot.text_5": "Engage it from that screen, or feed the block a redstone signal.",
+  "skyport.ponder.autopilot.text_6": "Cutting that signal disengages the autopilot, even mid-flight, and hands the craft back. It reads the level, not a pulse, so a lever left on still means \"flying\" after a reload.",
 
   "skyport.ponder.atc.header": "Watching the traffic",
   "skyport.ponder.atc.text_1": "Air Traffic Control shows every airport and every aircraft under autopilot on one live map.",

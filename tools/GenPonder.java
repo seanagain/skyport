@@ -102,8 +102,12 @@ public class GenPonder {
         s.set(x, y + 1, z - 1, "minecraft:light_gray_concrete");
         s.set(x, y + 1, z + 1, "minecraft:light_gray_concrete");
         s.set(x, y + 2, z, "minecraft:light_gray_concrete");
-        // The block being explained, facing along the fuselage.
-        s.set(x + 2, y + 2, z, "skyport:autopilot");
+        // The block being explained, facing along the fuselage - the scene
+        // flies the plane east, so the nose arrow has to point east too.
+        s.set(x + 2, y + 2, z, "skyport:autopilot", "facing=east");
+        // A lever on the nose, so the scene can show redstone cutting the
+        // autopilot out rather than only asserting that it does.
+        s.set(x + 3, y + 2, z, "minecraft:lever", "face=floor", "facing=east", "powered=false");
     }
 
     static void write(File file, Structure structure) throws IOException {
@@ -130,9 +134,27 @@ public class GenPonder {
         }
 
         void set(int x, int y, int z, String blockName) {
-            int index = palette.indexOf(blockName);
+            set(x, y, z, blockName, new String[0]);
+        }
+
+        /**
+         * Place a block in a non-default state, e.g.
+         * { set(4, 3, 5, "skyport:autopilot", "facing=east")}.
+         *
+         * Needed because the Autopilot has to point along the fuselage of
+         * the aeroplane it sits on - left in its default state it faces
+         * north while the plane flies east, which is exactly the mistake the
+         * scene is meant to warn against.
+         */
+        void set(int x, int y, int z, String blockName, String... properties) {
+            // Two states of the same block are two palette entries, so the
+            // key has to carry the properties as well as the name.
+            String key = properties.length == 0
+                    ? blockName
+                    : blockName + "|" + String.join(",", properties);
+            int index = palette.indexOf(key);
             if (index < 0) {
-                palette.add(blockName);
+                palette.add(key);
                 index = palette.size() - 1;
             }
             blocks.add(new int[] { x, y, z, index });
@@ -147,10 +169,22 @@ public class GenPonder {
             out.writeUTF("palette");
             out.writeByte(10);
             out.writeInt(palette.size());
-            for (String name : palette) {
+            for (String key : palette) {
+                int bar = key.indexOf('|');
                 out.writeByte(8);
                 out.writeUTF("Name");
-                out.writeUTF(name);
+                out.writeUTF(bar < 0 ? key : key.substring(0, bar));
+                if (bar >= 0) {
+                    out.writeByte(10);
+                    out.writeUTF("Properties");
+                    for (String property : key.substring(bar + 1).split(",")) {
+                        int equals = property.indexOf('=');
+                        out.writeByte(8);
+                        out.writeUTF(property.substring(0, equals));
+                        out.writeUTF(property.substring(equals + 1));
+                    }
+                    out.writeByte(0);
+                }
                 out.writeByte(0);
             }
 
