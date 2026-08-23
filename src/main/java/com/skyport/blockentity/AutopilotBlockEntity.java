@@ -595,7 +595,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             registry(serverLevel).reportParked(planeId(),
                     serverLevel.dimension().location().toString(),
                     BlockPos.containing(simulatedPosition),
-                    callsign(), destinationLabel(registry(serverLevel)));
+                    callsign(), destinationLabel(registry(serverLevel)),
+                    serverLevel.getGameTime());
 
             if (SkyportConfig.keepParkedLoaded) {
                 // Server has opted into schedules that run unattended: hold a

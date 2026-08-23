@@ -237,8 +237,28 @@ public class AirportRegistry extends SavedData {
     public record ParkedAircraft(UUID planeId, String dimension, BlockPos position,
                                  String callsign, String destination) { }
 
+    /**
+     * When each parked aircraft last reported in.
+     *
+     * A parked aircraft that is still ticking and one whose chunks have been
+     * released look identical in the list above - both are simply "parked" -
+     * but only the second needs waking, and the tower is where someone would
+     * go to find that out. Transient because it means nothing after a
+     * restart: everything is asleep then, which is precisely what the absence
+     * of an entry says.
+     */
+    private final transient Map<UUID, Long> parkedLastSeen = new HashMap<>();
+
+    /** Longer than the report interval, short enough that an aircraft whose
+     *  chunks were just released shows as asleep almost immediately. */
+    private static final long PARKED_AWAKE_WINDOW_TICKS = 40;
+
     public void reportParked(UUID planeId, String dimension, BlockPos position,
-                             String callsign, String destination) {
+                             String callsign, String destination, long now) {
+        // Always freshen the heartbeat, even when nothing persisted changed -
+        // "still here" is the whole point of it.
+        parkedLastSeen.put(planeId, now);
+
         ParkedAircraft existing = parked.get(planeId);
         if (existing != null && existing.position().equals(position)
                 && existing.callsign().equals(callsign)
@@ -247,17 +267,33 @@ public class AirportRegistry extends SavedData {
         setDirty();
     }
 
+    /** Is this parked aircraft still ticking, or have its chunks gone? */
+    public boolean isAwake(UUID planeId, long now) {
+        Long seen = parkedLastSeen.get(planeId);
+        return seen != null && now - seen <= PARKED_AWAKE_WINDOW_TICKS;
+    }
+
+    /** A parked aircraft by id, for waking one on request. */
+    public Optional<ParkedAircraft> parkedById(UUID planeId) {
+        return Optional.ofNullable(parked.get(planeId));
+    }
+
     /**
      * Everything the tower should be able to see: what is moving, plus what
      * is standing at a gate. Parked entries are synthesised rather than
      * stored as reports, since a TrafficReport is explicitly a live snapshot
      * and these aircraft are not running.
      */
-    public List<TrafficReport> allTraffic() {
+    public List<TrafficReport> allTraffic(long now) {
         List<TrafficReport> all = new ArrayList<>(airborneTraffic.values());
         for (ParkedAircraft aircraft : parked.values()) {
             if (airborneTraffic.containsKey(aircraft.planeId())) continue;
-            all.add(new TrafficReport(aircraft.planeId(), aircraft.callsign(), "WAITING",
+            // ASLEEP is not a flight state - it is the absence of one. The
+            // aircraft is parked either way; the difference is whether
+            // anything is running to notice, and that is what decides
+            // whether the tower can offer to wake it.
+            String state = isAwake(aircraft.planeId(), now) ? "WAITING" : "ASLEEP";
+            all.add(new TrafficReport(aircraft.planeId(), aircraft.callsign(), state,
                     Vec3.atCenterOf(aircraft.position()), aircraft.destination(), false));
         }
         return all;

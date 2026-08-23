@@ -70,33 +70,62 @@ public final class FleetWake {
      * @return how many were woken, for the message back to the player
      */
     public static int wakeAll(MinecraftServer server) {
-        int minutes = SkyportConfig.fleetWakeMinutes;
-        if (minutes <= 0) return 0;
-
-        ServerLevel overworld = server.overworld();
-        long expiry = overworld.getGameTime() + minutes * 60L * 20L;
-        Set<UUID> alreadyAwake = new HashSet<>();
-        for (Waking waking : ACTIVE) alreadyAwake.add(waking.planeId());
-
         int woken = 0;
-        for (AirportRegistry.ParkedAircraft aircraft : List.copyOf(AirportRegistry.get(overworld).parked())) {
-            if (alreadyAwake.contains(aircraft.planeId())) continue;
-
-            ServerLevel level = levelFor(server, aircraft.dimension());
-            if (level == null) continue;
-
-            ChunkPos centre = new ChunkPos(aircraft.position());
-            int radius = SkyportConfig.parkedChunkRadius;
-            for (int dx = -radius; dx <= radius; dx++) {
-                for (int dz = -radius; dz <= radius; dz++) {
-                    ChunkPos chunk = new ChunkPos(centre.x + dx, centre.z + dz);
-                    CONTROLLER.forceChunk(level, aircraft.planeId(), chunk.x, chunk.z, true, true);
-                    ACTIVE.add(new Waking(level.dimension(), chunk, aircraft.planeId(), expiry));
-                }
-            }
-            woken++;
+        for (AirportRegistry.ParkedAircraft aircraft
+                : List.copyOf(AirportRegistry.get(server.overworld()).parked())) {
+            if (wake(server, aircraft)) woken++;
         }
         return woken;
+    }
+
+    /**
+     * Wake one aircraft by id - the tower listing it and someone asking for
+     * that one.
+     *
+     * Waking the whole fleet is the blunt version, and on a server with a
+     * large fleet it forces a lot of world open to get one aeroplane moving.
+     * Picking the one you actually want is both cheaper and easier to reason
+     * about.
+     */
+    public static boolean wake(MinecraftServer server, UUID planeId) {
+        return AirportRegistry.get(server.overworld()).parkedById(planeId)
+                .map(aircraft -> wake(server, aircraft))
+                .orElse(false);
+    }
+
+    private static boolean wake(MinecraftServer server, AirportRegistry.ParkedAircraft aircraft) {
+        int minutes = SkyportConfig.fleetWakeMinutes;
+        if (minutes <= 0) return false;
+
+        ServerLevel level = levelFor(server, aircraft.dimension());
+        if (level == null) return false;
+
+        long expiry = server.overworld().getGameTime() + minutes * 60L * 20L;
+
+        // Push the expiry back on tickets this aircraft already holds rather
+        // than skipping it. Asking again used to be a no-op for anything
+        // already awake, so a schedule that needed longer than one wake
+        // period could not be helped by asking again - which is exactly what
+        // someone does when the aircraft has not moved.
+        boolean extended = false;
+        for (int i = 0; i < ACTIVE.size(); i++) {
+            Waking waking = ACTIVE.get(i);
+            if (!waking.planeId().equals(aircraft.planeId())) continue;
+            ACTIVE.set(i, new Waking(waking.dimension(), waking.chunk(), waking.planeId(), expiry));
+            extended = true;
+        }
+        if (extended) return true;
+
+        ChunkPos centre = new ChunkPos(aircraft.position());
+        int radius = SkyportConfig.parkedChunkRadius;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                ChunkPos chunk = new ChunkPos(centre.x + dx, centre.z + dz);
+                CONTROLLER.forceChunk(level, aircraft.planeId(), chunk.x, chunk.z, true, true);
+                ACTIVE.add(new Waking(level.dimension(), chunk, aircraft.planeId(), expiry));
+            }
+        }
+        return true;
     }
 
     private static ServerLevel levelFor(MinecraftServer server, String dimension) {

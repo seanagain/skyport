@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -107,7 +108,7 @@ class SerializationTest {
         AirportRegistry registry = new AirportRegistry();
         UUID plane = UUID.randomUUID();
         registry.reportParked(plane, "minecraft:overworld", new BlockPos(12, 64, -8),
-                "Cargo 1", "Heathrow / Gate A");
+                "Cargo 1", "Heathrow / Gate A", 1000L);
 
         AirportRegistry loaded = AirportRegistry.FACTORY.deserializer()
                 .apply(registry.save(new CompoundTag(), null), null);
@@ -155,11 +156,66 @@ class SerializationTest {
         AirportRegistry registry = new AirportRegistry();
         UUID plane = UUID.randomUUID();
         registry.reportParked(plane, "minecraft:overworld", new BlockPos(0, 64, 0),
-                "Cargo 1", "Heathrow / Gate A");
+                "Cargo 1", "Heathrow / Gate A", 1000L);
 
         assertTrue(registry.airborneTraffic().isEmpty(), "nothing is flying");
-        assertEquals(1, registry.allTraffic().size(), "but something is still traffic");
-        assertEquals("Cargo 1", registry.allTraffic().get(0).callsign());
+        assertEquals(1, registry.allTraffic(1000L).size(), "but something is still traffic");
+        assertEquals("Cargo 1", registry.allTraffic(1000L).get(0).callsign());
+    }
+
+    /**
+     * A parked aircraft that has stopped reporting is asleep, and that is
+     * what the tower offers to wake. The distinction is a heartbeat, not a
+     * stored flag, so it has to survive the aircraft simply going quiet -
+     * which is exactly what happens when its chunks are released.
+     */
+    @Test
+    void aParkedAircraftThatStopsReportingReadsAsAsleep() {
+        AirportRegistry registry = new AirportRegistry();
+        UUID plane = UUID.randomUUID();
+        registry.reportParked(plane, "minecraft:overworld", new BlockPos(0, 64, 0),
+                "Cargo 1", "Heathrow / Gate A", 1000L);
+
+        assertTrue(registry.isAwake(plane, 1000L), "it just reported in");
+        assertEquals("WAITING", registry.allTraffic(1010L).get(0).state(),
+                "still ticking a moment later");
+
+        assertFalse(registry.isAwake(plane, 5000L), "long since gone quiet");
+        assertEquals("ASLEEP", registry.allTraffic(5000L).get(0).state(),
+                "an aircraft nothing is ticking is asleep, and can be woken");
+    }
+
+    /**
+     * Nothing has reported since the world loaded, so everything parked is
+     * asleep. The heartbeat is deliberately not persisted for this reason -
+     * its absence is the correct answer after a restart.
+     */
+    @Test
+    void everythingIsAsleepAfterAReload() {
+        AirportRegistry registry = new AirportRegistry();
+        UUID plane = UUID.randomUUID();
+        registry.reportParked(plane, "minecraft:overworld", new BlockPos(0, 64, 0),
+                "Cargo 1", "Heathrow / Gate A", 1000L);
+
+        AirportRegistry loaded = AirportRegistry.FACTORY.deserializer()
+                .apply(registry.save(new CompoundTag(), null), null);
+
+        assertFalse(loaded.isAwake(plane, 1000L));
+        assertEquals("ASLEEP", loaded.allTraffic(1000L).get(0).state());
+    }
+
+    /** Waking one has to be able to find it again by id alone - the player
+     *  clicking a row in the tower is nowhere near the aircraft. */
+    @Test
+    void aParkedAircraftCanBeFoundById() {
+        AirportRegistry registry = new AirportRegistry();
+        UUID plane = UUID.randomUUID();
+        registry.reportParked(plane, "minecraft:the_nether", new BlockPos(3, 70, 4),
+                "Cargo 1", "Heathrow / Gate A", 1000L);
+
+        assertTrue(registry.parkedById(plane).isPresent());
+        assertEquals("minecraft:the_nether", registry.parkedById(plane).get().dimension());
+        assertTrue(registry.parkedById(UUID.randomUUID()).isEmpty());
     }
 
     /** An aircraft that is flying must not also be listed as parked - it
@@ -169,11 +225,11 @@ class SerializationTest {
         AirportRegistry registry = new AirportRegistry();
         UUID plane = UUID.randomUUID();
         registry.reportParked(plane, "minecraft:overworld", new BlockPos(0, 64, 0),
-                "Cargo 1", "Heathrow / Gate A");
+                "Cargo 1", "Heathrow / Gate A", 1000L);
         registry.reportAirborne(new TrafficReport(plane, "Cargo 1", "CRUISE",
                 new net.minecraft.world.phys.Vec3(0, 120, 0), "Gatwick / Gate B", true));
 
-        assertEquals(1, registry.allTraffic().size(), "the same aircraft must appear once");
-        assertEquals("CRUISE", registry.allTraffic().get(0).state(), "the live report wins");
+        assertEquals(1, registry.allTraffic(1000L).size(), "the same aircraft must appear once");
+        assertEquals("CRUISE", registry.allTraffic(1000L).get(0).state(), "the live report wins");
     }
 }

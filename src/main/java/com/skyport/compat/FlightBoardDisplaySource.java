@@ -42,7 +42,7 @@ public class FlightBoardDisplaySource extends DisplaySource {
         BlockEntity source = context.getSourceBlockEntity();
         AirportRegistry registry = AirportRegistry.get(serverLevel);
 
-        List<TrafficReport> traffic = new ArrayList<>(registry.allTraffic());
+        List<TrafficReport> traffic = new ArrayList<>(registry.allTraffic(serverLevel.getGameTime()));
         // Newest information first is useless on a board; a stable order is
         // what makes one readable at a glance.
         traffic.sort(Comparator.comparing(TrafficReport::callsign));

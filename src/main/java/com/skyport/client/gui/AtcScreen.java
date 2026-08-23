@@ -44,6 +44,8 @@ public class AtcScreen extends Screen {
     private static final int COLOR_HELIPAD = 0xFF63D66B;
     private static final int COLOR_LABEL = 0xFF5AD7E0;
     private static final int COLOR_AIRCRAFT = 0xFFE0812F;
+    /** Sleeping aircraft, dimmed - present in the list, but not live. */
+    private static final int COLOR_ASLEEP = 0xFF6A6A6A;
     /** Taxiing aircraft, dimmer so they read as "on the ground" against the
      *  airport lines they sit on top of. */
     private static final int COLOR_AIRCRAFT_GROUND = 0xFF9E6636;
@@ -68,6 +70,7 @@ public class AtcScreen extends Screen {
     private int listX, listW;
     private int[][] terrain = new int[0][0];
     private net.minecraft.client.gui.components.Button zoomButton;
+    private net.minecraft.client.gui.components.Button wakeButton;
     private double blocksPerPixel = 8;
     private int centreX, centreZ;
     /** Which aircraft the detail line is describing; -1 for none. */
@@ -106,6 +109,18 @@ public class AtcScreen extends Screen {
                         b -> { panned = false; fitToContents(); refreshZoom(); })
                 .bounds(mapX + 118, mapY + mapH + 16, 34, rowH).build());
 
+        // Wake sits under the traffic strip it acts on, and is only live when
+        // a sleeping aircraft is selected - it does nothing for one that is
+        // already running, and a button that is always clickable but usually
+        // pointless teaches people to ignore it.
+        wakeButton = addRenderableWidget(Button.builder(Component.literal("Wake"), b -> wakeSelected())
+                .bounds(listX, mapY + mapH + 16, 52, rowH)
+                .build());
+        wakeButton.active = false;
+        wakeButton.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(
+                "Load the world around a parked aircraft for a few minutes, so its "
+                        + "schedule starts running again.")));
+
         addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose())
                 .bounds(listX + listW - 60, mapY + mapH + 16, 60, rowH)
                 .build());
@@ -137,6 +152,19 @@ public class AtcScreen extends Screen {
                 }
             }
         }
+    }
+
+    /**
+     * Ask the server to load the world around the selected aircraft.
+     *
+     * The list is rebuilt from the server twice a second, so the row will
+     * stop saying ASLEEP on its own once the aircraft starts reporting again
+     * - no need to guess here about whether it worked.
+     */
+    private void wakeSelected() {
+        if (!selectedIsAsleep()) return;
+        PacketDistributor.sendToServer(new com.skyport.network.WakeAircraftPayload(
+                traffic.get(selected).planeId()));
     }
 
     private Component zoomLabel() {
@@ -375,6 +403,12 @@ public class AtcScreen extends Screen {
      * selects the same aircraft as clicking its marker.
      */
     private void drawAircraftList(GuiGraphics guiGraphics) {
+        // Kept in step here rather than at every point that can change the
+        // selection: the list is also rebuilt from the server twice a second,
+        // so an aircraft can stop being asleep without anyone clicking
+        // anything.
+        if (wakeButton != null) wakeButton.active = selectedIsAsleep();
+
         guiGraphics.fill(listX, mapY, listX + listW, mapY + mapH, 0xFF141414);
         drawBorder(guiGraphics, listX, mapY, listW, mapH, 0xFF2B2B2B);
         guiGraphics.drawString(font, "Traffic", listX + 4, mapY + 4, 0xFFFFFFFF);
@@ -390,11 +424,23 @@ public class AtcScreen extends Screen {
             if (i == selected) {
                 guiGraphics.fill(listX + 1, y - 1, listX + listW - 1, y + 19, 0xFF303030);
             }
-            guiGraphics.drawString(font, report.callsign(), listX + 4, y,
-                    i == selected ? 0xFFFFFFFF : COLOR_AIRCRAFT);
-            guiGraphics.drawString(font, prettyState(report.state()), listX + 4, y + 10, 0xFF9A9A9A);
+            // A sleeping aircraft is dimmed, because it is not traffic in any
+            // live sense - nothing is running to move it - and showing it at
+            // the same weight as an aircraft on final approach would be a lie
+            // about what the tower can see.
+            boolean asleep = "ASLEEP".equals(report.state());
+            int nameColor = asleep ? COLOR_ASLEEP : (i == selected ? 0xFFFFFFFF : COLOR_AIRCRAFT);
+            guiGraphics.drawString(font, report.callsign(), listX + 4, y, nameColor);
+            guiGraphics.drawString(font, prettyState(report.state()), listX + 4, y + 10,
+                    asleep ? COLOR_ASLEEP : 0xFF9A9A9A);
             y += 22;
         }
+    }
+
+    /** Is the selected row an aircraft the server has stopped ticking? */
+    private boolean selectedIsAsleep() {
+        return selected >= 0 && selected < traffic.size()
+                && "ASLEEP".equals(traffic.get(selected).state());
     }
 
     /** TAKEOFF_ROLL -> "Takeoff roll" - the enum name is for code, not a

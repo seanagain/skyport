@@ -61,6 +61,11 @@ public class ModNetworking {
                 ModNetworking::handleSaveSchedule);
 
         registrar.playToServer(
+                WakeAircraftPayload.TYPE,
+                WakeAircraftPayload.STREAM_CODEC,
+                ModNetworking::handleWakeAircraft);
+
+        registrar.playToServer(
                 AtcTrafficPayload.Request.TYPE,
                 AtcTrafficPayload.Request.STREAM_CODEC,
                 ModNetworking::handleAtcTrafficRequest);
@@ -109,6 +114,24 @@ public class ModNetworking {
         });
     }
 
+    /**
+     * Wake one parked aircraft on request from the tower.
+     *
+     * The player has to be looking at a real ATC screen to send this, and
+     * the cost is bounded and self-expiring (see FleetWake), so there is
+     * nothing here worth guarding beyond the aircraft existing.
+     */
+    private static void handleWakeAircraft(WakeAircraftPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            ServerPlayer player = (ServerPlayer) context.player();
+            boolean woken = com.skyport.world.FleetWake.wake(player.getServer(), payload.planeId());
+            player.sendSystemMessage(Component.literal(woken
+                    ? "[Skyport] Waking that aircraft for "
+                            + com.skyport.SkyportConfig.fleetWakeMinutes + " minutes."
+                    : "[Skyport] Could not wake that aircraft - it may have moved already."));
+        });
+    }
+
     private static void handleAtcTrafficRequest(AtcTrafficPayload.Request payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             ServerPlayer player = (ServerPlayer) context.player();
@@ -116,7 +139,7 @@ public class ModNetworking {
             com.skyport.blockentity.AtcBlockEntity.pruneGhostAirports(player.serverLevel(), registry);
             PacketDistributor.sendToPlayer(player, new AtcTrafficPayload(
                     List.copyOf(registry.all()),
-                    List.copyOf(registry.allTraffic())));
+                    List.copyOf(registry.allTraffic(player.serverLevel().getGameTime()))));
         });
     }
 
