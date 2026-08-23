@@ -196,6 +196,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** How often to repeat a "this airport is missing something" warning
      *  while an aircraft holds waiting for the player to fix it. */
     private static final int MISSING_FACILITY_REPEAT_TICKS = 200;
+    /** How often to re-check power and burn fuel. One second. */
+    private static final int POWER_CHECK_INTERVAL_TICKS = 20;
     /** How many unsuccessful laps between "still waiting" reports. */
     private static final int HOLDING_REPORT_EVERY_LAPS = 2;
     /** How often to move the force-loaded bubble; every tick would churn. */
@@ -270,6 +272,21 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      *  it leaves, since a rebuilt aircraft may have different holds. */
     @org.jetbrains.annotations.Nullable
     private transient java.util.List<BlockPos> cargoContainers;
+    /** Containers to draw fuel from, located once and remembered - same
+     *  reasoning as cargoContainers. */
+    private transient java.util.List<BlockPos> fuelContainers;
+    /** Game time at which the currently-burning fuel item runs out.
+     *  Persisted, or reloading would refund whatever was already lit. */
+    private long fuelUntilGameTime;
+    /** Game time of the last power check, to keep the cadence honest
+     *  regardless of how often this gets called. */
+    private long lastPowerCheckGameTime;
+    /** Fuel ticks carried across a reload, turned into a deadline on the
+     *  first power check - loadAdditional has no world clock to read yet. */
+    private long pendingFuelTicks;
+    /** Cached answer from the last power check, so the steering code can ask
+     *  every tick without paying for a container sweep every tick. */
+    private boolean hasPowerNow = true;
     /** The pad this aircraft is parked on, so it can be released on takeoff. */
     @org.jetbrains.annotations.Nullable
     private transient UUID occupiedPadAirport;
@@ -431,6 +448,18 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             setState(FlightState.IDLE);
             return;
         }
+
+        // Power last of the refusals, because in FUEL mode asking the
+        // question lights an item: check it only once everything free to
+        // check has already passed, or a layout mistake would quietly burn a
+        // coal every time the player pressed Engage.
+        fuelContainers = null;
+        if (!hasPower(serverLevel.getGameTime())) {
+            message(powerMissingReason());
+            setState(FlightState.IDLE);
+            return;
+        }
+        hasPowerNow = true;
 
         // Rotorcraft and airships have no ground route to join - they lift
         // off from wherever they are standing. No taxiway check, and nothing
@@ -878,6 +907,26 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                     new ChunkPos(BlockPos.containing(simulatedPosition)), heldChunks);
         }
 
+        // Power, once a second of world time. Both the cadence and the fuel
+        // burn are measured against the game clock rather than counted in
+        // passes, because this method runs off the physics tick and that
+        // fires faster than twenty times a second.
+        long now = serverLevel.getGameTime();
+        if (now - lastPowerCheckGameTime >= POWER_CHECK_INTERVAL_TICKS) {
+            lastPowerCheckGameTime = now;
+            boolean powered = hasPower(now);
+            if (powered != hasPowerNow) {
+                hasPowerNow = powered;
+                // Losing power is an engine failure, not a pause: steering
+                // below drops the linear correction and keeps only attitude,
+                // so the craft coasts and comes down instead of hanging in
+                // the air on an autopilot that is no longer paying for it.
+                message(powered
+                        ? "Power restored - back under thrust."
+                        : powerMissingReason() + " Coasting.");
+            }
+        }
+
         if (++tickCounter % TELEMETRY_INTERVAL_TICKS == 0) {
             sendTelemetry(serverLevel.getServer());
         }
@@ -1216,6 +1265,17 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // often. Capped at 1 so it converges instead of overshooting.
         double gain = Math.min(1.0, CRAFT_STEER_GAIN * physicsStepSeconds / NOMINAL_STEP_SECONDS);
         Vec3 correction = desired.subtract(new Vec3(v.x(), v.y(), v.z())).scale(gain);
+
+        // Unpowered: steer, but don't drive. Attitude control below still
+        // runs - an aircraft losing its engine keeps its wings level - but
+        // nothing accelerates the craft or holds it up, so it coasts and
+        // descends the way an unpowered aircraft should. Braking is still
+        // allowed, or an aircraft that ran dry on the taxiway would be
+        // unable to stop.
+        if (!hasPowerNow) {
+            boolean slowingDown = correction.dot(new Vec3(v.x(), v.y(), v.z())) < 0;
+            correction = slowingDown ? correction.multiply(1, 0, 1) : Vec3.ZERO;
+        }
 
         // Pushing back: keep the nose where it is and roll backwards. Steering
         // toward the heading would have the plane pirouette on the stand.
@@ -1918,6 +1978,60 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return false;
     }
 
+    /**
+     * Does the craft have power right now, burning fuel if that's the mode?
+     *
+     * Called once a second rather than every physics tick: a fuel check
+     * sweeps containers, and the difference between running out of coal now
+     * and running out a second from now is not worth a per-tick scan.
+     */
+    private boolean hasPower(long now) {
+        if (SkyportConfig.powerRequirement == SkyportConfig.PowerRequirement.NONE) return true;
+        if (level == null) return true;
+
+        if (SkyportConfig.powerRequirement == SkyportConfig.PowerRequirement.ROTATION) {
+            return PowerSource.hasRotation(level, getBlockPos());
+        }
+
+        // FUEL: burn down what's lit, then light another item when it runs
+        // out. Fuel is only spent while actually flying a leg - an aircraft
+        // sitting at a gate for ten minutes shouldn't empty its bunker.
+        //
+        if (pendingFuelTicks > 0) {
+            fuelUntilGameTime = now + pendingFuelTicks;
+            pendingFuelTicks = 0;
+        }
+
+        // A deadline in world time, not a counter decremented per pass: this
+        // runs off the physics tick, which fires faster than twenty times a
+        // second, so counting passes would burn a coal in well under the
+        // eighty seconds it is supposed to last. Exactly the bug that made a
+        // ten second gate wait end in five.
+        if (now < fuelUntilGameTime) return true;
+
+        if (fuelContainers == null) fuelContainers = PowerSource.findFuelContainers(level, getBlockPos());
+        int burnTime = PowerSource.consumeFuel(level, fuelContainers);
+        if (burnTime <= 0) {
+            // The hold may have been refilled since the scan, or the scan may
+            // predate a chest being added. Look once more before declaring
+            // the aircraft dry.
+            fuelContainers = PowerSource.findFuelContainers(level, getBlockPos());
+            burnTime = PowerSource.consumeFuel(level, fuelContainers);
+        }
+        if (burnTime <= 0) return false;
+        fuelUntilGameTime = now + burnTime;
+        setChanged();
+        return true;
+    }
+
+    /** What to tell the player when there's no power, in this mode's terms. */
+    private String powerMissingReason() {
+        return SkyportConfig.powerRequirement == SkyportConfig.PowerRequirement.ROTATION
+                ? "No rotational force at the autopilot - it needs at least "
+                        + SkyportConfig.rotationMinimumRpm + " RPM from a shaft or cogwheel against it."
+                : "No fuel aboard - put something burnable in a container on the aircraft.";
+    }
+
     private BlockPos destinationPad(AirportLayout destination) {
         String name = destinationGateName();
         BlockPos pad = name == null ? null : destination.helipads().get(name);
@@ -2445,6 +2559,12 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (planeId != null) tag.putUUID("planeId", planeId);
         tag.putString("state", state.name());
         tag.putInt("currentWaypointIndex", currentWaypointIndex);
+        // Fuel already lit is spent - reloading must not hand it back. Saved
+        // as remaining ticks rather than as a deadline, since world time
+        // keeps running while this block entity is unloaded.
+        if (level != null && fuelUntilGameTime > level.getGameTime()) {
+            tag.putLong("fuelRemaining", fuelUntilGameTime - level.getGameTime());
+        }
         // originAirportId, holdingEntryIndex, waitUntilGameTime and
         // simulatedPosition are intentionally NOT persisted - transient
         // stand-ins for real contraption movement, not worth preserving
@@ -2460,6 +2580,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (tag.hasUUID("planeId")) planeId = tag.getUUID("planeId");
         if (tag.contains("state")) state = FlightState.valueOf(tag.getString("state"));
         currentWaypointIndex = tag.getInt("currentWaypointIndex");
+        pendingFuelTicks = tag.getLong("fuelRemaining");
         if (state != FlightState.IDLE) simulatedPosition = getBlockPos().getCenter();
     }
 }

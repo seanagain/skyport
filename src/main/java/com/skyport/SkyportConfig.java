@@ -84,6 +84,56 @@ public final class SkyportConfig {
                      "over a long session. 0 disables remembering entirely.")
             .defineInRange("performance.terrainMemoryLimit", 200_000, 0, 2_000_000);
 
+    /**
+     * What an aircraft has to have aboard before the autopilot will fly it.
+     *
+     * The autopilot steers by applying velocity to the craft's rigid body,
+     * which means it makes thrust out of nothing - an autopilot on a solid
+     * cube of iron flies exactly as well as a real aeroplane. Fine while
+     * building the thing; indefensible in survival, where every other way of
+     * moving costs something.
+     */
+    public enum PowerRequirement {
+        /** No requirement. What the mod did before this existed. */
+        NONE,
+        /** Create rotational force reaching the Autopilot block. */
+        ROTATION,
+        /** Furnace fuel, burned from a container on the aircraft. */
+        FUEL
+    }
+
+    public static final ModConfigSpec.EnumValue<PowerRequirement> POWER_REQUIREMENT = BUILDER
+            .comment("What an aircraft needs aboard before the autopilot will fly it.",
+                     "",
+                     "NONE: the autopilot flies anything it is placed on, free. Right for",
+                     "creative building and for testing a layout; a cheat in survival.",
+                     "",
+                     "ROTATION: Create rotational force must reach the Autopilot block -",
+                     "put a shaft or cogwheel against it, driven by whatever powertrain the",
+                     "aircraft already carries. Costs whatever that powertrain costs to run.",
+                     "",
+                     "FUEL: the autopilot burns furnace fuel from a container on the",
+                     "aircraft, the way a furnace would. Self-contained, and readable at a",
+                     "glance from the chest it is drawing on.",
+                     "",
+                     "Either way, losing power in flight is an engine failure, not a pause:",
+                     "the autopilot keeps the wings level but stops driving the craft",
+                     "forward, and it comes down.")
+            .defineEnum("survival.powerRequirement", PowerRequirement.NONE);
+
+    public static final ModConfigSpec.IntValue ROTATION_MINIMUM_RPM = BUILDER
+            .comment("ROTATION mode: rotation speed needed at the Autopilot block, in RPM.",
+                     "Sign is ignored - either direction will do. 16 is one water wheel's",
+                     "worth; raise it to demand a real powertrain rather than a hand crank.")
+            .defineInRange("survival.rotationMinimumRpm", 16, 1, 256);
+
+    public static final ModConfigSpec.DoubleValue FUEL_EFFICIENCY = BUILDER
+            .comment("FUEL mode: how far one item's burn time goes, as a multiplier.",
+                     "1.0 means an item burns for exactly as long as it would in a furnace",
+                     "- coal for 80 seconds of flight. Raise it for longer range on less",
+                     "fuel; lower it to make range a real constraint on route planning.")
+            .defineInRange("survival.fuelEfficiency", 1.0, 0.05, 20.0);
+
     public static final ModConfigSpec SPEC = BUILDER.build();
 
     private SkyportConfig() { }
@@ -100,6 +150,9 @@ public final class SkyportConfig {
     public static boolean wakeOnAtcOpen = true;
     public static int terrainMemoryLimit = 200_000;
     public static int fleetWakeMinutes = 5;
+    public static PowerRequirement powerRequirement = PowerRequirement.NONE;
+    public static int rotationMinimumRpm = 16;
+    public static double fuelEfficiency = 1.0;
 
     public static void refresh() {
         chatMessages = CHAT_MESSAGES.get();
@@ -112,5 +165,8 @@ public final class SkyportConfig {
         wakeOnAtcOpen = WAKE_ON_ATC_OPEN.get();
         terrainMemoryLimit = TERRAIN_MEMORY_LIMIT.get();
         fleetWakeMinutes = FLEET_WAKE_MINUTES.get();
+        powerRequirement = POWER_REQUIREMENT.get();
+        rotationMinimumRpm = ROTATION_MINIMUM_RPM.get();
+        fuelEfficiency = FUEL_EFFICIENCY.get();
     }
 }

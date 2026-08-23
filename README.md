@@ -107,6 +107,28 @@ altitude instead.
 - `client/LayoutProjector` - traces a layout in the world while you hold a
   station.
 
+## Making it cost something in survival
+
+The autopilot steers by writing velocity onto the craft, so out of the box it
+makes thrust from nothing - an Autopilot on a solid cube of iron flies as well
+as a real aeroplane. Fine while building; a cheat in survival. Set
+`survival.powerRequirement` in `config/skyport-common.toml`:
+
+- `NONE` (default) - flight is free. Right for creative and for testing a
+  layout.
+- `ROTATION` - Create rotational force has to reach the Autopilot block. Put a
+  shaft or cogwheel against it, driven by whatever powertrain the aircraft
+  already carries; `survival.rotationMinimumRpm` sets how much (16 by default,
+  about one water wheel).
+- `FUEL` - the autopilot burns furnace fuel out of any container on the
+  aircraft, at furnace burn times scaled by `survival.fuelEfficiency`. Coal is
+  80 seconds of flight at 1.0. Anything that burns in a furnace works,
+  including other mods' fuels.
+
+Either way, losing power in flight is an engine failure rather than a pause:
+the autopilot holds the wings level but stops driving the craft, so it coasts
+and descends. Aircraft parked at a gate burn nothing.
+
 ## Known limits
 
 Each of these is a reasonable next step rather than an oversight:
