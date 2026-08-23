@@ -73,9 +73,41 @@ public final class FleetWake {
         int woken = 0;
         for (AirportRegistry.KnownAircraft aircraft
                 : List.copyOf(AirportRegistry.get(server.overworld()).known())) {
+            // Deliberately does NOT extend aircraft that already hold a
+            // ticket. Opening the tower is something a player does often, and
+            // pushing every expiry back another five minutes each time meant
+            // the tickets never lapsed at all - the world simply stopped
+            // unloading. Extending is for asking about one aircraft on
+            // purpose; see wake(server, planeId).
+            if (holdsTicket(aircraft.planeId())) continue;
             if (wake(server, aircraft)) woken++;
         }
         return woken;
+    }
+
+    private static boolean holdsTicket(UUID planeId) {
+        for (Waking waking : ACTIVE) {
+            if (waking.planeId().equals(planeId)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Drop an aircraft's wake tickets early.
+     *
+     * Called the moment it starts holding its own flying bubble: at that
+     * point the wake ticket has done exactly what it was for and is only
+     * keeping a second patch of world open behind it.
+     */
+    public static void release(MinecraftServer server, UUID planeId) {
+        ACTIVE.removeIf(waking -> {
+            if (!waking.planeId().equals(planeId)) return false;
+            ServerLevel level = server.getLevel(waking.dimension());
+            if (level != null) {
+                CONTROLLER.forceChunk(level, waking.planeId(), waking.chunk().x, waking.chunk().z, false, true);
+            }
+            return true;
+        });
     }
 
     /**

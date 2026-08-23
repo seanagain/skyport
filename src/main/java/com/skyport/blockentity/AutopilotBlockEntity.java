@@ -13,6 +13,7 @@ import com.skyport.network.OpenAutopilotPayload;
 import com.skyport.registry.ModBlockEntities;
 import com.skyport.logic.FuelBurn;
 import com.skyport.logic.GroundNetwork;
+import com.skyport.world.FleetWake;
 import com.skyport.world.FlightChunkLoader;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
@@ -908,6 +909,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (tickCounter % CHUNK_FOLLOW_INTERVAL_TICKS == 0) {
             FlightChunkLoader.follow(serverLevel, planeId(),
                     new ChunkPos(BlockPos.containing(simulatedPosition)), heldChunks);
+            // Moving under our own bubble now, so hand back any wake ticket
+            // that got us started. It has done its job, and leaving it to
+            // time out keeps a second patch of world open at the airport this
+            // aircraft has already left.
+            FleetWake.release(serverLevel.getServer(), planeId());
         }
 
         // Power, once a second of world time. Both the cadence and the fuel
