@@ -58,14 +58,18 @@ public class AtcBlockEntity extends BlockEntity {
         AirportRegistry registry = AirportRegistry.get(serverLevel);
         pruneGhostAirports(serverLevel, registry);
 
-        // Opening the tower wakes the fleet. Aircraft parked where nobody is
-        // standing have released their chunks and stopped ticking, so their
-        // schedules are stalled; checking on them is exactly the moment you'd
-        // want them running. See FleetWake - it lapses on its own.
-        int woken = SkyportConfig.wakeOnAtcOpen ? FleetWake.wakeAll(serverLevel.getServer()) : 0;
-        if (woken > 0 && SkyportConfig.chatMessages) {
-            player.sendSystemMessage(Component.literal("[Skyport] Woke " + woken
-                    + " parked aircraft for " + SkyportConfig.fleetWakeMinutes + " minutes."));
+        // Opening the tower can wake the whole fleet, but no longer does by
+        // default - see SkyportConfig#WAKE_ON_ATC_OPEN. The screen lists
+        // sleeping aircraft and waking one is a click on its name, which is
+        // both cheaper and almost always the aircraft you actually meant.
+        // Blanket waking on every visit held a patch of world open around
+        // every aircraft on the server, and announced it in chat each time.
+        if (SkyportConfig.wakeOnAtcOpen) {
+            int woken = FleetWake.wakeAll(serverLevel.getServer());
+            if (woken > 0 && SkyportConfig.chatMessages) {
+                player.sendSystemMessage(Component.literal("[Skyport] Woke " + woken
+                        + " sleeping aircraft for " + SkyportConfig.fleetWakeMinutes + " minutes."));
+            }
         }
 
         List<AirportLayout> airports = List.copyOf(registry.all());

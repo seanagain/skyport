@@ -78,10 +78,15 @@ public final class SkyportConfig {
             .defineInRange("performance.parkedChunkRadius", 1, 0, 3);
 
     public static final ModConfigSpec.BooleanValue WAKE_ON_ATC_OPEN = BUILDER
-            .comment("Opening the ATC block wakes every parked aircraft on the server.",
-                     "Turn off if you would rather aircraft only run while a player is",
-                     "actually at their airport.")
-            .define("performance.wakeOnAtcOpen", true);
+            .comment("Opening the ATC block wakes EVERY sleeping aircraft on the server.",
+                     "",
+                     "Off by default, and rarely what you want. The tower lists sleeping",
+                     "aircraft and waking one is a click on its name, which costs a'",
+                     "fraction as much world and is almost always the aircraft you meant.",
+                     "Blanket waking was how this worked before that list existed: every",
+                     "visit to the tower held a patch of world open around every aircraft",
+                     "on the server, whether or not you cared about any of them.")
+            .define("performance.wakeOnAtcOpen", false);
 
     public static final ModConfigSpec.IntValue FLEET_WAKE_MINUTES = BUILDER
             .comment("How long opening the ATC block keeps parked aircraft loaded, in minutes.",
@@ -186,7 +191,7 @@ public final class SkyportConfig {
     public static int chunkRadius = 2;
     public static boolean keepParkedLoaded = false;
     public static int parkedChunkRadius = 1;
-    public static boolean wakeOnAtcOpen = true;
+    public static boolean wakeOnAtcOpen = false;
     public static int terrainMemoryLimit = 200_000;
     public static int fleetWakeMinutes = 5;
     public static PowerRequirement powerRequirement = PowerRequirement.NONE;

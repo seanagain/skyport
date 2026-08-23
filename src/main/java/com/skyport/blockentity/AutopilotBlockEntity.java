@@ -2634,7 +2634,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (!SkyportConfig.telemetry) return;
         if (controllingPlayerId == null || simulatedPosition == null) return;
         ServerPlayer player = server.getPlayerList().getPlayer(controllingPlayerId);
-        if (player == null) return;
+        // Same earshot rule as everything else. This is the noisiest thing
+        // the mod can do - once a second, forever - and it was the one path
+        // that skipped the radius check, so turning telemetry on to watch one
+        // aircraft meant every aircraft narrating from across the map.
+        if (player == null || !withinEarshot(player)) return;
         String pos = String.format("%.0f, %.0f, %.0f", simulatedPosition.x, simulatedPosition.y, simulatedPosition.z);
         String pitch = Math.abs(pitchDegrees) < 1 ? "level" : String.format("%+.0f deg", pitchDegrees);
         // Says outright whether it's flying a real craft or just simulating,
@@ -2693,11 +2697,23 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * which is sub-level-local while mounted and would compare a player's
      * world coordinates against an offset inside the aircraft.
      */
+    /** The real world this aircraft is in, seeing through the sub-level it
+     *  may be riding inside. */
+    @org.jetbrains.annotations.Nullable
+    private ServerLevel worldLevel() {
+        if (activeSubLevel != null && activeSubLevel.getLevel() instanceof ServerLevel parent) return parent;
+        return level instanceof ServerLevel direct ? direct : null;
+    }
+
     private boolean withinEarshot(@org.jetbrains.annotations.Nullable ServerPlayer player) {
         if (player == null) return false;
         int radius = SkyportConfig.messageRadius;
         if (radius <= 0) return true; // 0 means "wherever I am", as before
         if (simulatedPosition == null) return true;
+        // A player in the Nether is not near an aircraft in the Overworld,
+        // however close the numbers happen to look.
+        ServerLevel world = worldLevel();
+        if (world != null && player.level() != world) return false;
         // simulatedPosition is already in world coordinates, so comparing a
         // player's position against it is valid whether the block is mounted
         // on a craft or sitting on the ground.
