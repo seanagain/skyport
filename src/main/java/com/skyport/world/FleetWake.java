@@ -128,6 +128,46 @@ public final class FleetWake {
         return true;
     }
 
+    /**
+     * Aircraft asked for recently, and the player who asked, so the result
+     * can be reported rather than guessed at.
+     *
+     * "I pressed Wake and I'm not sure anything happened" is not a useful
+     * place to be, and it is where forcing a chunk and saying nothing leaves
+     * you - especially since an aircraft can also start ticking because
+     * something else wandered past. This checks a few seconds later whether
+     * the aircraft actually began reporting, and says so either way.
+     */
+    private record PendingCheck(UUID planeId, UUID playerId, String callsign, long checkAtTick) { }
+
+    private static final List<PendingCheck> PENDING = new ArrayList<>();
+
+    /** Long enough for a woken aircraft to tick and publish, short enough to
+     *  still feel like an answer to the click. */
+    private static final long WAKE_CONFIRM_TICKS = 60;
+
+    public static void confirmLater(MinecraftServer server, UUID planeId, UUID playerId, String callsign) {
+        PENDING.add(new PendingCheck(planeId, playerId, callsign,
+                server.overworld().getGameTime() + WAKE_CONFIRM_TICKS));
+    }
+
+    private static void runPendingChecks(MinecraftServer server, long now) {
+        if (PENDING.isEmpty()) return;
+        PENDING.removeIf(check -> {
+            if (now < check.checkAtTick()) return false;
+            var player = server.getPlayerList().getPlayer(check.playerId());
+            if (player == null) return true;
+
+            boolean running = AirportRegistry.get(server.overworld()).isAwake(check.planeId(), now);
+            player.sendSystemMessage(net.minecraft.network.chat.Component.literal(running
+                    ? "[Skyport] " + check.callsign() + " is running again."
+                    : "[Skyport] " + check.callsign() + " did not start ticking. Its chunk is "
+                            + "loaded, so the craft itself may be held by Create Aeronautics "
+                            + "rather than by the world - try flying out to it once."));
+            return true;
+        });
+    }
+
     private static ServerLevel levelFor(MinecraftServer server, String dimension) {
         for (ServerLevel level : server.getAllLevels()) {
             if (level.dimension().location().toString().equals(dimension)) return level;
@@ -144,10 +184,12 @@ public final class FleetWake {
      */
     @SubscribeEvent
     static void onServerTick(ServerTickEvent.Post event) {
-        if (ACTIVE.isEmpty()) return;
         MinecraftServer server = event.getServer();
         long now = server.overworld().getGameTime();
         if (now % 20 != 0) return;
+
+        runPendingChecks(server, now);
+        if (ACTIVE.isEmpty()) return;
 
         ACTIVE.removeIf(waking -> {
             if (now < waking.expiresAtTick()) return false;

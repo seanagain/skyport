@@ -71,10 +71,11 @@ public final class SkyportConfig {
 
     public static final ModConfigSpec.IntValue PARKED_CHUNK_RADIUS = BUILDER
             .comment("Chunks either side of a parked or newly woken aircraft.",
-                     "0 loads only the chunk it stands in, which is all it needs to tick",
-                     "down a gate wait. Raise it if aircraft park across a chunk boundary",
-                     "from something they need.")
-            .defineInRange("performance.parkedChunkRadius", 0, 0, 2);
+                     "0 loads only the chunk it stands in. That is enough to tick down a",
+                     "gate wait, but an aircraft is bigger than a block and can straddle a",
+                     "chunk boundary, so 1 is the safer default and costs eight more chunks",
+                     "for a few minutes.")
+            .defineInRange("performance.parkedChunkRadius", 1, 0, 3);
 
     public static final ModConfigSpec.BooleanValue WAKE_ON_ATC_OPEN = BUILDER
             .comment("Opening the ATC block wakes every parked aircraft on the server.",
@@ -184,7 +185,7 @@ public final class SkyportConfig {
     public static boolean chunkLoading = true;
     public static int chunkRadius = 2;
     public static boolean keepParkedLoaded = false;
-    public static int parkedChunkRadius = 0;
+    public static int parkedChunkRadius = 1;
     public static boolean wakeOnAtcOpen = true;
     public static int terrainMemoryLimit = 200_000;
     public static int fleetWakeMinutes = 5;

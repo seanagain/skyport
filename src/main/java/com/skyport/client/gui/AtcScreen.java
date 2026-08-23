@@ -78,6 +78,10 @@ public class AtcScreen extends Screen {
     private int centreX, centreZ;
     /** Which aircraft the detail line is describing; -1 for none. */
     private int selected = -1;
+    /** Where each traffic row was last drawn: {index into traffic, top y}.
+     *  Rebuilt every frame, because the strip has sections and a heading and
+     *  its row positions are not a simple multiple of anything. */
+    private final java.util.List<int[]> rowHitboxes = new java.util.ArrayList<>();
 
     public AtcScreen(BlockPos atcPos, List<AirportLayout> airports, List<TrafficReport> traffic) {
         super(Component.translatable("gui.skyport.atc.title"));
@@ -292,10 +296,20 @@ public class AtcScreen extends Screen {
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         // A row in the traffic strip selects the same aircraft as its marker.
-        if (mouseX >= listX && mouseX < listX + listW && mouseY >= mapY + 16) {
-            int row = (int) ((mouseY - (mapY + 16)) / 22);
-            if (row >= 0 && row < traffic.size()) {
-                selected = row;
+        //
+        // Hit-tested against where the rows were actually drawn rather than
+        // by dividing the height into equal steps: the strip has two sections
+        // with a heading between them, so an arithmetic row index stopped
+        // matching what is on screen the moment anything was resting.
+        if (mouseX >= listX && mouseX < listX + listW) {
+            for (int[] row : rowHitboxes) {
+                if (mouseY < row[1] || mouseY >= row[1] + 20) continue;
+                selected = row[0];
+                // Clicking a resting aircraft asks for it directly. Waking is
+                // bounded and expires on its own, so there is nothing to
+                // regret about an accidental one, and reaching for a button
+                // to act on the row you just clicked is a step nobody wants.
+                if (selectedIsAsleep()) wakeSelected();
                 return true;
             }
         }
@@ -426,6 +440,7 @@ public class AtcScreen extends Screen {
         // that exist, are somewhere, and are not moving because nothing is
         // running to move them. Mixed together, a dozen sleeping aircraft
         // buried the one that was actually on approach.
+        rowHitboxes.clear();
         int y = mapY + 16;
         y = drawSection(guiGraphics, y, false);
 
@@ -458,6 +473,7 @@ public class AtcScreen extends Screen {
             // the same weight as an aircraft on final approach would be a lie
             // about what the tower can see.
             int nameColor = asleep ? COLOR_ASLEEP : (i == selected ? 0xFFFFFFFF : COLOR_AIRCRAFT);
+            rowHitboxes.add(new int[] { i, y });
             guiGraphics.drawString(font, report.callsign(), listX + 4, y, nameColor);
             guiGraphics.drawString(font, prettyState(report.state()), listX + 4, y + 10,
                     asleep ? COLOR_ASLEEP : 0xFF9A9A9A);

@@ -124,11 +124,22 @@ public class ModNetworking {
     private static void handleWakeAircraft(WakeAircraftPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             ServerPlayer player = (ServerPlayer) context.player();
+            var registry = com.skyport.data.AirportRegistry.get(player.serverLevel());
+            String callsign = registry.knownById(payload.planeId())
+                    .map(com.skyport.data.AirportRegistry.KnownAircraft::callsign)
+                    .orElse("That aircraft");
             boolean woken = com.skyport.world.FleetWake.wake(player.getServer(), payload.planeId());
-            player.sendSystemMessage(Component.literal(woken
-                    ? "[Skyport] Waking that aircraft for "
-                            + com.skyport.SkyportConfig.fleetWakeMinutes + " minutes."
-                    : "[Skyport] Could not wake that aircraft - it may have moved already."));
+            if (!woken) {
+                player.sendSystemMessage(Component.literal(
+                        "[Skyport] Could not wake " + callsign + " - it may have moved already."));
+                return;
+            }
+            player.sendSystemMessage(Component.literal("[Skyport] Loading the world around "
+                    + callsign + " for " + com.skyport.SkyportConfig.fleetWakeMinutes + " minutes."));
+            // Report back once it has had a chance to tick, rather than
+            // leaving "did that do anything" to guesswork.
+            com.skyport.world.FleetWake.confirmLater(player.getServer(), payload.planeId(),
+                    player.getUUID(), callsign);
         });
     }
 
