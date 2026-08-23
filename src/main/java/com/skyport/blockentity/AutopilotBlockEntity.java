@@ -116,10 +116,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** Taxi speed - slower, so the craft actually settles on tightly spaced
      *  ground waypoints instead of sailing past them and turning back. */
     private static final double CRAFT_TAXI_SPEED = 4.0;
-    /** Pushback, a little below taxi speed. Reversing should read as
-     *  deliberate rather than brisk, but it was a crawl before - see
-     *  alignmentFactor, which was throttling it for facing "the wrong way". */
-    private static final double CRAFT_PUSHBACK_SPEED = 3.0;
+    /** Pushback, as a fraction of the airport's taxi speed. Reversing should
+     *  read as deliberate rather than brisk whatever the field is set to. */
+    private static final double PUSHBACK_SPEED_FRACTION = 0.75;
     /** Rotation speed, reached by half the runway's length. */
     private static final double CRAFT_TAKEOFF_SPEED = 14.0;
     /** Climb-out angle. Shallower than the 30-degree structural cap because
@@ -1169,8 +1168,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * speed if that's already slower.
      */
     private double currentTopSpeed() {
-        if (state == FlightState.PUSHBACK) return CRAFT_PUSHBACK_SPEED;
-        if (isGroundState()) return CRAFT_TAXI_SPEED;
+        if (state == FlightState.PUSHBACK) return groundSpeed() * PUSHBACK_SPEED_FRACTION;
+        if (isGroundState()) return groundSpeed();
         if (state == FlightState.HOLDING || state == FlightState.APPROACH) {
             return Math.min(cruiseSpeed(), CRAFT_PATTERN_SPEED);
         }
@@ -2248,6 +2247,28 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
     /** Cruise altitude including any separation offset - so a plane giving
      *  way climbs above the traffic rather than through it. */
+    /**
+     * Taxi speed at whichever airport this aircraft is actually on.
+     *
+     * Departing, that is the origin; arriving, the destination. It matters
+     * which: an aircraft that taxis briskly at its home field should still
+     * creep at the cramped one it is visiting, and reading the speed off the
+     * wrong end of the route would get that exactly backwards.
+     *
+     * Falls back to the old constant when there is no airport to ask - an
+     * aircraft engaged somewhere off-airport still has to be able to move.
+     */
+    private double groundSpeed() {
+        AirportLayout here = null;
+        if (level instanceof ServerLevel serverLevel) {
+            AirportRegistry registry = AirportRegistry.get(serverLevel);
+            UUID id = state == FlightState.TAXI_IN ? destinationAirportId() : originAirportId;
+            if (id == null) id = originAirportId != null ? originAirportId : destinationAirportId();
+            if (id != null) here = registry.byId(id).orElse(null);
+        }
+        return here == null ? CRAFT_TAXI_SPEED : here.taxiSpeed();
+    }
+
     private int cruiseAltitude() {
         return schedule.cruiseAltitude() + currentSeparationOffset;
     }

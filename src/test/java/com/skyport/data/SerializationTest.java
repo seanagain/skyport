@@ -96,6 +96,42 @@ class SerializationTest {
         assertEquals(Waypoint.Flow.FORWARD,
                 loaded.waypoints(Waypoint.Type.TAXIWAY).get(0).flow(),
                 "a one-way segment must still be one-way after a reload");
+        assertEquals(original.taxiSpeed(), loaded.taxiSpeed());
+    }
+
+    /** The ATC map and the autopilot both read layouts off the wire, so the
+     *  network form has to carry everything the saved form does. */
+    @Test
+    void layoutSurvivesTheNetworkRoundTrip() {
+        AirportLayout original = layout();
+        original.setTaxiSpeed(9);
+        original.waypoints(Waypoint.Type.TAXIWAY)
+                .add(new Waypoint(new BlockPos(0, 64, 0), Waypoint.Type.TAXIWAY, 0, Waypoint.Flow.REVERSE));
+        original.waypoints(Waypoint.Type.TAXIWAY)
+                .add(new Waypoint(new BlockPos(30, 64, 10), Waypoint.Type.TAXIWAY, 1, Waypoint.Flow.REVERSE));
+
+        FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+        original.write(buf);
+        AirportLayout loaded = AirportLayout.read(buf);
+
+        assertEquals(0, buf.readableBytes(), "reader must consume exactly what the writer wrote");
+        assertEquals(original.displayName(), loaded.displayName());
+        assertEquals(9, loaded.taxiSpeed());
+        assertEquals(original.gates(), loaded.gates());
+        assertEquals(Waypoint.Flow.REVERSE,
+                loaded.waypoints(Waypoint.Type.TAXIWAY).get(0).flow(),
+                "the ATC map draws arrows from this - the direction has to survive");
+    }
+
+    /** An airport saved before taxi speed was settable loads at the default
+     *  it was flying at, not at zero. */
+    @Test
+    void layoutWithoutTaxiSpeedLoadsAtTheDefault() {
+        AirportLayout original = layout();
+        CompoundTag tag = original.save();
+        tag.remove("taxiSpeed");
+
+        assertEquals(4, AirportLayout.load(tag).taxiSpeed());
     }
 
     /**

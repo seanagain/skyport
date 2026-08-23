@@ -24,6 +24,7 @@ public class AirportStationScreen extends Screen {
     private final BlockPos stationPos;
     private final AirportLayout layout;
     private EditBox nameBox;
+    private Button taxiSpeedButton;
 
     public AirportStationScreen(BlockPos stationPos, AirportLayout layout) {
         super(Component.translatable("gui.skyport.airport_station.title"));
@@ -53,10 +54,35 @@ public class AirportStationScreen extends Screen {
                 .bounds(left, top + 26, boxW, 20)
                 .build());
 
+        // Taxi speed is a property of the field, not of the aircraft: a
+        // cramped airport where the taxiway doubles as the runway wants
+        // everything slow enough to stop, however fast the visiting aircraft
+        // is set up to cruise.
+        int stepW = 22;
+        addRenderableWidget(Button.builder(Component.literal("-"), b -> adjustTaxiSpeed(-1))
+                .bounds(left, top + 50, stepW, 20)
+                .build());
+        taxiSpeedButton = addRenderableWidget(Button.builder(taxiSpeedLabel(), b -> { })
+                .bounds(left + stepW + 2, top + 50, boxW - stepW * 2 - 4, 20)
+                .build());
+        taxiSpeedButton.active = false;
+        addRenderableWidget(Button.builder(Component.literal("+"), b -> adjustTaxiSpeed(1))
+                .bounds(left + boxW - stepW, top + 50, stepW, 20)
+                .build());
+
         addRenderableWidget(Button.builder(Component.translatable("gui.skyport.airport_station.save"),
                         b -> saveAndClose())
-                .bounds(left, top + 50, boxW, 20)
+                .bounds(left, top + 74, boxW, 20)
                 .build());
+    }
+
+    private Component taxiSpeedLabel() {
+        return Component.literal("Taxi speed: " + layout.taxiSpeed() + " b/s");
+    }
+
+    private void adjustTaxiSpeed(int delta) {
+        layout.setTaxiSpeed(layout.taxiSpeed() + delta);
+        if (taxiSpeedButton != null) taxiSpeedButton.setMessage(taxiSpeedLabel());
     }
 
     private void save() {

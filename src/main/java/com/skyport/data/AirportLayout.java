@@ -40,6 +40,16 @@ public class AirportLayout {
     // around the loop a plane flies it. Defaults chosen so a freshly created
     // layout is still flyable before the player touches these settings.
     private int holdingPatternHeight = 100;
+    /**
+     * How fast aircraft taxi here, in blocks per second.
+     *
+     * Per-airport rather than a global constant because airports differ: a
+     * long field with wide taxiways can move traffic briskly, and a cramped
+     * one where the taxiway doubles as the runway wants everything slow
+     * enough to stop. It also sets pushback, proportionally - reversing off a
+     * stand should read as more deliberate than taxiing whatever the speed.
+     */
+    private int taxiSpeed = 4;
     private boolean holdingPatternClockwise = true;
 
     // Gates are named endpoints, not part of a connected line, so they get
@@ -97,6 +107,14 @@ public class AirportLayout {
 
     public int holdingPatternHeight() {
         return holdingPatternHeight;
+    }
+
+    public int taxiSpeed() {
+        return taxiSpeed;
+    }
+
+    public void setTaxiSpeed(int taxiSpeed) {
+        this.taxiSpeed = Math.max(1, Math.min(20, taxiSpeed));
     }
 
     public void setHoldingPatternHeight(int holdingPatternHeight) {
@@ -157,6 +175,7 @@ public class AirportLayout {
         tag.putString("displayName", displayName);
         tag.putString("dimension", dimension.location().toString());
         tag.putInt("holdingPatternHeight", holdingPatternHeight);
+        tag.putInt("taxiSpeed", taxiSpeed);
         tag.putBoolean("holdingPatternClockwise", holdingPatternClockwise);
         tag.putLong("stationPos", stationPos.asLong());
 
@@ -202,6 +221,9 @@ public class AirportLayout {
 
         AirportLayout layout = new AirportLayout(id, name, dimension);
         layout.holdingPatternHeight = tag.contains("holdingPatternHeight") ? tag.getInt("holdingPatternHeight") : layout.holdingPatternHeight;
+        // Absent on airports drawn before taxi speed was settable, which is
+        // exactly the default they were flying at.
+        if (tag.contains("taxiSpeed")) layout.taxiSpeed = tag.getInt("taxiSpeed");
         layout.holdingPatternClockwise = !tag.contains("holdingPatternClockwise") || tag.getBoolean("holdingPatternClockwise");
         if (tag.contains("stationPos")) layout.stationPos = BlockPos.of(tag.getLong("stationPos"));
         for (Waypoint.Type type : Waypoint.Type.values()) {
@@ -237,6 +259,7 @@ public class AirportLayout {
         buf.writeUtf(displayName);
         buf.writeUtf(dimension.location().toString());
         buf.writeVarInt(holdingPatternHeight);
+        buf.writeVarInt(taxiSpeed);
         buf.writeBoolean(holdingPatternClockwise);
         buf.writeBlockPos(stationPos);
 
@@ -266,11 +289,13 @@ public class AirportLayout {
                 net.minecraft.core.registries.Registries.DIMENSION,
                 ResourceLocation.parse(buf.readUtf()));
         int holdingPatternHeight = buf.readVarInt();
+        int taxiSpeed = buf.readVarInt();
         boolean holdingPatternClockwise = buf.readBoolean();
         BlockPos stationPos = buf.readBlockPos();
 
         AirportLayout layout = new AirportLayout(id, name, dimension);
         layout.holdingPatternHeight = holdingPatternHeight;
+        layout.taxiSpeed = taxiSpeed;
         layout.holdingPatternClockwise = holdingPatternClockwise;
         layout.stationPos = stationPos;
         for (Waypoint.Type type : Waypoint.Type.values()) {
