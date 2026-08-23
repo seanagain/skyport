@@ -2360,10 +2360,18 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         }
 
         List<BlockPos> route = shortestGroundRoute(layout, from, to);
-        // No connected route (a layout drawn before the editor enforced
-        // connectivity, say) - head straight there rather than refusing to
-        // move at all.
-        return route.isEmpty() ? List.of(to) : route;
+        if (!route.isEmpty()) return route;
+
+        // No connected route - head straight there rather than refusing to
+        // move at all, but say so. This used to be a quiet fallback because
+        // the only way to reach it was a layout drawn before the editor
+        // enforced connectivity, which nobody would hit by accident. One-way
+        // taxiways make it something a player can create on purpose, and an
+        // aircraft that answers by driving across the grass in a straight
+        // line needs to explain itself rather than just look broken.
+        message("No taxi route to " + (arriving ? "the gate" : "the runway")
+                + " - the one-way directions may not allow it. Going direct.");
+        return List.of(to);
     }
 
     /**

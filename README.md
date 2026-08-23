@@ -207,6 +207,12 @@ Each of these is a reasonable next step rather than an oversight:
 This **builds and runs** (`./gradlew build`, `./gradlew runClient`) against
 a real NeoForge/Create toolchain, and both blocks show up and work in game.
 
+`./gradlew test` runs the unit tests. They cover `GroundNetwork` - the taxiway
+graph and its one-way routing - because that is the part most able to fail
+quietly: a wrong answer there produces an aircraft that takes the long way
+round or drives across the grass, which looks like a steering bug from inside
+the game.
+
 `./gradlew runServer` runs a dedicated server, in its own `run-server/`
 directory so it doesn't fight `runClient` over the world session lock. Worth
 running after any change that touches networking or screens: it caught a

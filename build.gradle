@@ -152,6 +152,25 @@ dependencies {
     // neoforge.mods.toml: nothing in this addon compiles against it, and it
     // must not become something players are required to install.
     runtimeOnly "maven.modrinth:worldedit:${worldedit_version}"
+
+    // --- tests ---------------------------------------------------------
+    // Plain JUnit against the pure logic. Minecraft is on the test
+    // classpath because even BlockPos lives there, but nothing here boots a
+    // game: the classes under test are graph and geometry code that happen
+    // to use MC value types.
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    // ModDevGradle wires Minecraft into the main source set only, so the
+    // test source set has to borrow it. Reusing main's compile classpath
+    // rather than declaring the artifact again keeps the two from drifting.
+    testImplementation files(sourceSets.main.compileClasspath)
+    testImplementation files(sourceSets.main.output)
+    testRuntimeOnly files(sourceSets.main.runtimeClasspath)
+}
+
+tasks.named("test", Test).configure {
+    useJUnitPlatform()
+    testLogging { events "failed" }
 }
 
 // Expands the placeholders below (${mod_id}, ${mod_version}, etc.) into
