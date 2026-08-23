@@ -96,6 +96,26 @@ public class AutopilotBlock extends Block implements EntityBlock {
         }
     }
 
+    /**
+     * Breaking the block takes its aircraft off the tower's roster.
+     *
+     * Here rather than in the block entity's setRemoved, because setRemoved
+     * also fires when a chunk merely unloads - and an aircraft whose chunks
+     * unloaded is precisely the one the tower most needs to still know about.
+     * Hooking there deleted the record a tick after the aircraft wrote it,
+     * which is why sleeping aircraft never appeared on the map. The state
+     * check is because onRemove also runs for a blockstate change on the same
+     * block, and turning to face a different way is not being broken.
+     */
+    @Override
+    protected void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean movedByPiston) {
+        if (!state.is(newState.getBlock())
+                && level.getBlockEntity(pos) instanceof AutopilotBlockEntity autopilot) {
+            autopilot.unregister();
+        }
+        super.onRemove(state, level, pos, newState, movedByPiston);
+    }
+
     @Nullable
     @Override
     public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {

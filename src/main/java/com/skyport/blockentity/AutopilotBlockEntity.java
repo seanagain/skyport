@@ -2158,16 +2158,43 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         FlightChunkLoader.releaseAll(serverLevel, planeId, heldChunks);
     }
 
+    /**
+     * Called when this block entity stops existing - which includes the chunk
+     * simply unloading, not only the block being broken.
+     *
+     * That distinction is the whole point of this comment. Releasing chunks
+     * and clearances here is right either way: an aircraft that has stopped
+     * ticking should not keep holding tickets or lock an airport. But taking
+     * it off the tower's roster here was wrong, and quietly defeated every
+     * attempt to make sleeping aircraft visible - the aircraft wrote down
+     * where it was, released its chunks, and the resulting unload deleted the
+     * record a tick later. Nothing showed on the map, and the entry was gone
+     * before anyone could ask to wake it.
+     *
+     * Roster removal belongs to genuine removal, so it lives in
+     * {@link #unregister} instead, called from the block's onRemove.
+     */
     @Override
     public void setRemoved() {
         super.setRemoved();
         releaseChunks();
-        forgetParked();
         // Hand back any clearance too. Breaking an autopilot mid-flight used
         // to leave its airport locked with no plane left to release it, so
         // everyone else circled a field that was actually empty. The lease
         // timeout would recover it eventually; this makes it immediate.
         releaseApproach();
+    }
+
+    /**
+     * The autopilot block itself is gone for good - take its aircraft off the
+     * tower's roster.
+     *
+     * Deliberately called from the block's onRemove rather than from
+     * setRemoved, which also fires on a chunk unload. Same reasoning as
+     * AirportStationBlockEntity#unregister, and the same trap.
+     */
+    public void unregister() {
+        forgetParked();
     }
 
     /** Give the departure airport's runway back once safely airborne. */
