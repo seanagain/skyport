@@ -592,11 +592,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // it starts moving again.
             // Write down where we are, so the ATC block can find and wake us
             // even with these chunks unloaded.
-            registry(serverLevel).reportParked(planeId(),
-                    serverLevel.dimension().location().toString(),
-                    BlockPos.containing(simulatedPosition),
-                    callsign(), destinationLabel(registry(serverLevel)),
-                    serverLevel.getGameTime());
+            rememberSelf(serverLevel);
 
             if (SkyportConfig.keepParkedLoaded) {
                 // Server has opted into schedules that run unattended: hold a
@@ -885,8 +881,12 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // Publish our position for other planes' separation checks, and work
         // out whether we're the one that has to give way.
         AirportRegistry registry = AirportRegistry.get(serverLevel);
-        // Moving again - drop out of the parked list the ATC wake uses.
-        registry.clearParked(planeId());
+        // Keep the roster current wherever we are. This used to remove the
+        // aircraft from the written-down list the moment it started moving,
+        // on the theory that only parked aircraft needed finding again - but
+        // an aircraft frozen halfway through a leg is exactly as lost as one
+        // asleep at a gate, and rather harder to go and look for.
+        rememberSelf(serverLevel);
         // Keep any clearance we hold alive. Going quiet is what lets another
         // plane reclaim it, so a flight that ends abruptly can't lock a field.
         registry.heartbeat(planeId(), serverLevel.getGameTime());
@@ -1673,11 +1673,22 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
     /** Remove this aircraft from the persisted parked list, wherever we can
      *  reach a real level from. */
+    /** Write down where this aircraft is, so the tower can find it again
+     *  once its chunks are gone. */
+    private void rememberSelf(ServerLevel serverLevel) {
+        if (simulatedPosition == null) return;
+        registry(serverLevel).remember(planeId(),
+                serverLevel.dimension().location().toString(),
+                BlockPos.containing(simulatedPosition),
+                callsign(), destinationLabel(registry(serverLevel)),
+                state.name(), serverLevel.getGameTime());
+    }
+
     private void forgetParked() {
         if (planeId == null) return;
         ServerLevel serverLevel = level instanceof ServerLevel direct ? direct
                 : (activeSubLevel != null && activeSubLevel.getLevel() instanceof ServerLevel parent ? parent : null);
-        if (serverLevel != null) AirportRegistry.get(serverLevel).clearParked(planeId);
+        if (serverLevel != null) AirportRegistry.get(serverLevel).forget(planeId);
     }
 
     private static AirportRegistry registry(ServerLevel level) {
@@ -2601,6 +2612,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private void message(String text) {
         if (level == null || level.isClientSide || controllingPlayerId == null) return;
         ServerPlayer player = ((ServerLevel) level).getServer().getPlayerList().getPlayer(controllingPlayerId);
+        if (!withinEarshot(player)) return;
         message(player, text);
     }
 
@@ -2610,8 +2622,32 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (!SkyportConfig.actionBarMessages) return;
         if (text == null || level == null || level.isClientSide || controllingPlayerId == null) return;
         ServerPlayer player = ((ServerLevel) level).getServer().getPlayerList().getPlayer(controllingPlayerId);
-        if (player == null) return;
+        if (player == null || !withinEarshot(player)) return;
         player.displayClientMessage(Component.literal("[" + callsign() + "] " + text), true);
+    }
+
+    /**
+     * Is the player close enough to this aircraft to be told what it is doing?
+     *
+     * An aircraft narrating its whole schedule to whoever last touched it is
+     * fine with one aeroplane and unbearable with six, especially when they
+     * are all somewhere else. Standing next to the thing is a good proxy for
+     * caring what it is up to right now; the tower is where you go to check
+     * on one you are not standing next to.
+     *
+     * Measured against the craft's tracked position rather than getBlockPos,
+     * which is sub-level-local while mounted and would compare a player's
+     * world coordinates against an offset inside the aircraft.
+     */
+    private boolean withinEarshot(@org.jetbrains.annotations.Nullable ServerPlayer player) {
+        if (player == null) return false;
+        int radius = SkyportConfig.messageRadius;
+        if (radius <= 0) return true; // 0 means "wherever I am", as before
+        if (simulatedPosition == null) return true;
+        // simulatedPosition is already in world coordinates, so comparing a
+        // player's position against it is valid whether the block is mounted
+        // on a craft or sitting on the ground.
+        return player.position().closerThan(simulatedPosition, radius);
     }
 
     private void message(@org.jetbrains.annotations.Nullable ServerPlayer player, @org.jetbrains.annotations.Nullable String text) {

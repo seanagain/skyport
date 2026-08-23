@@ -28,6 +28,18 @@ public final class SkyportConfig {
                      "Useful when debugging a route, noisy the rest of the time.")
             .define("messages.telemetry", false);
 
+    public static final ModConfigSpec.IntValue MESSAGE_RADIUS = BUILDER
+            .comment("How close you have to be to an aircraft to hear it, in blocks.",
+                     "",
+                     "An aircraft narrating its whole schedule to whoever last touched",
+                     "it is fine with one aeroplane and unbearable with six, especially",
+                     "when they are all somewhere else. The ATC screen is where you check",
+                     "on an aircraft you are not standing next to.",
+                     "",
+                     "Refusals still always reach you - if Engage is rejected, you are",
+                     "standing at the block anyway. 0 means no limit, as it was before.")
+            .defineInRange("messages.radius", 5, 0, 256);
+
     public static final ModConfigSpec.BooleanValue CHUNK_LOADING = BUILDER
             .comment("Let aircraft keep the world loaded around themselves while flying.",
                      "Turn this off only if something else on the server handles chunk",
@@ -168,6 +180,7 @@ public final class SkyportConfig {
     public static boolean chatMessages = true;
     public static boolean actionBarMessages = true;
     public static boolean telemetry = false;
+    public static int messageRadius = 5;
     public static boolean chunkLoading = true;
     public static int chunkRadius = 2;
     public static boolean keepParkedLoaded = false;
@@ -185,6 +198,7 @@ public final class SkyportConfig {
         chatMessages = CHAT_MESSAGES.get();
         actionBarMessages = ACTION_BAR_MESSAGES.get();
         telemetry = TELEMETRY.get();
+        messageRadius = MESSAGE_RADIUS.get();
         chunkLoading = CHUNK_LOADING.get();
         chunkRadius = CHUNK_RADIUS.get();
         keepParkedLoaded = KEEP_PARKED_LOADED.get();

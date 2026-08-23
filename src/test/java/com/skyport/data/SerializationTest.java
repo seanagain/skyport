@@ -107,14 +107,14 @@ class SerializationTest {
     void parkedAircraftSurvivesRoundTrip() {
         AirportRegistry registry = new AirportRegistry();
         UUID plane = UUID.randomUUID();
-        registry.reportParked(plane, "minecraft:overworld", new BlockPos(12, 64, -8),
-                "Cargo 1", "Heathrow / Gate A", 1000L);
+        registry.remember(plane, "minecraft:overworld", new BlockPos(12, 64, -8),
+                "Cargo 1", "Heathrow / Gate A", "WAITING", 1000L);
 
         AirportRegistry loaded = AirportRegistry.FACTORY.deserializer()
                 .apply(registry.save(new CompoundTag(), null), null);
 
-        assertEquals(1, loaded.parked().size());
-        AirportRegistry.ParkedAircraft aircraft = loaded.parked().iterator().next();
+        assertEquals(1, loaded.known().size());
+        AirportRegistry.KnownAircraft aircraft = loaded.known().iterator().next();
         assertEquals(plane, aircraft.planeId());
         assertEquals(new BlockPos(12, 64, -8), aircraft.position());
         assertEquals("Cargo 1", aircraft.callsign());
@@ -143,8 +143,8 @@ class SerializationTest {
 
         AirportRegistry loaded = AirportRegistry.FACTORY.deserializer().apply(tag, null);
 
-        assertEquals(1, loaded.parked().size());
-        AirportRegistry.ParkedAircraft aircraft = loaded.parked().iterator().next();
+        assertEquals(1, loaded.known().size());
+        AirportRegistry.KnownAircraft aircraft = loaded.known().iterator().next();
         assertEquals("", aircraft.callsign());
         assertEquals(new BlockPos(1, 64, 2), aircraft.position());
     }
@@ -155,8 +155,8 @@ class SerializationTest {
     void parkedAircraftAppearInTheMergedTrafficView() {
         AirportRegistry registry = new AirportRegistry();
         UUID plane = UUID.randomUUID();
-        registry.reportParked(plane, "minecraft:overworld", new BlockPos(0, 64, 0),
-                "Cargo 1", "Heathrow / Gate A", 1000L);
+        registry.remember(plane, "minecraft:overworld", new BlockPos(0, 64, 0),
+                "Cargo 1", "Heathrow / Gate A", "WAITING", 1000L);
 
         assertTrue(registry.airborneTraffic().isEmpty(), "nothing is flying");
         assertEquals(1, registry.allTraffic(1000L).size(), "but something is still traffic");
@@ -173,8 +173,8 @@ class SerializationTest {
     void aParkedAircraftThatStopsReportingReadsAsAsleep() {
         AirportRegistry registry = new AirportRegistry();
         UUID plane = UUID.randomUUID();
-        registry.reportParked(plane, "minecraft:overworld", new BlockPos(0, 64, 0),
-                "Cargo 1", "Heathrow / Gate A", 1000L);
+        registry.remember(plane, "minecraft:overworld", new BlockPos(0, 64, 0),
+                "Cargo 1", "Heathrow / Gate A", "WAITING", 1000L);
 
         assertTrue(registry.isAwake(plane, 1000L), "it just reported in");
         assertEquals("WAITING", registry.allTraffic(1010L).get(0).state(),
@@ -194,8 +194,8 @@ class SerializationTest {
     void everythingIsAsleepAfterAReload() {
         AirportRegistry registry = new AirportRegistry();
         UUID plane = UUID.randomUUID();
-        registry.reportParked(plane, "minecraft:overworld", new BlockPos(0, 64, 0),
-                "Cargo 1", "Heathrow / Gate A", 1000L);
+        registry.remember(plane, "minecraft:overworld", new BlockPos(0, 64, 0),
+                "Cargo 1", "Heathrow / Gate A", "WAITING", 1000L);
 
         AirportRegistry loaded = AirportRegistry.FACTORY.deserializer()
                 .apply(registry.save(new CompoundTag(), null), null);
@@ -204,18 +204,63 @@ class SerializationTest {
         assertEquals("ASLEEP", loaded.allTraffic(1000L).get(0).state());
     }
 
+    /**
+     * The case the roster exists for: an aircraft that stopped ticking
+     * halfway through a leg, and a restart on top of it.
+     *
+     * This used to be unrecoverable. Only aircraft parked at a gate were
+     * written down; a moving one lived in a transient list and was actively
+     * removed from the persisted one, so an aircraft frozen mid-flight was
+     * lost from the tower entirely - no position, no way to ask for it back.
+     * It is exactly as lost as one asleep at a gate, and rather harder to go
+     * and look for.
+     */
+    @Test
+    void anAircraftFrozenMidFlightIsStillFoundAfterARestart() {
+        AirportRegistry registry = new AirportRegistry();
+        UUID plane = UUID.randomUUID();
+        registry.remember(plane, "minecraft:overworld", new BlockPos(4000, 180, -2500),
+                "Cargo 1", "Heathrow / Gate A", "CRUISE", 1000L);
+
+        AirportRegistry loaded = AirportRegistry.FACTORY.deserializer()
+                .apply(registry.save(new CompoundTag(), null), null);
+
+        assertTrue(loaded.knownById(plane).isPresent(), "the aircraft is still on the roster");
+        assertEquals(new BlockPos(4000, 180, -2500), loaded.knownById(plane).get().position(),
+                "and it is still where it stopped, which is where waking has to load");
+        assertEquals("CRUISE", loaded.knownById(plane).get().state(),
+                "along with what it was doing when it went quiet");
+        assertEquals("ASLEEP", loaded.allTraffic(1000L).get(0).state(),
+                "the tower shows it as resting, not as flying");
+    }
+
+    /** Disengaging takes an aircraft off the roster - otherwise the tower
+     *  would accumulate every aircraft that ever flew. */
+    @Test
+    void forgettingRemovesItFromTheRoster() {
+        AirportRegistry registry = new AirportRegistry();
+        UUID plane = UUID.randomUUID();
+        registry.remember(plane, "minecraft:overworld", new BlockPos(0, 64, 0),
+                "Cargo 1", "Heathrow / Gate A", "WAITING", 1000L);
+        assertEquals(1, registry.allTraffic(1000L).size());
+
+        registry.forget(plane);
+        assertTrue(registry.allTraffic(1000L).isEmpty());
+        assertTrue(registry.knownById(plane).isEmpty());
+    }
+
     /** Waking one has to be able to find it again by id alone - the player
      *  clicking a row in the tower is nowhere near the aircraft. */
     @Test
     void aParkedAircraftCanBeFoundById() {
         AirportRegistry registry = new AirportRegistry();
         UUID plane = UUID.randomUUID();
-        registry.reportParked(plane, "minecraft:the_nether", new BlockPos(3, 70, 4),
-                "Cargo 1", "Heathrow / Gate A", 1000L);
+        registry.remember(plane, "minecraft:the_nether", new BlockPos(3, 70, 4),
+                "Cargo 1", "Heathrow / Gate A", "WAITING", 1000L);
 
-        assertTrue(registry.parkedById(plane).isPresent());
-        assertEquals("minecraft:the_nether", registry.parkedById(plane).get().dimension());
-        assertTrue(registry.parkedById(UUID.randomUUID()).isEmpty());
+        assertTrue(registry.knownById(plane).isPresent());
+        assertEquals("minecraft:the_nether", registry.knownById(plane).get().dimension());
+        assertTrue(registry.knownById(UUID.randomUUID()).isEmpty());
     }
 
     /** An aircraft that is flying must not also be listed as parked - it
@@ -224,8 +269,8 @@ class SerializationTest {
     void airborneAircraftIsNotAlsoListedAsParked() {
         AirportRegistry registry = new AirportRegistry();
         UUID plane = UUID.randomUUID();
-        registry.reportParked(plane, "minecraft:overworld", new BlockPos(0, 64, 0),
-                "Cargo 1", "Heathrow / Gate A", 1000L);
+        registry.remember(plane, "minecraft:overworld", new BlockPos(0, 64, 0),
+                "Cargo 1", "Heathrow / Gate A", "WAITING", 1000L);
         registry.reportAirborne(new TrafficReport(plane, "Cargo 1", "CRUISE",
                 new net.minecraft.world.phys.Vec3(0, 120, 0), "Gatwick / Gate B", true), 1000L);
 

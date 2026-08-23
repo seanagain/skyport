@@ -71,8 +71,8 @@ public final class FleetWake {
      */
     public static int wakeAll(MinecraftServer server) {
         int woken = 0;
-        for (AirportRegistry.ParkedAircraft aircraft
-                : List.copyOf(AirportRegistry.get(server.overworld()).parked())) {
+        for (AirportRegistry.KnownAircraft aircraft
+                : List.copyOf(AirportRegistry.get(server.overworld()).known())) {
             if (wake(server, aircraft)) woken++;
         }
         return woken;
@@ -88,12 +88,12 @@ public final class FleetWake {
      * about.
      */
     public static boolean wake(MinecraftServer server, UUID planeId) {
-        return AirportRegistry.get(server.overworld()).parkedById(planeId)
+        return AirportRegistry.get(server.overworld()).knownById(planeId)
                 .map(aircraft -> wake(server, aircraft))
                 .orElse(false);
     }
 
-    private static boolean wake(MinecraftServer server, AirportRegistry.ParkedAircraft aircraft) {
+    private static boolean wake(MinecraftServer server, AirportRegistry.KnownAircraft aircraft) {
         int minutes = SkyportConfig.fleetWakeMinutes;
         if (minutes <= 0) return false;
 
