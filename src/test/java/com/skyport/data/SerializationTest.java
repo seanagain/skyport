@@ -227,7 +227,7 @@ class SerializationTest {
         registry.reportParked(plane, "minecraft:overworld", new BlockPos(0, 64, 0),
                 "Cargo 1", "Heathrow / Gate A", 1000L);
         registry.reportAirborne(new TrafficReport(plane, "Cargo 1", "CRUISE",
-                new net.minecraft.world.phys.Vec3(0, 120, 0), "Gatwick / Gate B", true));
+                new net.minecraft.world.phys.Vec3(0, 120, 0), "Gatwick / Gate B", true), 1000L);
 
         assertEquals(1, registry.allTraffic(1000L).size(), "the same aircraft must appear once");
         assertEquals("CRUISE", registry.allTraffic(1000L).get(0).state(), "the live report wins");

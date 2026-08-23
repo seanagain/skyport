@@ -896,7 +896,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         boolean airborne = !isGroundState();
         registry.reportAirborne(new TrafficReport(
                 planeId(), callsign(), state.name(), simulatedPosition,
-                destinationLabel(registry), airborne));
+                destinationLabel(registry), airborne), serverLevel.getGameTime());
 
         if (!airborne) {
             currentSeparationOffset = 0;
@@ -2160,9 +2160,26 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     }
 
     /** Give the departure airport's runway back once safely airborne. */
+    /**
+     * Hand back everything the departure airport lent us, now we are airborne.
+     *
+     * Both clearances, not just the runway. A departure takes the taxiway on
+     * pushback and only gives it back at the hold line - and that release
+     * lives inside the hold-line branch, so an airport with no hold line
+     * drawn never ran it. This method then nulled originAirportId, putting
+     * the lease permanently out of reach of every other release path, while
+     * the aircraft went on heartbeating happily from the far side of the map
+     * so the lease never timed out either.
+     *
+     * The symptom was an arrival holding forever over an airport with nothing
+     * on it: arrivals claim runway and taxiway together, and the taxiway was
+     * still held by an aeroplane that had left minutes ago.
+     */
     private void releaseOriginRunway(ServerLevel serverLevel) {
         if (originAirportId == null || planeId == null) return;
-        AirportRegistry.get(serverLevel).releaseTraffic(originAirportId, planeId);
+        AirportRegistry registry = AirportRegistry.get(serverLevel);
+        registry.releaseTraffic(originAirportId, planeId);
+        registry.releaseTaxiway(originAirportId, planeId);
         originAirportId = null;
     }
 

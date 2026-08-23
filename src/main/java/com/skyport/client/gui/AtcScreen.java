@@ -51,6 +51,9 @@ public class AtcScreen extends Screen {
     private static final int COLOR_AIRCRAFT_GROUND = 0xFF9E6636;
     private static final int COLOR_ATC = 0xFFE33A3A;
     private static final int COLOR_GRID = 0xFF2A2A2A;
+    /** One-way arrowheads. Dark, so they read as markings ON the taxiway
+     *  rather than as another line beside it. */
+    private static final int COLOR_FLOW_ARROW = 0xFF3A2E10;
     private static final int MARGIN_BLOCKS = 120;
     private static final int TERRAIN_CELL = 3;
     /** How often to ask the server for fresh aircraft positions. */
@@ -418,23 +421,49 @@ public class AtcScreen extends Screen {
             return;
         }
 
+        // Two sections, because they answer different questions. The top half
+        // is what is happening now; the bottom is a fleet inventory - aircraft
+        // that exist, are somewhere, and are not moving because nothing is
+        // running to move them. Mixed together, a dozen sleeping aircraft
+        // buried the one that was actually on approach.
         int y = mapY + 16;
+        y = drawSection(guiGraphics, y, false);
+
+        boolean anyResting = false;
+        for (TrafficReport report : traffic) {
+            if ("ASLEEP".equals(report.state())) { anyResting = true; break; }
+        }
+        if (anyResting && y < mapY + mapH - 30) {
+            y += 4;
+            guiGraphics.fill(listX + 4, y, listX + listW - 4, y + 1, 0xFF2B2B2B);
+            y += 4;
+            guiGraphics.drawString(font, "Resting", listX + 4, y, 0xFF8A8A8A);
+            y += 12;
+            drawSection(guiGraphics, y, true);
+        }
+    }
+
+    /** Draws one half of the strip; returns the y it stopped at. */
+    private int drawSection(GuiGraphics guiGraphics, int y, boolean resting) {
         for (int i = 0; i < traffic.size() && y < mapY + mapH - 20; i++) {
             TrafficReport report = traffic.get(i);
+            boolean asleep = "ASLEEP".equals(report.state());
+            if (asleep != resting) continue;
+
             if (i == selected) {
                 guiGraphics.fill(listX + 1, y - 1, listX + listW - 1, y + 19, 0xFF303030);
             }
-            // A sleeping aircraft is dimmed, because it is not traffic in any
+            // A resting aircraft is dimmed, because it is not traffic in any
             // live sense - nothing is running to move it - and showing it at
             // the same weight as an aircraft on final approach would be a lie
             // about what the tower can see.
-            boolean asleep = "ASLEEP".equals(report.state());
             int nameColor = asleep ? COLOR_ASLEEP : (i == selected ? 0xFFFFFFFF : COLOR_AIRCRAFT);
             guiGraphics.drawString(font, report.callsign(), listX + 4, y, nameColor);
             guiGraphics.drawString(font, prettyState(report.state()), listX + 4, y + 10,
                     asleep ? COLOR_ASLEEP : 0xFF9A9A9A);
             y += 22;
         }
+        return y;
     }
 
     /** Is the selected row an aircraft the server has stopped ticking? */
@@ -474,12 +503,49 @@ public class AtcScreen extends Screen {
             drawBorder(guiGraphics, x - 2, y - 2, 5, 5, COLOR_HOLD_SHORT);
         }
 
-        List<Waypoint> runway = airport.waypoints(Waypoint.Type.RUNWAY);
-        if (!runway.isEmpty()) {
-            int x = worldToScreenX(runway.get(0).pos().getX());
-            int y = worldToScreenY(runway.get(0).pos().getZ());
-            guiGraphics.drawString(font, airport.displayName(), x + 5, y - 10, COLOR_LABEL);
+        drawAirportLabel(guiGraphics, airport);
+    }
+
+    /**
+     * The airport's name, above everything it owns.
+     *
+     * Anchored to the top of the layout's own bounding box rather than to the
+     * runway's first point, which put the text straight through the taxiways
+     * and gates - both the name and the airport became unreadable, and at a
+     * busy field the labels crossed each other too. Centred and backed by a
+     * dark strip so it stays legible over terrain.
+     */
+    private void drawAirportLabel(GuiGraphics guiGraphics, AirportLayout airport) {
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE;
+        for (Waypoint.Type type : Waypoint.Type.values()) {
+            for (Waypoint point : airport.waypoints(type)) {
+                int x = worldToScreenX(point.pos().getX());
+                int y = worldToScreenY(point.pos().getZ());
+                minX = Math.min(minX, x);
+                maxX = Math.max(maxX, x);
+                minY = Math.min(minY, y);
+            }
         }
+        for (BlockPos gate : airport.gates().values()) {
+            int x = worldToScreenX(gate.getX());
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+            minY = Math.min(minY, worldToScreenY(gate.getZ()));
+        }
+        if (minX == Integer.MAX_VALUE) return; // nothing drawn yet
+
+        String name = airport.displayName();
+        int width = font.width(name);
+        int x = (minX + maxX) / 2 - width / 2;
+        int y = minY - 12;
+
+        // Keep it on the map even when the airport is scrolled to an edge -
+        // a label half off the panel is worse than one nudged inwards.
+        x = Math.max(mapX + 2, Math.min(x, mapX + mapW - width - 2));
+        y = Math.max(mapY + 2, Math.min(y, mapY + mapH - 10));
+
+        guiGraphics.fill(x - 2, y - 1, x + width + 2, y + 9, 0xB0000000);
+        guiGraphics.drawString(font, name, x, y, COLOR_LABEL);
     }
 
     private void drawPath(GuiGraphics guiGraphics, List<Waypoint> points, int color) {
@@ -492,8 +558,50 @@ public class AtcScreen extends Screen {
 
     private void drawSegmentPairs(GuiGraphics guiGraphics, List<Waypoint> points, int color) {
         for (int i = 0; i + 1 < points.size(); i += 2) {
-            line(guiGraphics, points.get(i).pos(), points.get(i + 1).pos(), color);
+            BlockPos a = points.get(i).pos();
+            BlockPos b = points.get(i + 1).pos();
+            line(guiGraphics, a, b, color);
+
+            // One-way segments get an arrowhead here as well as in the
+            // editor. The tower is where someone works out why an aircraft is
+            // taking the long way round, and it could not answer that while
+            // it drew every taxiway identically.
+            Waypoint.Flow flow = points.get(i).flow();
+            if (flow == Waypoint.Flow.FORWARD) {
+                drawFlowArrow(guiGraphics, a, b);
+            } else if (flow == Waypoint.Flow.REVERSE) {
+                drawFlowArrow(guiGraphics, b, a);
+            }
         }
+    }
+
+    /** An arrowhead at the middle of a one-way segment, pointing from -> to. */
+    private void drawFlowArrow(GuiGraphics guiGraphics, BlockPos from, BlockPos to) {
+        int fromX = worldToScreenX(from.getX()), fromY = worldToScreenY(from.getZ());
+        int toX = worldToScreenX(to.getX()), toY = worldToScreenY(to.getZ());
+
+        double dx = toX - fromX;
+        double dy = toY - fromY;
+        double length = Math.sqrt(dx * dx + dy * dy);
+        if (length < 8) return; // shorter than the arrow would be
+
+        dx /= length;
+        dy /= length;
+        int midX = (fromX + toX) / 2;
+        int midY = (fromY + toY) / 2;
+
+        int size = 4;
+        double angle = Math.toRadians(40);
+        double cos = Math.cos(angle), sin = Math.sin(angle);
+        double backX = -dx * size, backY = -dy * size;
+
+        int leftX = midX + (int) Math.round(backX * cos - backY * sin);
+        int leftY = midY + (int) Math.round(backX * sin + backY * cos);
+        int rightX = midX + (int) Math.round(backX * cos + backY * sin);
+        int rightY = midY + (int) Math.round(-backX * sin + backY * cos);
+
+        drawPixelLine(guiGraphics, midX, midY, leftX, leftY, COLOR_FLOW_ARROW);
+        drawPixelLine(guiGraphics, midX, midY, rightX, rightY, COLOR_FLOW_ARROW);
     }
 
     private void drawLoop(GuiGraphics guiGraphics, List<Waypoint> points, int color) {

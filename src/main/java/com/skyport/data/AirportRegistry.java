@@ -285,7 +285,22 @@ public class AirportRegistry extends SavedData {
      * and these aircraft are not running.
      */
     public List<TrafficReport> allTraffic(long now) {
-        List<TrafficReport> all = new ArrayList<>(airborneTraffic.values());
+        List<TrafficReport> all = new ArrayList<>();
+
+        // An aircraft that stops reporting has NOT gone anywhere - almost
+        // always its chunks were released and it is frozen mid-flight,
+        // exactly where it was. Dropping it from the board made aircraft
+        // vanish off the map and reappear minutes later when something else
+        // happened to load that patch of world, which reads as the mod losing
+        // track of them. It keeps its last known position and says it is
+        // resting, which is the truth.
+        for (TrafficReport report : airborneTraffic.values()) {
+            Long seen = airborneSeen.get(report.planeId());
+            boolean live = seen != null && now - seen <= PARKED_AWAKE_WINDOW_TICKS;
+            all.add(live ? report : new TrafficReport(report.planeId(), report.callsign(),
+                    "ASLEEP", report.position(), report.destination(), false));
+        }
+
         for (ParkedAircraft aircraft : parked.values()) {
             if (airborneTraffic.containsKey(aircraft.planeId())) continue;
             // ASLEEP is not a flight state - it is the absence of one. The
@@ -315,12 +330,23 @@ public class AirportRegistry extends SavedData {
      */
     private final transient Map<UUID, TrafficReport> airborneTraffic = new HashMap<>();
 
-    public void reportAirborne(TrafficReport report) {
+    /** When each airborne report last arrived - see allTraffic. */
+    private final transient Map<UUID, Long> airborneSeen = new HashMap<>();
+
+    public void reportAirborne(TrafficReport report, long now) {
         airborneTraffic.put(report.planeId(), report);
+        airborneSeen.put(report.planeId(), now);
     }
 
+    /**
+     * Take an aircraft off the board for good - it parked, or disengaged.
+     *
+     * Deliberately the only way an entry leaves. An aircraft that simply
+     * stops reporting is NOT removed: see allTraffic for why.
+     */
     public void clearAirborne(UUID planeId) {
         airborneTraffic.remove(planeId);
+        airborneSeen.remove(planeId);
     }
 
     public Map<UUID, TrafficReport> airborneTraffic() {

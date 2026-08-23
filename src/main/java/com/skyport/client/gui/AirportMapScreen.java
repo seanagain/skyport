@@ -55,10 +55,7 @@ public class AirportMapScreen extends Screen {
 
     private enum EditMode {
         RUNWAY("Runway"), TAXIWAY("Taxiway"), HOLDING_PATTERN("Pattern"),
-        FINAL_LEG("Final"), GATE("Gate"), HOLD_SHORT("Hold Line"), HELIPAD("Pad"),
-        /** Not a drawing mode: clicking an existing taxiway segment cycles
-         *  which way traffic may run along it. */
-        FLOW("Flow");
+        FINAL_LEG("Final"), GATE("Gate"), HOLD_SHORT("Hold Line"), HELIPAD("Pad");
 
         final String label;
         EditMode(String label) { this.label = label; }
@@ -315,7 +312,7 @@ public class AirportMapScreen extends Screen {
             case HOLDING_PATTERN -> Waypoint.Type.HOLDING_PATTERN;
             case FINAL_LEG -> Waypoint.Type.FINAL_LEG;
             case HOLD_SHORT -> Waypoint.Type.HOLD_SHORT;
-            case GATE, HELIPAD, FLOW -> throw new IllegalArgumentException(mode + " is not a Waypoint.Type");
+            case GATE, HELIPAD -> throw new IllegalArgumentException(mode + " is not a Waypoint.Type");
         };
     }
 
@@ -324,8 +321,23 @@ public class AirportMapScreen extends Screen {
         if (button == 0 && isInsideMap(mouseX, mouseY)) {
             BlockPos world = snapToExistingNode(screenToWorld((int) mouseX, (int) mouseY));
 
-            if (mode == EditMode.FLOW) {
-                cycleFlowAt(world);
+            // In Taxiway mode, a click on the BODY of an existing segment
+            // changes its direction instead of placing a point.
+            //
+            // Two guards keep that from stealing clicks meant for drawing.
+            // Near a node it always places, because joining to an existing
+            // point is how every segment has to start - that is the one place
+            // a legitimate click lands on top of existing geometry. And
+            // mid-pair it always places, because you are half way through
+            // drawing a segment and the second click is not optional.
+            //
+            // Without this, clicking a segment to redirect it silently drew a
+            // new one instead, which is how a layout ends up with stray
+            // taxiways going nowhere.
+            if (mode == EditMode.TAXIWAY
+                    && layout.waypoints(Waypoint.Type.TAXIWAY).size() % 2 == 0
+                    && !isOnExistingNode(mouseX, mouseY)
+                    && cycleFlowAt(world)) {
                 return true;
             }
 
@@ -419,7 +431,7 @@ public class AirportMapScreen extends Screen {
      * the natural thing to click is the middle of the line you want to make
      * one-way, not one of the two dots at its ends.
      */
-    private void cycleFlowAt(BlockPos clicked) {
+    private boolean cycleFlowAt(BlockPos clicked) {
         List<Waypoint> taxiway = layout.waypoints(Waypoint.Type.TAXIWAY);
         int best = -1;
         double bestDistance = Double.MAX_VALUE;
@@ -435,11 +447,10 @@ public class AirportMapScreen extends Screen {
         // In blocks, but scaled by zoom, so "near enough to mean that one"
         // stays the same apparent distance however far out you are.
         double tolerance = Math.max(4, FLOW_PICK_PIXELS * (double) blocksPerPixel());
-        if (best < 0 || bestDistance > tolerance) {
-            rejection = "Click on a taxiway segment to change its direction.";
-            rejectionShownAtMs = System.currentTimeMillis();
-            return;
-        }
+        // Not on a segment - the caller treats this as an ordinary placing
+        // click rather than an error, which is what lets one mode both draw
+        // taxiways and redirect them.
+        if (best < 0 || bestDistance > tolerance) return false;
 
         rejection = null;
         Waypoint start = taxiway.get(best);
@@ -461,6 +472,13 @@ public class AirportMapScreen extends Screen {
                     + " - aircraft can't get there and back.";
             rejectionShownAtMs = System.currentTimeMillis();
         }
+        return true;
+    }
+
+    /** Is the cursor sitting on a waypoint someone might be trying to join? */
+    private boolean isOnExistingNode(double mouseX, double mouseY) {
+        BlockPos raw = screenToWorld((int) mouseX, (int) mouseY);
+        return !snapToExistingNode(raw).equals(raw);
     }
 
     /** Perpendicular distance from a point to a line segment, in blocks. */
@@ -505,10 +523,6 @@ public class AirportMapScreen extends Screen {
             }
 
             case HOLDING_PATTERN -> null;
-
-            // Not placing anything - the click retargets an existing
-            // segment, and mouseClicked handles the "nothing there" case.
-            case FLOW -> null;
 
             // Pads stand alone - rotorcraft arrive vertically, so a helipad
             // needs no taxiway, no runway and nothing to connect to.
@@ -748,13 +762,12 @@ public class AirportMapScreen extends Screen {
     private String hint() {
         return switch (mode) {
             case RUNWAY -> "draw this first - 2 points: gate end, then far end";
-            case TAXIWAY -> "pairs; start each on the runway or another taxiway";
+            case TAXIWAY -> "pairs; click a drawn segment to flip its direction";
             case HOLDING_PATTERN -> "the airborne racetrack - click a loop of 3+ points";
             case FINAL_LEG -> "2 points: from holding pattern, to runway";
             case GATE -> "click the end of a runway or taxiway line";
             case HOLD_SHORT -> "the ground stop line - planes wait here for the runway";
             case HELIPAD -> "click anywhere - helicopters and blimps land here";
-            case FLOW -> "click a taxiway segment to cycle two-way / one-way / reversed";
         };
     }
 
