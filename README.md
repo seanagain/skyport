@@ -121,14 +121,41 @@ as a real aeroplane. Fine while building; a cheat in survival. Set
   already carries; `survival.rotationMinimumRpm` sets how much (16 by default,
   about one water wheel).
 - `FUEL` - the autopilot burns furnace fuel out of any container on the
-  aircraft, at furnace burn times scaled by `survival.fuelEfficiency`. Coal is
-  80 seconds of flight at 1.0. Anything that burns in a furnace works,
-  including other mods' fuels.
+  aircraft, at furnace burn times scaled by `survival.fuelEfficiency`.
+  Anything that burns in a furnace works, including other mods' fuels.
 
 Either way, losing power in flight is an engine failure rather than a pause:
 the autopilot holds the wings level but stops driving the craft, so it coasts
 and descends. Aircraft parked at a gate burn nothing.
 
+### Speed costs fuel
+
+Burn rate rises with cruise speed raised to `survival.fuelSpeedExponent`,
+measured against `survival.fuelReferenceSpeed` (24 by default - the default
+cruise speed, so an aircraft nobody has retuned burns exactly what it always
+did).
+
+The exponent has to be above 1 for the choice to mean anything. At 1.0 the
+rate rises exactly in step with speed, so a journey costs the same fuel
+however fast it is flown and there is never a reason to fly slowly. The
+default of 2.0 makes fuel per block scale with speed, and matches the fact
+that drag really does rise with the square of speed. On one coal:
+
+| Cruise speed | Endurance | Range |
+| --- | --- | --- |
+| 12 | 320s | 3840 blocks |
+| 24 (default) | 80s | 1920 blocks |
+| 48 | 20s | 960 blocks |
+| 80 | 7s | 576 blocks |
+
+There is a floor on the burn rate, because an aircraft holding with its engine
+running is still burning something. One consequence of that is emergent rather
+than designed: below roughly speed 8 the floor dominates, so range stops
+improving and starts falling again. There is a genuine best-range cruise
+speed, the way there is for a real aircraft.
+
+With telemetry on (`messages.telemetry`) the readout shows seconds of fuel
+remaining at the speed currently being flown.
 ## Known limits
 
 Each of these is a reasonable next step rather than an oversight:

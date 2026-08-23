@@ -134,6 +134,31 @@ public final class SkyportConfig {
                      "fuel; lower it to make range a real constraint on route planning.")
             .defineInRange("survival.fuelEfficiency", 1.0, 0.05, 20.0);
 
+    public static final ModConfigSpec.DoubleValue FUEL_SPEED_EXPONENT = BUILDER
+            .comment("FUEL mode: how sharply fuel burn rises with cruise speed.",
+                     "",
+                     "Burn rate is (cruise speed / reference speed) raised to this power.",
+                     "The exponent is what creates the trade-off, and it has to be above 1",
+                     "for one to exist at all: at 1.0 the rate rises exactly in step with",
+                     "speed, so a journey costs the same fuel however fast it is flown and",
+                     "there is never a reason to fly slowly.",
+                     "",
+                     "0.0: flat rate. Speed is free; fuel is purely a function of time.",
+                     "1.0: fuel per block is constant. Speed is still effectively free.",
+                     "2.0 (default): fuel per block scales with speed - double the cruise",
+                     "speed, double the fuel for the trip. Drag really does rise with the",
+                     "square of speed, so this is also roughly the honest answer.",
+                     "3.0+: punishing. Fast aircraft become a deliberate luxury.")
+            .defineInRange("survival.fuelSpeedExponent", 2.0, 0.0, 4.0);
+
+    public static final ModConfigSpec.IntValue FUEL_REFERENCE_SPEED = BUILDER
+            .comment("FUEL mode: the cruise speed that burns fuel at exactly the rate",
+                     "fuelEfficiency describes - one coal for 80 seconds at 1.0.",
+                     "Below this an aircraft is cheaper than that, above it dearer.",
+                     "Defaults to 24, the default cruise speed, so an aircraft nobody has",
+                     "retuned burns exactly what it always did.")
+            .defineInRange("survival.fuelReferenceSpeed", 24, 4, 80);
+
     public static final ModConfigSpec SPEC = BUILDER.build();
 
     private SkyportConfig() { }
@@ -153,6 +178,8 @@ public final class SkyportConfig {
     public static PowerRequirement powerRequirement = PowerRequirement.NONE;
     public static int rotationMinimumRpm = 16;
     public static double fuelEfficiency = 1.0;
+    public static double fuelSpeedExponent = 2.0;
+    public static int fuelReferenceSpeed = 24;
 
     public static void refresh() {
         chatMessages = CHAT_MESSAGES.get();
@@ -168,5 +195,7 @@ public final class SkyportConfig {
         powerRequirement = POWER_REQUIREMENT.get();
         rotationMinimumRpm = ROTATION_MINIMUM_RPM.get();
         fuelEfficiency = FUEL_EFFICIENCY.get();
+        fuelSpeedExponent = FUEL_SPEED_EXPONENT.get();
+        fuelReferenceSpeed = FUEL_REFERENCE_SPEED.get();
     }
 }

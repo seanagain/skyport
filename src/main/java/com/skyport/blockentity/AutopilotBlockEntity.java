@@ -198,6 +198,16 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private static final int MISSING_FACILITY_REPEAT_TICKS = 200;
     /** How often to re-check power and burn fuel. One second. */
     private static final int POWER_CHECK_INTERVAL_TICKS = 20;
+    /** Fuel burn for a craft that is powered but barely moving. Not zero: an
+     *  aircraft holding with its engine running is still burning. */
+    private static final double FUEL_IDLE_BURN_RATE = 0.1;
+    /** Cap on the burn multiplier, so a steep exponent and a high cruise
+     *  speed cannot drain a whole hold between two checks. */
+    private static final double FUEL_MAX_BURN_RATE = 20.0;
+    /** Most world time one fuel check may charge for. A craft that has been
+     *  unloaded for an hour was not flying for that hour, and should not be
+     *  billed as though it were. */
+    private static final long MAX_FUEL_CATCHUP_TICKS = 100;
     /** How many unsuccessful laps between "still waiting" reports. */
     private static final int HOLDING_REPORT_EVERY_LAPS = 2;
     /** How often to move the force-loaded bubble; every tick would churn. */
@@ -275,15 +285,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** Containers to draw fuel from, located once and remembered - same
      *  reasoning as cargoContainers. */
     private transient java.util.List<BlockPos> fuelContainers;
-    /** Game time at which the currently-burning fuel item runs out.
-     *  Persisted, or reloading would refund whatever was already lit. */
-    private long fuelUntilGameTime;
+    /** Fuel left in the currently-burning item, in reference-speed ticks -
+     *  it drains faster than one per tick when flying fast. Persisted, or
+     *  reloading would refund whatever was already lit. */
+    private double fuelReserve;
     /** Game time of the last power check, to keep the cadence honest
      *  regardless of how often this gets called. */
     private long lastPowerCheckGameTime;
-    /** Fuel ticks carried across a reload, turned into a deadline on the
-     *  first power check - loadAdditional has no world clock to read yet. */
-    private long pendingFuelTicks;
     /** Cached answer from the last power check, so the steering code can ask
      *  every tick without paying for a container sweep every tick. */
     private boolean hasPowerNow = true;
@@ -913,7 +921,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // fires faster than twenty times a second.
         long now = serverLevel.getGameTime();
         if (now - lastPowerCheckGameTime >= POWER_CHECK_INTERVAL_TICKS) {
+            // Elapsed world time, not the nominal interval: a laggy or newly
+            // woken aircraft can be well past due, and charging it for the
+            // interval it was supposed to take would let a fleet fly for free
+            // through exactly the conditions that stop them ticking.
+            long elapsed = Math.min(now - lastPowerCheckGameTime, MAX_FUEL_CATCHUP_TICKS);
             lastPowerCheckGameTime = now;
+            if (fuelReserve > 0) fuelReserve -= elapsed * fuelBurnRate();
             boolean powered = hasPower(now);
             if (powered != hasPowerNow) {
                 hasPowerNow = powered;
@@ -1997,17 +2011,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // out. Fuel is only spent while actually flying a leg - an aircraft
         // sitting at a gate for ten minutes shouldn't empty its bunker.
         //
-        if (pendingFuelTicks > 0) {
-            fuelUntilGameTime = now + pendingFuelTicks;
-            pendingFuelTicks = 0;
-        }
-
-        // A deadline in world time, not a counter decremented per pass: this
-        // runs off the physics tick, which fires faster than twenty times a
-        // second, so counting passes would burn a coal in well under the
-        // eighty seconds it is supposed to last. Exactly the bug that made a
-        // ten second gate wait end in five.
-        if (now < fuelUntilGameTime) return true;
+        if (fuelReserve > 0) return true;
 
         if (fuelContainers == null) fuelContainers = PowerSource.findFuelContainers(level, getBlockPos());
         int burnTime = PowerSource.consumeFuel(level, fuelContainers);
@@ -2019,9 +2023,45 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             burnTime = PowerSource.consumeFuel(level, fuelContainers);
         }
         if (burnTime <= 0) return false;
-        fuelUntilGameTime = now + burnTime;
+        fuelReserve = burnTime;
         setChanged();
         return true;
+    }
+
+    /**
+     * How fast fuel drains right now, relative to flying at the reference
+     * speed.
+     *
+     * Rate rises with speed raised to a configured power, which is what makes
+     * choosing a cruise speed a real decision. It has to rise FASTER than
+     * linearly for there to be a decision at all: if the rate merely doubled
+     * with speed, a trip would cost the same fuel however fast it was flown,
+     * and nobody would ever fly slowly. At the default exponent of 2 the fuel
+     * per block travelled scales with speed, so doubling cruise speed doubles
+     * the cost of the journey. Drag genuinely rises with the square of speed,
+     * so this is close to the honest answer as well as the interesting one.
+     *
+     * Measured from the craft's real velocity where there is one, so a
+     * headwind or a climb costs what it actually costs, falling back to the
+     * commanded speed for the phantom simulation.
+     */
+    private double fuelBurnRate() {
+        double speed;
+        if (activeBody != null) {
+            Vector3dc v = activeBody.getLinearVelocity();
+            speed = Math.sqrt(v.x() * v.x() + v.y() * v.y() + v.z() * v.z());
+        } else {
+            speed = currentTopSpeed();
+        }
+
+        double reference = Math.max(1, SkyportConfig.fuelReferenceSpeed);
+        double rate = Math.pow(speed / reference, SkyportConfig.fuelSpeedExponent);
+        // A floor because an aircraft that is running but going nowhere - a
+        // helicopter holding off a busy pad, a plane waiting at the hold line
+        // with the engine on - is still burning something. A ceiling so that
+        // a high exponent and a silly cruise speed cannot empty a hold
+        // between two checks.
+        return Math.max(FUEL_IDLE_BURN_RATE, Math.min(FUEL_MAX_BURN_RATE, rate));
     }
 
     /** What to tell the player when there's no power, in this mode's terms. */
@@ -2522,7 +2562,22 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 && server.overworld().getGameTime() - lastPhysicsTickGameTime < 20;
         String mode = flyingReal ? "FLYING" : "sim";
         player.displayClientMessage(
-                Component.literal("[" + callsign() + "] " + state + " @ " + pos + "  " + pitch + "  (" + mode + ")"), true);
+                Component.literal("[" + callsign() + "] " + state + " @ " + pos + "  " + pitch
+                        + fuelReadout() + "  (" + mode + ")"), true);
+    }
+
+    /**
+     * Seconds of flight left in the lit fuel, at the rate it is burning now.
+     *
+     * Seconds rather than a raw reserve because the reserve is denominated in
+     * reference-speed ticks, which means nothing to anyone: the useful
+     * question is how long you have at the speed you are actually flying, and
+     * that answer moves when the throttle does.
+     */
+    private String fuelReadout() {
+        if (SkyportConfig.powerRequirement != SkyportConfig.PowerRequirement.FUEL) return "";
+        if (fuelReserve <= 0) return "  DRY";
+        return String.format("  fuel %.0fs", fuelReserve / fuelBurnRate() / 20.0);
     }
 
     private void message(String text) {
@@ -2559,12 +2614,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (planeId != null) tag.putUUID("planeId", planeId);
         tag.putString("state", state.name());
         tag.putInt("currentWaypointIndex", currentWaypointIndex);
-        // Fuel already lit is spent - reloading must not hand it back. Saved
-        // as remaining ticks rather than as a deadline, since world time
-        // keeps running while this block entity is unloaded.
-        if (level != null && fuelUntilGameTime > level.getGameTime()) {
-            tag.putLong("fuelRemaining", fuelUntilGameTime - level.getGameTime());
-        }
+        // Fuel already lit is spent - reloading must not hand it back. Held
+        // as a remaining amount rather than a deadline, so it simply pauses
+        // while this block entity is unloaded instead of draining away in a
+        // world clock the aircraft was not flying in.
+        if (fuelReserve > 0) tag.putDouble("fuelReserve", fuelReserve);
         // originAirportId, holdingEntryIndex, waitUntilGameTime and
         // simulatedPosition are intentionally NOT persisted - transient
         // stand-ins for real contraption movement, not worth preserving
@@ -2580,7 +2634,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (tag.hasUUID("planeId")) planeId = tag.getUUID("planeId");
         if (tag.contains("state")) state = FlightState.valueOf(tag.getString("state"));
         currentWaypointIndex = tag.getInt("currentWaypointIndex");
-        pendingFuelTicks = tag.getLong("fuelRemaining");
+        fuelReserve = tag.getDouble("fuelReserve");
         if (state != FlightState.IDLE) simulatedPosition = getBlockPos().getCenter();
     }
 }
