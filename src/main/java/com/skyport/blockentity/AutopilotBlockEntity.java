@@ -197,6 +197,17 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** How often to repeat a "this airport is missing something" warning
      *  while an aircraft holds waiting for the player to fix it. */
     private static final int MISSING_FACILITY_REPEAT_TICKS = 200;
+    /** How far a vertical craft may drift off the pad before the autopilot
+     *  starts pulling it back. Wide enough that a craft making its own thrust
+     *  is not corrected every tick, narrow enough to still land on the pad. */
+    private static final double VERTICAL_DRIFT_DEADBAND_BLOCKS = 1.5;
+    /** Sideways authority once outside the deadband, as a fraction of normal.
+     *  Gentle on purpose: the craft is nudged back over a few seconds rather
+     *  than snapped, which is what made the descent judder. */
+    private static final double VERTICAL_SIDEWAYS_GAIN_SCALE = 0.35;
+    /** Beyond this the craft is not drifting, it is off course, and gets the
+     *  full correction it needs to actually get back over the pad. */
+    private static final double VERTICAL_FULL_AUTHORITY_BLOCKS = 5.0;
     /** How often to re-check power and burn fuel. One second. */
     private static final int POWER_CHECK_INTERVAL_TICKS = 20;
     /** Most world time one fuel check may charge for. A craft that has been
@@ -1292,6 +1303,40 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             correction = slowingDown ? correction.multiply(1, 0, 1) : Vec3.ZERO;
         }
 
+        // Going straight up or down, ease off sideways.
+        //
+        // A rotorcraft or airship carrying sails makes its own forward thrust,
+        // and it does not stop making it because the autopilot would rather
+        // hold station. Correcting that away at full gain on every physics
+        // tick is a controller fighting a constant disturbance: the craft is
+        // shoved back, the sails push again, and the result is a visible
+        // judder all the way down.
+        //
+        // Inside the deadband nothing is corrected at all, so a little drift
+        // is simply allowed. Beyond it the correction returns gently. The
+        // vertical axis keeps full authority throughout - that is the one
+        // actually flying the manoeuvre, and a soft descent rate would be a
+        // real problem rather than a cosmetic one.
+        if (isVerticalManoeuvre()) {
+            double driftX = position.x - (target.getX() + 0.5);
+            double driftZ = position.z - (target.getZ() + 0.5);
+            double drift = Math.sqrt(driftX * driftX + driftZ * driftZ);
+            // Graded, not simply on or off. Full authority while genuinely
+            // off course, or a craft under its own thrust would never make it
+            // to the pad in the first place - it would drift away at a third
+            // of the strength needed to bring it back. Softened only in the
+            // endgame, where the judder actually happens.
+            double sideways;
+            if (drift <= VERTICAL_DRIFT_DEADBAND_BLOCKS) {
+                sideways = 0.0;
+            } else if (drift >= VERTICAL_FULL_AUTHORITY_BLOCKS) {
+                sideways = 1.0;
+            } else {
+                sideways = VERTICAL_SIDEWAYS_GAIN_SCALE;
+            }
+            correction = new Vec3(correction.x * sideways, correction.y, correction.z * sideways);
+        }
+
         // Pushing back: keep the nose where it is and roll backwards. Steering
         // toward the heading would have the plane pirouette on the stand.
         Vector3d spin = state == FlightState.PUSHBACK
@@ -1358,6 +1403,14 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // Target heading == current heading, so only the roll/pitch levelling
         // terms do anything.
         return attitudeCorrection(nose, up, new Vector3d(nose), true);
+    }
+
+    /** Straight up, straight down, or holding station - the manoeuvres where
+     *  the craft has no forward flight to speak of. */
+    private boolean isVerticalManoeuvre() {
+        return state == FlightState.VERTICAL_CLIMB
+                || state == FlightState.VERTICAL_DESCENT
+                || state == FlightState.HOVERING;
     }
 
     private boolean isGroundState() {
