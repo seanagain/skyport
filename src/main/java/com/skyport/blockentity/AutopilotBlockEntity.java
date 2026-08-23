@@ -11,6 +11,7 @@ import com.skyport.data.TrafficReport;
 import com.skyport.data.Waypoint;
 import com.skyport.network.OpenAutopilotPayload;
 import com.skyport.registry.ModBlockEntities;
+import com.skyport.logic.FuelBurn;
 import com.skyport.logic.GroundNetwork;
 import com.skyport.world.FlightChunkLoader;
 import net.minecraft.core.BlockPos;
@@ -198,12 +199,6 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private static final int MISSING_FACILITY_REPEAT_TICKS = 200;
     /** How often to re-check power and burn fuel. One second. */
     private static final int POWER_CHECK_INTERVAL_TICKS = 20;
-    /** Fuel burn for a craft that is powered but barely moving. Not zero: an
-     *  aircraft holding with its engine running is still burning. */
-    private static final double FUEL_IDLE_BURN_RATE = 0.1;
-    /** Cap on the burn multiplier, so a steep exponent and a high cruise
-     *  speed cannot drain a whole hold between two checks. */
-    private static final double FUEL_MAX_BURN_RATE = 20.0;
     /** Most world time one fuel check may charge for. A craft that has been
      *  unloaded for an hour was not flying for that hour, and should not be
      *  billed as though it were. */
@@ -2054,14 +2049,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             speed = currentTopSpeed();
         }
 
-        double reference = Math.max(1, SkyportConfig.fuelReferenceSpeed);
-        double rate = Math.pow(speed / reference, SkyportConfig.fuelSpeedExponent);
-        // A floor because an aircraft that is running but going nowhere - a
-        // helicopter holding off a busy pad, a plane waiting at the hold line
-        // with the engine on - is still burning something. A ceiling so that
-        // a high exponent and a silly cruise speed cannot empty a hold
-        // between two checks.
-        return Math.max(FUEL_IDLE_BURN_RATE, Math.min(FUEL_MAX_BURN_RATE, rate));
+        // The curve itself lives in FuelBurn, where it can be tested: the
+        // property that makes it worth having - faster costs more for the
+        // same journey, not just more per second - is easy to break by
+        // accident and invisible when broken.
+        return FuelBurn.rateForSpeed(speed);
     }
 
     /** What to tell the player when there's no power, in this mode's terms. */
