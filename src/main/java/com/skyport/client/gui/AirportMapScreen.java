@@ -68,6 +68,7 @@ public class AirportMapScreen extends Screen {
      */
     private enum EditMode {
         MOVE("Move nodes"),
+        INSERT("Add node on a line"),
         RUNWAY("Runway"),
         ARRIVAL_RUNWAY("Arrival runway"),
         DEPARTURE_RUNWAY("Departure runway"),
@@ -109,7 +110,6 @@ public class AirportMapScreen extends Screen {
     private static final int NODE_SNAP_PIXELS = 4;
     /** How near a click has to land to count as "on" a taxiway segment. */
     private static final int FLOW_PICK_PIXELS = 6;
-    /** Two runways at two points each. The second pair is optional. */
     /** How far to one side a newly added departure runway is seeded, so it
      *  is visible and draggable rather than hidden under the first. */
     private static final int DEPARTURE_RUNWAY_OFFSET = 40;
@@ -317,6 +317,20 @@ public class AirportMapScreen extends Screen {
     }
 
     private void drawDropdown(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        // Raised, not merely drawn last. GuiGraphics batches text and flushes
+        // it separately from fills, so the buttons underneath printed their
+        // labels straight through this panel however late it was drawn. Depth
+        // is what actually decides it.
+        guiGraphics.pose().pushPose();
+        guiGraphics.pose().translate(0, 0, 400);
+        try {
+            drawDropdownContents(guiGraphics, mouseX, mouseY);
+        } finally {
+            guiGraphics.pose().popPose();
+        }
+    }
+
+    private void drawDropdownContents(GuiGraphics guiGraphics, int mouseX, int mouseY) {
         guiGraphics.fill(dropdownX, dropdownY, dropdownX + dropdownW, dropdownY + dropdownH, 0xFF2B2B2B);
         drawBorder(guiGraphics, dropdownX, dropdownY, dropdownW, dropdownH, 0xFF5A5A5A);
         guiGraphics.drawString(font, mode.label, dropdownX + 6, dropdownY + 6, 0xFFFFFFFF);
@@ -421,9 +435,9 @@ public class AirportMapScreen extends Screen {
     }
 
     private void undoLastPoint() {
-        // Nothing to undo in Move mode - it edits positions rather than
-        // adding points, and toWaypointType has no answer for it.
-        if (mode == EditMode.MOVE) return;
+        // Nothing to undo in Move or Insert mode - they edit existing lines
+        // rather than appending, and toWaypointType has no answer for them.
+        if (mode == EditMode.MOVE || mode == EditMode.INSERT) return;
         if (mode == EditMode.GATE) {
             List<String> names = new ArrayList<>(layout.gates().keySet());
             if (!names.isEmpty()) layout.gates().remove(names.get(names.size() - 1));
@@ -445,7 +459,7 @@ public class AirportMapScreen extends Screen {
     }
 
     private void clearCurrent() {
-        if (mode == EditMode.MOVE) return;
+        if (mode == EditMode.MOVE || mode == EditMode.INSERT) return;
         if (mode == EditMode.GATE) {
             layout.gates().clear();
         } else if (mode == EditMode.HELIPAD) {
@@ -480,7 +494,7 @@ public class AirportMapScreen extends Screen {
             case HOLDING_PATTERN -> Waypoint.Type.HOLDING_PATTERN;
             case FINAL_LEG -> Waypoint.Type.FINAL_LEG;
             case HOLD_SHORT -> Waypoint.Type.HOLD_SHORT;
-            case GATE, HELIPAD, MOVE -> throw new IllegalArgumentException(mode + " is not a Waypoint.Type");
+            case GATE, HELIPAD, MOVE, INSERT -> throw new IllegalArgumentException(mode + " is not a Waypoint.Type");
         };
     }
 
@@ -488,6 +502,11 @@ public class AirportMapScreen extends Screen {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         // The dropdown overlaps the map, so it gets first refusal on clicks.
         if (button == 0 && dropdownClicked(mouseX, mouseY)) return true;
+
+        if (button == 0 && mode == EditMode.INSERT && isInsideMap(mouseX, mouseY)) {
+            insertNodeAt(screenToWorld((int) mouseX, (int) mouseY));
+            return true;
+        }
 
         if (button == 0 && mode == EditMode.MOVE && isInsideMap(mouseX, mouseY)) {
             dragging = nodeAt(mouseX, mouseY);
@@ -546,8 +565,9 @@ public class AirportMapScreen extends Screen {
                     Waypoint.Type type = toWaypointType(mode);
                     List<Waypoint> points = layout.waypoints(type);
                     if (isLineMode(mode) && points.size() >= 2) points.clear();
-                    // Only one hold point per airport - a second click moves it.
-                    if (mode == EditMode.HOLD_SHORT) points.clear();
+                    // One hold line per airport, drawn as two points across
+                    // the taxiway. A third click starts it over.
+                    if (mode == EditMode.HOLD_SHORT && points.size() >= 2) points.clear();
                     points.add(new Waypoint(world, type, points.size()));
                 }
             }
@@ -563,6 +583,83 @@ public class AirportMapScreen extends Screen {
      * apart, which leaves a gap the autopilot's connectivity check would
      * treat as a broken network.
      */
+    /**
+     * Split whichever line was clicked, putting a node at that point.
+     *
+     * The reason this is worth having: a final leg that crosses the holding
+     * pattern has no node where they meet, so the two are drawn touching but
+     * are not connected, and nothing routes between them. Adding a node on
+     * the crossing is how you turn a drawing into a junction.
+     *
+     * Which list is split decides what the halves mean. Taxiway segments are
+     * pairs, so a split becomes two pairs. A holding pattern is a path, so a
+     * split is an insertion between two existing points. Runways and the
+     * final leg are single lines that other things attach to rather than
+     * lines you subdivide, so they are left alone.
+     */
+    private void insertNodeAt(BlockPos clicked) {
+        double tolerance = Math.max(4, FLOW_PICK_PIXELS * (double) blocksPerPixel());
+
+        // Taxiway first: pairs, split into two pairs.
+        List<Waypoint> taxiway = layout.waypoints(Waypoint.Type.TAXIWAY);
+        int bestPair = -1;
+        double bestDistance = tolerance;
+        for (int i = 0; i + 1 < taxiway.size(); i += 2) {
+            double distance = distanceToSegment(clicked, taxiway.get(i).pos(), taxiway.get(i + 1).pos());
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestPair = i;
+            }
+        }
+
+        List<Waypoint> loop = layout.waypoints(Waypoint.Type.HOLDING_PATTERN);
+        int bestEdge = -1;
+        for (int i = 0; i < loop.size(); i++) {
+            BlockPos a = loop.get(i).pos();
+            BlockPos b = loop.get((i + 1) % loop.size()).pos();
+            if (loop.size() < 3 && i == loop.size() - 1) break; // no closing edge yet
+            double distance = distanceToSegment(clicked, a, b);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestEdge = i;
+                bestPair = -1;
+            }
+        }
+
+        if (bestPair >= 0) {
+            Waypoint start = taxiway.get(bestPair);
+            Waypoint end = taxiway.get(bestPair + 1);
+            // Both halves keep the original segment's direction, so splitting
+            // a one-way strip does not quietly make either half two-way.
+            taxiway.set(bestPair + 1, new Waypoint(clicked, Waypoint.Type.TAXIWAY, 0, start.flow()));
+            taxiway.add(bestPair + 2, new Waypoint(clicked, Waypoint.Type.TAXIWAY, 0, start.flow()));
+            taxiway.add(bestPair + 3, new Waypoint(end.pos(), Waypoint.Type.TAXIWAY, 0, start.flow()));
+            renumber(taxiway);
+            flowNotice = "Taxiway split - the new node joins both halves.";
+            flowNoticeShownAtMs = System.currentTimeMillis();
+            return;
+        }
+        if (bestEdge >= 0) {
+            loop.add(bestEdge + 1, new Waypoint(clicked, Waypoint.Type.HOLDING_PATTERN, 0));
+            renumber(loop);
+            flowNotice = "Point added to the holding pattern.";
+            flowNoticeShownAtMs = System.currentTimeMillis();
+            return;
+        }
+
+        rejection = "No taxiway or holding-pattern line here to add a node to.";
+        rejectionShownAtMs = System.currentTimeMillis();
+    }
+
+    /** Waypoint order is positional, so it has to be rewritten after any
+     *  insertion rather than left with the gaps and duplicates. */
+    private static void renumber(List<Waypoint> points) {
+        for (int i = 0; i < points.size(); i++) {
+            Waypoint point = points.get(i);
+            points.set(i, new Waypoint(point.pos(), point.type(), i, point.flow()));
+        }
+    }
+
     // --- dragging nodes ----------------------------------------------------
 
     /** The world position currently being dragged, or null. Identified by
@@ -776,7 +873,7 @@ public class AirportMapScreen extends Screen {
             // The runway is the spine everything else hangs off, so it goes
             // down first and needs no connection of its own. Moving nodes
             // places nothing at all.
-            case RUNWAY, ARRIVAL_RUNWAY, DEPARTURE_RUNWAY, MOVE -> null;
+            case RUNWAY, ARRIVAL_RUNWAY, DEPARTURE_RUNWAY, MOVE, INSERT -> null;
 
             case TAXIWAY -> {
                 if (!hasRunway) yield "Draw the runway first.";
@@ -1050,13 +1147,14 @@ public class AirportMapScreen extends Screen {
     private String hint() {
         return switch (mode) {
             case MOVE -> "drag any node to move it - joined lines follow";
+            case INSERT -> "click a taxiway or pattern line to put a node on it";
             case RUNWAY, ARRIVAL_RUNWAY -> runwayHint();
             case DEPARTURE_RUNWAY -> "2 clicks: gate end, then far end - departures only";
             case TAXIWAY -> "pairs; click a drawn segment to flip its direction";
             case HOLDING_PATTERN -> "the airborne racetrack - click a loop of 3+ points";
             case FINAL_LEG -> "2 points: from holding pattern, to runway";
             case GATE -> "click the end of a runway or taxiway line";
-            case HOLD_SHORT -> "the ground stop line - planes wait here for the runway";
+            case HOLD_SHORT -> "2 clicks across the taxiway - planes hold behind this line";
             case HELIPAD -> "click anywhere - helicopters and blimps land here";
         };
     }

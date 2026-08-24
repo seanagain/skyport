@@ -53,6 +53,10 @@ build a runway where you drew one, or find the taxiway to tow an aircraft to.
    - **Move nodes** - drag any placed node to reposition it. Lines follow,
      and anything sitting on the same spot moves with it, so a taxiway that
      meets the runway stays met.
+   - **Add node on a line** - click a taxiway or holding-pattern line to put
+     a node on it, splitting it in two. This is how you turn a crossing into
+     a junction: a final leg drawn over the pattern only *looks* connected
+     until there is a node where they meet.
    - **Taxiway** - clicks are read in *pairs*, each pair its own segment.
      First pair is the backbone (runway gate end <-> holding pattern);
      each later pair is one gate's spur.
@@ -61,8 +65,9 @@ build a runway where you drew one, or find the taxiway to tow an aircraft to.
    - **Final** - 2 clicks: holding-pattern side first, then the runway's
      far end. This is the descent path.
    - **Gate** - one click per gate, auto-named Gate A, Gate B, ...
-   - **Hold Line** - one point on the taxiway where aircraft wait for the
-     runway.
+   - **Hold line** - 2 clicks, drawn across the taxiway. Aircraft stop behind
+     it and only cross once the runway ahead is clear, the way a train waits
+     at a signal for the next section.
    - **Pad** - helipads for rotorcraft, which need no runway at all.
    One-way taxiways are set from Taxiway mode itself: click the *body* of an
    already-drawn segment to cycle it two-way -> one-way -> one-way reversed,

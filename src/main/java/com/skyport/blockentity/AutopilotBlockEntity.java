@@ -2161,11 +2161,24 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         flyHeading(new Vec3(0, Math.signum(remaining), 0), speed);
     }
 
-    /** The airport's hold-short point, if one is drawn. */
+    /**
+     * Where on the hold line an aircraft stops, if one is drawn.
+     *
+     * The line is two points painted across the taxiway, the way a real one
+     * is - it is a boundary, not a parking spot. Aircraft aim at its middle,
+     * which is the part of it the taxiway actually crosses.
+     *
+     * A single point still works: that is what every airport drawn before the
+     * line existed has, and it is exactly the position they were using.
+     */
     @org.jetbrains.annotations.Nullable
     private static BlockPos holdShortPoint(AirportLayout layout) {
         List<BlockPos> points = positionsOf(layout, Waypoint.Type.HOLD_SHORT);
-        return points.isEmpty() ? null : points.get(0);
+        if (points.isEmpty()) return null;
+        if (points.size() == 1) return points.get(0);
+        BlockPos a = points.get(0);
+        BlockPos b = points.get(1);
+        return new BlockPos((a.getX() + b.getX()) / 2, a.getY(), (a.getZ() + b.getZ()) / 2);
     }
 
     /**
