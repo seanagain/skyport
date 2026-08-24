@@ -45,7 +45,11 @@ build a runway where you drew one, or find the taxiway to tow an aircraft to.
    hit **Edit Map**.
 4. Draw the layout. Each mode's click rule is spelled out in the hint line
    above the map, because they differ:
-   - **Runway** - 2 clicks: the gate end first, then the far end.
+   - **Runway** - 2 clicks: the gate end first, then the far end. Optionally
+     2 more for a second runway, drawn in green, which departures use and
+     arrivals never touch - so a departure stops queueing behind a landing
+     aircraft. Leave it off and one runway does both, as before. A fifth
+     click starts over.
    - **Taxiway** - clicks are read in *pairs*, each pair its own segment.
      First pair is the backbone (runway gate end <-> holding pattern);
      each later pair is one gate's spur.

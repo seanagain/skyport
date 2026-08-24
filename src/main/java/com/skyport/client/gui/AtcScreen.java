@@ -36,6 +36,8 @@ import java.util.List;
 public class AtcScreen extends Screen {
 
     private static final int COLOR_RUNWAY = 0xFFF2F2EA;
+    /** The departures-only strip, when an airport has one. */
+    private static final int COLOR_RUNWAY_DEPARTURE = 0xFF9FD8B0;
     private static final int COLOR_TAXIWAY = 0xFFE8C34A;
     private static final int COLOR_HOLDING = 0xFF4F8FE0;
     private static final int COLOR_FINAL_LEG = 0xFF7FD1E0;
@@ -498,7 +500,13 @@ public class AtcScreen extends Screen {
     /** One airport's actual geometry, in the same colours the layout editor
      *  uses so the two read as the same drawing. */
     private void drawAirport(GuiGraphics guiGraphics, AirportLayout airport) {
-        drawPath(guiGraphics, airport.waypoints(Waypoint.Type.RUNWAY), COLOR_RUNWAY);
+        // Runways are pairs; a second one is the departures-only strip, drawn
+        // apart so the tower shows which is which.
+        List<Waypoint> runways = airport.waypoints(Waypoint.Type.RUNWAY);
+        for (int i = 0; i + 1 < runways.size(); i += 2) {
+            line(guiGraphics, runways.get(i).pos(), runways.get(i + 1).pos(),
+                    i == 0 ? COLOR_RUNWAY : COLOR_RUNWAY_DEPARTURE);
+        }
         drawSegmentPairs(guiGraphics, airport.waypoints(Waypoint.Type.TAXIWAY), COLOR_TAXIWAY);
         drawPath(guiGraphics, airport.waypoints(Waypoint.Type.FINAL_LEG), COLOR_FINAL_LEG);
         drawLoop(guiGraphics, airport.waypoints(Waypoint.Type.HOLDING_PATTERN), COLOR_HOLDING);

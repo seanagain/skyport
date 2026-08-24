@@ -64,21 +64,36 @@ public class AirportRegistry extends SavedData {
     }
 
     /**
-     * Which plane currently has the run of each airport - the smallest thing
+     * Which plane currently has the run of each runway - the smallest thing
      * that counts as air traffic control.
      *
-     * One clearance covers the whole airport, not the runway alone, because
-     * at a small field the taxiway and runway are often the same strip: two
-     * planes on it cannot pass each other, so letting one taxi while another
-     * lands just moves the collision. A departure holds this from pushback
-     * until it is airborne; an arrival holds it from final approach until it
-     * is parked at the gate. Between those, at the gate, it is free.
+     * A departure holds one from pushback until it is airborne; an arrival
+     * holds one from final approach until it is parked at the gate. Between
+     * those, at the gate, it is free. The taxiway is claimed separately,
+     * because at a small field it is often the same strip as the runway and
+     * two aircraft on it cannot pass.
      *
      * Deliberately NOT persisted: it describes planes moving right now, and
      * a clearance surviving a restart would block an airport forever with no
      * plane left to release it.
+     *
+     * Keyed by runway, not by airport, so a field with a separate departure
+     * strip can run a departure and an arrival at once - which is the entire
+     * point of drawing a second one.
+     *
+     * An airport with one runway resolves both roles to the same key, so it
+     * behaves exactly as it did: one aircraft on the strip at a time.
      */
-    private final transient Map<UUID, UUID> trafficClearances = new HashMap<>();
+    private final transient Map<String, UUID> trafficClearances = new HashMap<>();
+
+    /** Runway 0 is the one arrivals land on; 1 is the departure strip, if
+     *  the field has one. See AirportLayout#departureRunway. */
+    public static final int ARRIVAL_RUNWAY = 0;
+    public static final int DEPARTURE_RUNWAY = 1;
+
+    public static String runwayKey(UUID airportId, int runwayIndex) {
+        return airportId + "#" + runwayIndex;
+    }
 
     /**
      * When each clearance was last confirmed by the plane holding it.
@@ -95,8 +110,8 @@ public class AirportRegistry extends SavedData {
     /** How long a holder can go silent before its clearance is up for grabs. */
     private static final long CLEARANCE_TIMEOUT_TICKS = 200; // 10 seconds
 
-    private boolean available(Map<UUID, UUID> clearances, UUID airportId, UUID planeId, long now) {
-        UUID holder = clearances.get(airportId);
+    private <K> boolean available(Map<K, UUID> clearances, K key, UUID planeId, long now) {
+        UUID holder = clearances.get(key);
         if (holder == null || holder.equals(planeId)) return true;
         Long seen = clearanceSeen.get(holder);
         return seen == null || now - seen > CLEARANCE_TIMEOUT_TICKS;
@@ -113,16 +128,17 @@ public class AirportRegistry extends SavedData {
      * plane already does (so re-asking every tick is harmless), or if the
      * current holder has gone silent long enough to be presumed gone.
      */
-    public boolean tryClaimTraffic(UUID airportId, UUID planeId, long now) {
-        if (!available(trafficClearances, airportId, planeId, now)) return false;
-        trafficClearances.put(airportId, planeId);
+    public boolean tryClaimTraffic(UUID airportId, int runwayIndex, UUID planeId, long now) {
+        String key = runwayKey(airportId, runwayIndex);
+        if (!available(trafficClearances, key, planeId, now)) return false;
+        trafficClearances.put(key, planeId);
         clearanceSeen.put(planeId, now);
         return true;
     }
 
-    /** Give the airport back - parked at a gate, safely airborne, or disengaged. */
-    public void releaseTraffic(UUID airportId, UUID planeId) {
-        trafficClearances.remove(airportId, planeId);
+    /** Give the runway back - parked at a gate, safely airborne, or disengaged. */
+    public void releaseTraffic(UUID airportId, int runwayIndex, UUID planeId) {
+        trafficClearances.remove(runwayKey(airportId, runwayIndex), planeId);
     }
 
     /**
@@ -168,8 +184,8 @@ public class AirportRegistry extends SavedData {
     /** Who currently holds the runway here, if anyone - so a plane stuck in
      *  the pattern can say what it's waiting for instead of just circling. */
     @org.jetbrains.annotations.Nullable
-    public UUID trafficHolder(UUID airportId) {
-        return trafficClearances.get(airportId);
+    public UUID trafficHolder(UUID airportId, int runwayIndex) {
+        return trafficClearances.get(runwayKey(airportId, runwayIndex));
     }
 
     /**
@@ -202,9 +218,11 @@ public class AirportRegistry extends SavedData {
      * have the whole path simply stays in the pattern, holding nothing.
      */
     public boolean tryClaimArrival(UUID airportId, UUID planeId, long now) {
-        if (!available(trafficClearances, airportId, planeId, now)) return false;
+        // Arrivals always mean runway 0 - the strip the final leg points at.
+        String key = runwayKey(airportId, ARRIVAL_RUNWAY);
+        if (!available(trafficClearances, key, planeId, now)) return false;
         if (!available(taxiwayClearances, airportId, planeId, now)) return false;
-        trafficClearances.put(airportId, planeId);
+        trafficClearances.put(key, planeId);
         taxiwayClearances.put(airportId, planeId);
         clearanceSeen.put(planeId, now);
         return true;

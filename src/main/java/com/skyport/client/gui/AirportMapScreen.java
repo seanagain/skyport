@@ -72,6 +72,8 @@ public class AirportMapScreen extends Screen {
     private static final int NODE_SNAP_PIXELS = 4;
     /** How near a click has to land to count as "on" a taxiway segment. */
     private static final int FLOW_PICK_PIXELS = 6;
+    /** Two runways at two points each. The second pair is optional. */
+    private static final int MAX_RUNWAY_POINTS = 4;
     private static final int COLOR_FLOW_ARROW = 0xFF2B2B22;
     private static final long REJECTION_VISIBLE_MS = 4000;
     // Deliberately NOT a plausible ground color - real sampled terrain and
@@ -81,6 +83,9 @@ public class AirportMapScreen extends Screen {
     private static final long TERRAIN_RESAMPLE_INTERVAL_MS = 1000;
 
     private static final int COLOR_RUNWAY = 0xFFF2F2EA;
+    /** The departures-only strip, if one is drawn - distinct from the arrival
+     *  runway so the map says which is which. */
+    private static final int COLOR_RUNWAY_DEPARTURE = 0xFF9FD8B0;
     private static final int COLOR_TAXIWAY = 0xFFE8C34A;
     private static final int COLOR_HOLDING = 0xFF4F8FE0;
     private static final int COLOR_FINAL_LEG = 0xFF7FD1E0;
@@ -356,7 +361,12 @@ public class AirportMapScreen extends Screen {
             } else {
                 Waypoint.Type type = toWaypointType(mode);
                 List<Waypoint> points = layout.waypoints(type);
-                if (isLineMode(mode) && points.size() >= 2) points.clear();
+                // Runway allows a second pair: the first is what arrivals
+                // land on, an optional second is where departures roll, so
+                // they stop queueing behind each other. A fifth click starts
+                // the whole thing over, the same way a third used to.
+                if (mode == EditMode.RUNWAY && points.size() >= MAX_RUNWAY_POINTS) points.clear();
+                else if (isLineMode(mode) && mode != EditMode.RUNWAY && points.size() >= 2) points.clear();
                 // Only one hold point per airport - a second click moves it.
                 if (mode == EditMode.HOLD_SHORT) points.clear();
                 points.add(new Waypoint(world, type, points.size()));
@@ -680,7 +690,7 @@ public class AirportMapScreen extends Screen {
         }
         drawBorder(guiGraphics, mapX, mapY, mapW, mapH, 0xFF2B2B2B);
 
-        drawPath(guiGraphics, layout.waypoints(Waypoint.Type.RUNWAY), COLOR_RUNWAY);
+        drawRunways(guiGraphics, layout.waypoints(Waypoint.Type.RUNWAY));
         drawSegmentPairs(guiGraphics, layout.waypoints(Waypoint.Type.TAXIWAY), COLOR_TAXIWAY);
         drawPath(guiGraphics, layout.waypoints(Waypoint.Type.FINAL_LEG), COLOR_FINAL_LEG);
         drawLoop(guiGraphics, layout.waypoints(Waypoint.Type.HOLDING_PATTERN), COLOR_HOLDING);
@@ -759,9 +769,18 @@ public class AirportMapScreen extends Screen {
 
     /** One line telling you what clicking actually does in the current mode -
      *  the rules differ per element and aren't guessable from the buttons. */
+    /** Runway mode does two things now, so it has to say which one it is on. */
+    private String runwayHint() {
+        int drawn = layout.waypoints(Waypoint.Type.RUNWAY).size();
+        if (drawn < 2) return "draw this first - 2 points: gate end, then far end";
+        if (drawn == 2) return "optional: 2 more points for a departures-only runway";
+        if (drawn == 3) return "one more point to finish the departure runway";
+        return "both runways drawn - clicking again starts over";
+    }
+
     private String hint() {
         return switch (mode) {
-            case RUNWAY -> "draw this first - 2 points: gate end, then far end";
+            case RUNWAY -> runwayHint();
             case TAXIWAY -> "pairs; click a drawn segment to flip its direction";
             case HOLDING_PATTERN -> "the airborne racetrack - click a loop of 3+ points";
             case FINAL_LEG -> "2 points: from holding pattern, to runway";
@@ -769,6 +788,32 @@ public class AirportMapScreen extends Screen {
             case HOLD_SHORT -> "the ground stop line - planes wait here for the runway";
             case HELIPAD -> "click anywhere - helicopters and blimps land here";
         };
+    }
+
+    /**
+     * Runways, as pairs, with the departure strip drawn in its own colour.
+     *
+     * They have to look different or the map is ambiguous: two white lines
+     * say nothing about which one arrivals use, and getting that backwards
+     * means drawing a final leg to the wrong strip.
+     */
+    private void drawRunways(GuiGraphics guiGraphics, List<Waypoint> points) {
+        for (int i = 0; i + 1 < points.size(); i += 2) {
+            int color = i == 0 ? COLOR_RUNWAY : COLOR_RUNWAY_DEPARTURE;
+            BlockPos a = points.get(i).pos();
+            BlockPos b = points.get(i + 1).pos();
+            int ax = worldToScreenX(a), ay = worldToScreenY(a);
+            int bx = worldToScreenX(b), by = worldToScreenY(b);
+            guiGraphics.fill(ax - 2, ay - 2, ax + 2, ay + 2, color);
+            guiGraphics.fill(bx - 2, by - 2, bx + 2, by + 2, color);
+            drawPixelLine(guiGraphics, ax, ay, bx, by, color);
+        }
+        // A lone trailing point - half way through drawing the second one.
+        if (points.size() % 2 == 1) {
+            BlockPos last = points.get(points.size() - 1).pos();
+            int lx = worldToScreenX(last), ly = worldToScreenY(last);
+            guiGraphics.fill(lx - 2, ly - 2, lx + 2, ly + 2, COLOR_RUNWAY_DEPARTURE);
+        }
     }
 
     /** Draws consecutive PAIRS as independent segments (0-1, 2-3, ...) rather

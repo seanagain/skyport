@@ -33,11 +33,11 @@ class ClearanceTest {
         UUID arriving = UUID.randomUUID();
 
         assertTrue(registry.tryClaimTaxiway(AIRPORT, departing, 0));
-        assertTrue(registry.tryClaimTraffic(AIRPORT, departing, 0));
+        assertTrue(registry.tryClaimTraffic(AIRPORT, AirportRegistry.ARRIVAL_RUNWAY, departing, 0));
 
         // The departure gives back only the runway, and keeps flying - so it
         // keeps its lease alive, and the timeout never rescues anyone.
-        registry.releaseTraffic(AIRPORT, departing);
+        registry.releaseTraffic(AIRPORT, AirportRegistry.ARRIVAL_RUNWAY, departing);
         registry.heartbeat(departing, 100);
 
         assertFalse(registry.tryClaimArrival(AIRPORT, arriving, 100),
@@ -60,12 +60,12 @@ class ClearanceTest {
         UUID gone = UUID.randomUUID();
         UUID waiting = UUID.randomUUID();
 
-        assertTrue(registry.tryClaimTraffic(AIRPORT, gone, 0));
+        assertTrue(registry.tryClaimTraffic(AIRPORT, AirportRegistry.ARRIVAL_RUNWAY, gone, 0));
         registry.heartbeat(gone, 0);
 
-        assertFalse(registry.tryClaimTraffic(AIRPORT, waiting, 100),
+        assertFalse(registry.tryClaimTraffic(AIRPORT, AirportRegistry.ARRIVAL_RUNWAY, waiting, 100),
                 "still within the lease, so still refused");
-        assertTrue(registry.tryClaimTraffic(AIRPORT, waiting, 1000),
+        assertTrue(registry.tryClaimTraffic(AIRPORT, AirportRegistry.ARRIVAL_RUNWAY, waiting, 1000),
                 "long silent, so the clearance can be taken");
     }
 
@@ -76,9 +76,9 @@ class ClearanceTest {
         AirportRegistry registry = new AirportRegistry();
         UUID plane = UUID.randomUUID();
 
-        assertTrue(registry.tryClaimTraffic(AIRPORT, plane, 0));
-        assertTrue(registry.tryClaimTraffic(AIRPORT, plane, 20));
-        assertTrue(registry.tryClaimTraffic(AIRPORT, plane, 40));
+        assertTrue(registry.tryClaimTraffic(AIRPORT, AirportRegistry.ARRIVAL_RUNWAY, plane, 0));
+        assertTrue(registry.tryClaimTraffic(AIRPORT, AirportRegistry.ARRIVAL_RUNWAY, plane, 20));
+        assertTrue(registry.tryClaimTraffic(AIRPORT, AirportRegistry.ARRIVAL_RUNWAY, plane, 40));
     }
 
     /**

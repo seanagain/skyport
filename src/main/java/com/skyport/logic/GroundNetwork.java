@@ -49,8 +49,14 @@ public final class GroundNetwork {
                 case REVERSE -> linkOneWay(graph, b, a);
             }
         }
+        // Runways are pairs too, so a second one joins the network the same
+        // way the first does. Without this a departure runway would be drawn
+        // but unreachable, and every aircraft would route to it in a straight
+        // line across the grass.
         List<Waypoint> runway = layout.waypoints(Waypoint.Type.RUNWAY);
-        if (runway.size() == 2) link(graph, runway.get(0).pos(), runway.get(1).pos());
+        for (int i = 0; i + 1 < runway.size(); i += 2) {
+            link(graph, runway.get(i).pos(), runway.get(i + 1).pos());
+        }
         return graph;
     }
 

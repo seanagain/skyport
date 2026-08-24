@@ -735,7 +735,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // by the halfway point, then pitch up and fly.
             case TAKEOFF_ROLL -> {
                 AirportLayout origin = originLayout(serverLevel);
-                List<BlockPos> runway = origin != null ? positionsOf(origin, Waypoint.Type.RUNWAY) : List.of();
+                // Departures roll down the departure runway, which is the
+                // second one if the field has one and the only one if not.
+                List<BlockPos> runway = origin != null ? origin.departureRunway() : List.<BlockPos>of();
                 if (runway.size() < 2) {
                     setState(FlightState.CLIMB);
                 } else {
@@ -1697,8 +1699,12 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         // Unless that junction is the runway itself: a stand that opens
         // straight onto it has nothing to back along, so just turn and go.
-        List<BlockPos> runway = positionsOf(origin, Waypoint.Type.RUNWAY);
-        if (!runway.isEmpty() && junction.equals(runway.get(0))) return null;
+        // Either runway's gate end counts - a stand opening straight onto
+        // one has nothing to back along whichever strip it is.
+        List<BlockPos> arrival = origin.arrivalRunway();
+        List<BlockPos> departure = origin.departureRunway();
+        if (!arrival.isEmpty() && junction.equals(arrival.get(0))) return null;
+        if (!departure.isEmpty() && junction.equals(departure.get(0))) return null;
         return junction;
     }
 
@@ -1706,7 +1712,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      *  circling" has an answer in game rather than needing a code read. */
     private String blockerDescription(ServerLevel serverLevel, AirportLayout destination) {
         AirportRegistry registry = AirportRegistry.get(serverLevel);
-        UUID holder = registry.trafficHolder(destination.id());
+        UUID holder = registry.trafficHolder(destination.id(), AirportRegistry.ARRIVAL_RUNWAY);
         if (holder == null) return "waiting for the taxiway to clear";
         TrafficReport report = registry.airborneTraffic().get(holder);
         return report == null
@@ -2177,8 +2183,17 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
     /** Ask for the run of an airport - covers the runway and everything
      *  committed to it, bounded by the hold-short point where one is drawn. */
-    private boolean claimTraffic(ServerLevel level, AirportLayout destination) {
-        return AirportRegistry.get(level).tryClaimTraffic(destination.id(), planeId(), level.getGameTime());
+    private boolean claimTraffic(ServerLevel level, AirportLayout departure) {
+        return AirportRegistry.get(level).tryClaimTraffic(departure.id(),
+                departureRunwayIndex(departure), planeId(), level.getGameTime());
+    }
+
+    /** Which runway a departure uses here: its own if the field has one,
+     *  otherwise the same strip arrivals use. */
+    private static int departureRunwayIndex(AirportLayout airport) {
+        return airport.hasDepartureRunway()
+                ? AirportRegistry.DEPARTURE_RUNWAY
+                : AirportRegistry.ARRIVAL_RUNWAY;
     }
 
     private boolean claimTaxiway(ServerLevel level, AirportLayout airport) {
@@ -2271,10 +2286,18 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * on it: arrivals claim runway and taxiway together, and the taxiway was
      * still held by an aeroplane that had left minutes ago.
      */
+    /** Hand back both runway keys rather than working out which one is held.
+     *  Releasing a clearance you do not hold is a no-op, and guessing wrong
+     *  here leaves an airport locked with no aircraft left to clear it. */
+    private void releaseBothRunways(AirportRegistry registry, UUID airportId) {
+        registry.releaseTraffic(airportId, AirportRegistry.ARRIVAL_RUNWAY, planeId);
+        registry.releaseTraffic(airportId, AirportRegistry.DEPARTURE_RUNWAY, planeId);
+    }
+
     private void releaseOriginRunway(ServerLevel serverLevel) {
         if (originAirportId == null || planeId == null) return;
         AirportRegistry registry = AirportRegistry.get(serverLevel);
-        registry.releaseTraffic(originAirportId, planeId);
+        releaseBothRunways(registry, originAirportId);
         registry.releaseTaxiway(originAirportId, planeId);
         originAirportId = null;
     }
@@ -2292,11 +2315,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         AirportRegistry registry = AirportRegistry.get(serverLevel);
         UUID destinationId = destinationAirportId();
         if (destinationId != null) {
-            registry.releaseTraffic(destinationId, planeId);
+            releaseBothRunways(registry, destinationId);
             registry.releaseTaxiway(destinationId, planeId);
         }
         if (originAirportId != null) {
-            registry.releaseTraffic(originAirportId, planeId);
+            releaseBothRunways(registry, originAirportId);
             registry.releaseTaxiway(originAirportId, planeId);
         }
         // Stop advertising as traffic too, or everyone else keeps dodging a
@@ -2471,7 +2494,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * what they are, a graph, and this finds the shortest path through it.
      */
     private List<BlockPos> groundTaxiPath(AirportLayout layout, boolean arriving) {
-        List<BlockPos> runway = positionsOf(layout, Waypoint.Type.RUNWAY);
+        // Taxi to whichever runway this leg actually uses: out to the
+        // departure runway, in from the one arrivals land on.
+        List<BlockPos> runway = arriving ? layout.arrivalRunway() : layout.departureRunway();
         if (runway.isEmpty()) return List.of();
         BlockPos gateEnd = runway.get(0);
 
@@ -2525,7 +2550,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      */
     private static List<BlockPos> approachPath(AirportLayout destination) {
         List<BlockPos> leg = positionsOf(destination, Waypoint.Type.FINAL_LEG);
-        List<BlockPos> runway = positionsOf(destination, Waypoint.Type.RUNWAY);
+        // Always the arrival runway - the final leg is drawn to it, and a
+        // departure runway has no approach path of its own by design.
+        List<BlockPos> runway = destination.arrivalRunway();
         List<BlockPos> path = new ArrayList<>();
 
         if (leg.size() == 2) {

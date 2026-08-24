@@ -109,6 +109,40 @@ public class AirportLayout {
         return holdingPatternHeight;
     }
 
+    /**
+     * The runway arrivals land on: always the first pair drawn.
+     *
+     * Runways are stored as pairs in the RUNWAY list, exactly like taxiway
+     * segments - index 0 of each pair is its gate end, index 1 the far end.
+     * One pair means one runway used for everything, which is what every
+     * airport drawn before this was.
+     */
+    public List<BlockPos> arrivalRunway() {
+        List<Waypoint> points = waypoints(Waypoint.Type.RUNWAY);
+        if (points.size() < 2) return List.of();
+        return List.of(points.get(0).pos(), points.get(1).pos());
+    }
+
+    /**
+     * The runway departures roll down - the second pair if one was drawn,
+     * otherwise the same strip everyone else uses.
+     *
+     * Deliberately the whole of the feature: a second runway is a place for
+     * departures to go so they stop queueing behind arrivals. It gets no
+     * pattern, no final leg and no taxi rerouting of its own, because none of
+     * those are what makes an airport with one runway feel congested.
+     */
+    public List<BlockPos> departureRunway() {
+        List<Waypoint> points = waypoints(Waypoint.Type.RUNWAY);
+        if (points.size() >= 4) return List.of(points.get(2).pos(), points.get(3).pos());
+        return arrivalRunway();
+    }
+
+    /** Does this airport separate departures onto their own strip? */
+    public boolean hasDepartureRunway() {
+        return waypoints(Waypoint.Type.RUNWAY).size() >= 4;
+    }
+
     public int taxiSpeed() {
         return taxiSpeed;
     }

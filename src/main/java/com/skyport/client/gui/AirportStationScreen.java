@@ -118,6 +118,7 @@ public class AirportStationScreen extends Screen {
         // What this airport actually contains right now - so "did my drawing
         // save" is answerable without opening the map editor again.
         String summary = "Runway " + tick(Waypoint.Type.RUNWAY, 2)
+                + (layout.hasDepartureRunway() ? " +dep" : "")
                 + "   Taxiway " + tick(Waypoint.Type.TAXIWAY, 2)
                 + "   Holding " + tick(Waypoint.Type.HOLDING_PATTERN, 3)
                 + "   Final " + tick(Waypoint.Type.FINAL_LEG, 2)
