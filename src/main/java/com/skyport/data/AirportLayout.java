@@ -143,6 +143,37 @@ public class AirportLayout {
         return waypoints(Waypoint.Type.RUNWAY).size() >= 4;
     }
 
+    /** How many runways are drawn, rounded down - a half-finished second one
+     *  does not count until both its ends exist. */
+    public int runwayCount() {
+        return waypoints(Waypoint.Type.RUNWAY).size() / 2;
+    }
+
+    /**
+     * Place one end of a specific runway, leaving the other alone.
+     *
+     * The editor draws runways by index rather than by appending, because
+     * with two of them the player picks which one they are editing. Slots
+     * before the one being written are padded so index 2 always means the
+     * departure runway even if the arrival runway is half drawn - otherwise
+     * points would silently shift roles as the list grew.
+     */
+    public void setRunwayPoint(int runwayIndex, int end, BlockPos pos) {
+        List<Waypoint> points = waypoints(Waypoint.Type.RUNWAY);
+        int slot = runwayIndex * 2 + end;
+        while (points.size() <= slot) {
+            points.add(new Waypoint(pos, Waypoint.Type.RUNWAY, points.size()));
+        }
+        points.set(slot, new Waypoint(pos, Waypoint.Type.RUNWAY, slot));
+    }
+
+    /** Drop everything past the given number of runways - used when the
+     *  editor is toggled back down to one. */
+    public void trimRunwaysTo(int runways) {
+        List<Waypoint> points = waypoints(Waypoint.Type.RUNWAY);
+        while (points.size() > runways * 2) points.remove(points.size() - 1);
+    }
+
     public int taxiSpeed() {
         return taxiSpeed;
     }

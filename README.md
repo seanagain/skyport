@@ -45,11 +45,14 @@ build a runway where you drew one, or find the taxiway to tow an aircraft to.
    hit **Edit Map**.
 4. Draw the layout. Each mode's click rule is spelled out in the hint line
    above the map, because they differ:
-   - **Runway** - 2 clicks: the gate end first, then the far end. Optionally
-     2 more for a second runway, drawn in green, which departures use and
-     arrivals never touch - so a departure stops queueing behind a landing
-     aircraft. Leave it off and one runway does both, as before. A fifth
-     click starts over.
+   - **Runway** - 2 clicks: the gate end first, then the far end. The toggle
+     beside the mode menu adds a second runway, drawn in green, which
+     departures use and arrivals never touch - so a departure stops queueing
+     behind a landing aircraft. With two selected the menu lists them
+     separately, so you pick which one you are editing.
+   - **Move nodes** - drag any placed node to reposition it. Lines follow,
+     and anything sitting on the same spot moves with it, so a taxiway that
+     meets the runway stays met.
    - **Taxiway** - clicks are read in *pairs*, each pair its own segment.
      First pair is the backbone (runway gate end <-> holding pattern);
      each later pair is one gate's spur.
@@ -61,11 +64,13 @@ build a runway where you drew one, or find the taxiway to tow an aircraft to.
    - **Hold Line** - one point on the taxiway where aircraft wait for the
      runway.
    - **Pad** - helipads for rotorcraft, which need no runway at all.
-   - **Flow** - not a drawing mode. Click a taxiway segment to cycle it
-     two-way -> one-way -> one-way reversed; one-way segments get an
-     arrowhead. Aircraft route around them, so a loop with an inbound and an
-     outbound half lets arrivals and departures pass instead of queueing on
-     one shared strip. The editor refuses a change that would strand a gate.
+   One-way taxiways are set from Taxiway mode itself: click the *body* of an
+   already-drawn segment to cycle it two-way -> one-way -> one-way reversed,
+   and it gets an arrowhead. Aircraft route around them, so a loop with an
+   inbound and an outbound half lets arrivals and departures pass instead of
+   queueing on one shared strip. Clicking near a node still places a point,
+   because that is how a segment joins the network. The editor refuses a
+   change that would strand a gate.
 
    Clicks land on the exact block under the cursor, so zoom in (scroll or
    the -/+ buttons) for finer placement; the crosshair turns green when a

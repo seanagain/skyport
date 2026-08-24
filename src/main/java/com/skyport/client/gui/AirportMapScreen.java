@@ -38,8 +38,15 @@ import java.util.List;
  * resemblance to the actual ground.
  *
  * Drawing rules, per element:
- * - Runway and Final Leg: exactly 2 points each (one straight line). A 3rd
- *   click starts that line over - see {@link #isLineMode}.
+ * - Runway: 2 points, gate end then far end. An airport can have a second
+ *   one, toggled beside the mode menu, which departures use and arrivals
+ *   never touch; runway points are written by slot rather than appended, so
+ *   the two never drift into each other's roles.
+ * - Final Leg: exactly 2 points (one straight line). A 3rd click starts it
+ *   over - see {@link #isLineMode}.
+ * - Move: drags an existing node. Everything sitting on that spot moves with
+ *   it, because a join here is nothing more than two points sharing
+ *   coordinates and moving one of them silently breaks the network.
  * - Taxiway: a set of independent 2-point segments. The first pair is the
  *   backbone (runway gate-end <-> holding pattern); every later pair is one
  *   gate's spur, drawn from the gate out to where it meets the backbone.
@@ -53,12 +60,42 @@ import java.util.List;
  */
 public class AirportMapScreen extends Screen {
 
+    /**
+     * What a click does. Chosen from the dropdown rather than a row of
+     * buttons: there are enough of these that buttons had to be abbreviated
+     * to the point of being cryptic, and the two runway entries only exist
+     * some of the time.
+     */
     private enum EditMode {
-        RUNWAY("Runway"), TAXIWAY("Taxiway"), HOLDING_PATTERN("Pattern"),
-        FINAL_LEG("Final"), GATE("Gate"), HOLD_SHORT("Hold Line"), HELIPAD("Pad");
+        MOVE("Move nodes"),
+        RUNWAY("Runway"),
+        ARRIVAL_RUNWAY("Arrival runway"),
+        DEPARTURE_RUNWAY("Departure runway"),
+        TAXIWAY("Taxiway"),
+        HOLDING_PATTERN("Holding pattern"),
+        FINAL_LEG("Final leg"),
+        GATE("Gate"),
+        HOLD_SHORT("Hold line"),
+        HELIPAD("Helipad");
 
         final String label;
         EditMode(String label) { this.label = label; }
+
+        /** Runways appear as one entry or two, never all three. */
+        boolean availableWith(int runways) {
+            if (this == RUNWAY) return runways == 1;
+            if (this == ARRIVAL_RUNWAY || this == DEPARTURE_RUNWAY) return runways == 2;
+            return true;
+        }
+    }
+
+    /** Which runway a mode edits, or -1 if it is not a runway mode. */
+    private static int runwayIndexOf(EditMode mode) {
+        return switch (mode) {
+            case RUNWAY, ARRIVAL_RUNWAY -> 0;
+            case DEPARTURE_RUNWAY -> 1;
+            default -> -1;
+        };
     }
 
     /** Zoom levels, in world blocks per screen pixel. */
@@ -73,7 +110,9 @@ public class AirportMapScreen extends Screen {
     /** How near a click has to land to count as "on" a taxiway segment. */
     private static final int FLOW_PICK_PIXELS = 6;
     /** Two runways at two points each. The second pair is optional. */
-    private static final int MAX_RUNWAY_POINTS = 4;
+    /** How far to one side a newly added departure runway is seeded, so it
+     *  is visible and draggable rather than hidden under the first. */
+    private static final int DEPARTURE_RUNWAY_OFFSET = 40;
     private static final int COLOR_FLOW_ARROW = 0xFF2B2B22;
     private static final long REJECTION_VISIBLE_MS = 4000;
     // Deliberately NOT a plausible ground color - real sampled terrain and
@@ -143,21 +182,20 @@ public class AirportMapScreen extends Screen {
         int row1Y = titleH + gap;
         int row2Y = row1Y + rowH + gap;
 
-        // --- row 1: edit modes, split evenly across the map's width ---
-        // The mode row spans the whole screen rather than just the map:
-        // eight buttons across 320px leaves 38px each, which is narrower
-        // than the words "Hold Line" and "Pattern" actually are.
-        int modeCount = EditMode.values().length;
-        int modeRowX = 10;
-        int modeRowW = width - 20;
-        int modeW = (modeRowW - (modeCount - 1) * 2) / modeCount;
-        int btnX = modeRowX;
-        for (EditMode candidate : EditMode.values()) {
-            addRenderableWidget(Button.builder(Component.literal(candidate.label), b -> mode = candidate)
-                    .bounds(btnX, row1Y, modeW, rowH)
-                    .build());
-            btnX += modeW + 2;
-        }
+        // --- row 1: what to draw, and how many runways ---
+        // A dropdown rather than a row of buttons. Ten modes across the top
+        // left each one about 38px, which is narrower than the words in it,
+        // and two of them only exist when the airport has two runways - a
+        // row that changes length as you toggle is worse than a list.
+        int runwayToggleW = 92;
+        dropdownX = mapX;
+        dropdownW = mapW - runwayToggleW - 4;
+        dropdownY = row1Y;
+        dropdownH = rowH;
+
+        addRenderableWidget(Button.builder(runwayToggleLabel(), b -> toggleRunwayCount())
+                .bounds(mapX + mapW - runwayToggleW, row1Y, runwayToggleW, rowH)
+                .build());
 
         // --- row 2: undo + holding-pattern height/direction ---
         int undoW = Math.max(52, mapW / 5);
@@ -165,7 +203,7 @@ public class AirportMapScreen extends Screen {
         int dirW = Math.max(58, mapW / 5);
         int heightW = Math.max(46, mapW - undoW - stepW * 2 - dirW - 8);
 
-        btnX = mapX;
+        int btnX = mapX;
         addRenderableWidget(Button.builder(Component.translatable("gui.skyport.airport_map.undo"), b -> undoLastPoint())
                 .bounds(btnX, row2Y, undoW, rowH)
                 .build());
@@ -218,6 +256,118 @@ public class AirportMapScreen extends Screen {
         lastTerrainSampleMs = System.currentTimeMillis();
     }
 
+    // --- the mode dropdown -------------------------------------------------
+    //
+    // Hand-rolled rather than a vanilla widget, because Minecraft has no
+    // dropdown: CycleButton is the nearest thing and cycling ten entries to
+    // reach the one you want is worse than the button row it replaced. It is
+    // drawn and hit-tested last so it sits above the map, which is the whole
+    // point of a menu that overlaps what is behind it.
+
+    private int dropdownX, dropdownY, dropdownW, dropdownH;
+    private boolean dropdownOpen;
+    /** Which end of the selected runway the next click sets: gate end, then
+     *  far end, then back round. Reset when the mode changes. */
+    private int runwayEndBeingDrawn;
+
+    private Component runwayToggleLabel() {
+        return Component.literal(layout.runwayCount() >= 2 ? "2 runways" : "1 runway");
+    }
+
+    /**
+     * Flip between one runway and two.
+     *
+     * Going down to one discards the departure runway rather than hiding it:
+     * a strip that is still in the layout but not in the editor would keep
+     * taking departures with no way to see or move it.
+     */
+    private void toggleRunwayCount() {
+        if (layout.runwayCount() >= 2) {
+            layout.trimRunwaysTo(1);
+            if (mode == EditMode.ARRIVAL_RUNWAY || mode == EditMode.DEPARTURE_RUNWAY) {
+                mode = EditMode.RUNWAY;
+            }
+            flowNotice = "Departure runway removed - one runway does both again.";
+        } else {
+            // Seed the second runway from the first so it exists to be moved,
+            // rather than making the player draw it blind before it appears.
+            List<Waypoint> runway = layout.waypoints(Waypoint.Type.RUNWAY);
+            if (runway.size() >= 2) {
+                BlockPos a = runway.get(0).pos();
+                BlockPos b = runway.get(1).pos();
+                layout.setRunwayPoint(1, 0, a.offset(0, 0, DEPARTURE_RUNWAY_OFFSET));
+                layout.setRunwayPoint(1, 1, b.offset(0, 0, DEPARTURE_RUNWAY_OFFSET));
+                flowNotice = "Departure runway added alongside - drag its ends into place.";
+            } else {
+                flowNotice = "Draw the arrival runway first.";
+            }
+            if (mode == EditMode.RUNWAY) mode = EditMode.ARRIVAL_RUNWAY;
+        }
+        flowNoticeShownAtMs = System.currentTimeMillis();
+        rebuildWidgets();
+    }
+
+    /** Entries the dropdown currently offers, given the runway count. */
+    private List<EditMode> availableModes() {
+        List<EditMode> modes = new ArrayList<>();
+        for (EditMode candidate : EditMode.values()) {
+            if (candidate.availableWith(layout.runwayCount() >= 2 ? 2 : 1)) modes.add(candidate);
+        }
+        return modes;
+    }
+
+    private void drawDropdown(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        guiGraphics.fill(dropdownX, dropdownY, dropdownX + dropdownW, dropdownY + dropdownH, 0xFF2B2B2B);
+        drawBorder(guiGraphics, dropdownX, dropdownY, dropdownW, dropdownH, 0xFF5A5A5A);
+        guiGraphics.drawString(font, mode.label, dropdownX + 6, dropdownY + 6, 0xFFFFFFFF);
+        guiGraphics.drawString(font, dropdownOpen ? "^" : "v",
+                dropdownX + dropdownW - 12, dropdownY + 6, 0xFFAAAAAA);
+
+        if (!dropdownOpen) return;
+        List<EditMode> modes = availableModes();
+        int y = dropdownY + dropdownH;
+        for (EditMode candidate : modes) {
+            boolean hovered = mouseX >= dropdownX && mouseX < dropdownX + dropdownW
+                    && mouseY >= y && mouseY < y + dropdownH;
+            guiGraphics.fill(dropdownX, y, dropdownX + dropdownW, y + dropdownH,
+                    hovered ? 0xFF3D5A80 : 0xFF222222);
+            guiGraphics.drawString(font, candidate.label, dropdownX + 6, y + 6,
+                    candidate == mode ? 0xFFFFE08A : 0xFFDDDDDD);
+            y += dropdownH;
+        }
+        drawBorder(guiGraphics, dropdownX, dropdownY + dropdownH, dropdownW,
+                modes.size() * dropdownH, 0xFF5A5A5A);
+    }
+
+    /** Returns true if the click belonged to the dropdown. */
+    private boolean dropdownClicked(double mouseX, double mouseY) {
+        boolean onHeader = mouseX >= dropdownX && mouseX < dropdownX + dropdownW
+                && mouseY >= dropdownY && mouseY < dropdownY + dropdownH;
+        if (onHeader) {
+            dropdownOpen = !dropdownOpen;
+            return true;
+        }
+        if (!dropdownOpen) return false;
+
+        List<EditMode> modes = availableModes();
+        int y = dropdownY + dropdownH;
+        for (EditMode candidate : modes) {
+            if (mouseX >= dropdownX && mouseX < dropdownX + dropdownW
+                    && mouseY >= y && mouseY < y + dropdownH) {
+                mode = candidate;
+                dropdownOpen = false;
+                runwayEndBeingDrawn = 0;
+                rejection = null;
+                return true;
+            }
+            y += dropdownH;
+        }
+        // Clicking anywhere else closes it, and that click is spent on
+        // closing rather than also landing on the map underneath.
+        dropdownOpen = false;
+        return true;
+    }
+
     private Component zoomLabel() {
         return Component.literal(blocksPerPixel() + " blk/px");
     }
@@ -264,10 +414,16 @@ public class AirportMapScreen extends Screen {
      *  starts a fresh line rather than extending a polygon. Taxiway is NOT
      *  capped like this: it's a set of segments (see class doc). */
     private static boolean isLineMode(EditMode mode) {
-        return mode == EditMode.RUNWAY || mode == EditMode.FINAL_LEG;
+        // Runways are no longer here: they are written by index rather than
+        // appended, so they have their own two-click cycle and never need
+        // clearing to start over.
+        return mode == EditMode.FINAL_LEG;
     }
 
     private void undoLastPoint() {
+        // Nothing to undo in Move mode - it edits positions rather than
+        // adding points, and toWaypointType has no answer for it.
+        if (mode == EditMode.MOVE) return;
         if (mode == EditMode.GATE) {
             List<String> names = new ArrayList<>(layout.gates().keySet());
             if (!names.isEmpty()) layout.gates().remove(names.get(names.size() - 1));
@@ -278,11 +434,18 @@ public class AirportMapScreen extends Screen {
             if (!names.isEmpty()) layout.helipads().remove(names.get(names.size() - 1));
             return;
         }
+        if (runwayIndexOf(mode) >= 0) {
+            // Runway points are slots, not a stack: undo steps the click
+            // cycle back so the next click rewrites the end you just did.
+            runwayEndBeingDrawn = runwayEndBeingDrawn == 0 ? 1 : 0;
+            return;
+        }
         List<Waypoint> points = layout.waypoints(toWaypointType(mode));
         if (!points.isEmpty()) points.remove(points.size() - 1);
     }
 
     private void clearCurrent() {
+        if (mode == EditMode.MOVE) return;
         if (mode == EditMode.GATE) {
             layout.gates().clear();
         } else if (mode == EditMode.HELIPAD) {
@@ -312,17 +475,29 @@ public class AirportMapScreen extends Screen {
 
     private static Waypoint.Type toWaypointType(EditMode mode) {
         return switch (mode) {
-            case RUNWAY -> Waypoint.Type.RUNWAY;
+            case RUNWAY, ARRIVAL_RUNWAY, DEPARTURE_RUNWAY -> Waypoint.Type.RUNWAY;
             case TAXIWAY -> Waypoint.Type.TAXIWAY;
             case HOLDING_PATTERN -> Waypoint.Type.HOLDING_PATTERN;
             case FINAL_LEG -> Waypoint.Type.FINAL_LEG;
             case HOLD_SHORT -> Waypoint.Type.HOLD_SHORT;
-            case GATE, HELIPAD -> throw new IllegalArgumentException(mode + " is not a Waypoint.Type");
+            case GATE, HELIPAD, MOVE -> throw new IllegalArgumentException(mode + " is not a Waypoint.Type");
         };
     }
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // The dropdown overlaps the map, so it gets first refusal on clicks.
+        if (button == 0 && dropdownClicked(mouseX, mouseY)) return true;
+
+        if (button == 0 && mode == EditMode.MOVE && isInsideMap(mouseX, mouseY)) {
+            dragging = nodeAt(mouseX, mouseY);
+            if (dragging == null) {
+                rejection = "Nothing to move here - click a node.";
+                rejectionShownAtMs = System.currentTimeMillis();
+            }
+            return true;
+        }
+
         if (button == 0 && isInsideMap(mouseX, mouseY)) {
             BlockPos world = snapToExistingNode(screenToWorld((int) mouseX, (int) mouseY));
 
@@ -359,17 +534,22 @@ public class AirportMapScreen extends Screen {
             } else if (mode == EditMode.HELIPAD) {
                 layout.helipads().put(layout.nextHelipadName(), world);
             } else {
-                Waypoint.Type type = toWaypointType(mode);
-                List<Waypoint> points = layout.waypoints(type);
-                // Runway allows a second pair: the first is what arrivals
-                // land on, an optional second is where departures roll, so
-                // they stop queueing behind each other. A fifth click starts
-                // the whole thing over, the same way a third used to.
-                if (mode == EditMode.RUNWAY && points.size() >= MAX_RUNWAY_POINTS) points.clear();
-                else if (isLineMode(mode) && mode != EditMode.RUNWAY && points.size() >= 2) points.clear();
-                // Only one hold point per airport - a second click moves it.
-                if (mode == EditMode.HOLD_SHORT) points.clear();
-                points.add(new Waypoint(world, type, points.size()));
+                int runwayIndex = runwayIndexOf(mode);
+                if (runwayIndex >= 0) {
+                    // Runways are edited by index, not by appending. With two
+                    // of them the player has said which one they are drawing,
+                    // and appending would let points drift between roles as
+                    // the list grew.
+                    layout.setRunwayPoint(runwayIndex, runwayEndBeingDrawn, world);
+                    runwayEndBeingDrawn = runwayEndBeingDrawn == 0 ? 1 : 0;
+                } else {
+                    Waypoint.Type type = toWaypointType(mode);
+                    List<Waypoint> points = layout.waypoints(type);
+                    if (isLineMode(mode) && points.size() >= 2) points.clear();
+                    // Only one hold point per airport - a second click moves it.
+                    if (mode == EditMode.HOLD_SHORT) points.clear();
+                    points.add(new Waypoint(world, type, points.size()));
+                }
             }
             return true;
         }
@@ -383,6 +563,90 @@ public class AirportMapScreen extends Screen {
      * apart, which leaves a gap the autopilot's connectivity check would
      * treat as a broken network.
      */
+    // --- dragging nodes ----------------------------------------------------
+
+    /** The world position currently being dragged, or null. Identified by
+     *  position rather than by index, so everything sitting on that spot
+     *  moves together - see moveNode. */
+    @Nullable
+    private BlockPos dragging;
+
+    /** Which node the cursor is over, if any. */
+    @Nullable
+    private BlockPos nodeAt(double mouseX, double mouseY) {
+        BlockPos raw = screenToWorldRaw((int) mouseX, (int) mouseY);
+        double radius = (double) NODE_SNAP_PIXELS * blocksPerPixel();
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (BlockPos node : allNodes()) {
+            double distance = horizontalDistance(node, raw);
+            if (distance < bestDistance && distance <= radius) {
+                bestDistance = distance;
+                best = node;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Move every node sitting on `from` to `to`.
+     *
+     * All of them, not just the one clicked. Joins in this layout are not
+     * recorded anywhere - a taxiway meets the runway by having a point at the
+     * same coordinates - so moving one of a co-located pair silently breaks
+     * the connection, and the break is invisible until an aircraft refuses to
+     * route. Moving them together is what makes the lines follow the node.
+     */
+    private void moveNode(BlockPos from, BlockPos to) {
+        if (from.equals(to)) return;
+        for (Waypoint.Type type : Waypoint.Type.values()) {
+            List<Waypoint> points = layout.waypoints(type);
+            for (int i = 0; i < points.size(); i++) {
+                Waypoint point = points.get(i);
+                if (samePlace(point.pos(), from)) {
+                    points.set(i, new Waypoint(to, point.type(), point.order(), point.flow()));
+                }
+            }
+        }
+        layout.gates().replaceAll((name, pos) -> samePlace(pos, from) ? to : pos);
+        layout.helipads().replaceAll((name, pos) -> samePlace(pos, from) ? to : pos);
+    }
+
+    /** Y is ignored: the editor is a top-down map and everything on it is
+     *  placed at the station's height anyway. */
+    private static boolean samePlace(BlockPos a, BlockPos b) {
+        return a.getX() == b.getX() && a.getZ() == b.getZ();
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (button == 0 && dragging != null) {
+            BlockPos to = screenToWorld((int) mouseX, (int) mouseY);
+            moveNode(dragging, to);
+            dragging = to;
+            return true;
+        }
+        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (button == 0 && dragging != null) {
+            dragging = null;
+            // Re-check the network: a node dragged off a junction can strand a
+            // gate exactly the way a one-way segment can, and for the same
+            // reason it is not visible by looking at the map.
+            List<String> stranded = GroundNetwork.strandedGates(layout);
+            if (!stranded.isEmpty()) {
+                rejection = "That leaves " + String.join(", ", stranded)
+                        + " with no route - the lines may no longer meet.";
+                rejectionShownAtMs = System.currentTimeMillis();
+            }
+            return true;
+        }
+        return super.mouseReleased(mouseX, mouseY, button);
+    }
+
     private BlockPos snapToExistingNode(BlockPos candidate) {
         BlockPos best = null;
         double bestDist = Double.MAX_VALUE;
@@ -510,8 +774,9 @@ public class AirportMapScreen extends Screen {
 
         return switch (mode) {
             // The runway is the spine everything else hangs off, so it goes
-            // down first and needs no connection of its own.
-            case RUNWAY -> null;
+            // down first and needs no connection of its own. Moving nodes
+            // places nothing at all.
+            case RUNWAY, ARRIVAL_RUNWAY, DEPARTURE_RUNWAY, MOVE -> null;
 
             case TAXIWAY -> {
                 if (!hasRunway) yield "Draw the runway first.";
@@ -745,9 +1010,13 @@ public class AirportMapScreen extends Screen {
             guiGraphics.drawString(font, flowNotice, mapX + 2, mapY + mapH + 12, 0xFFE8C34A);
         }
 
-        guiGraphics.drawString(font, mode.label + " - " + hint(), mapX + 2, 3, 0xFFAAAAAA);
+        guiGraphics.drawString(font, hint(), mapX + 2, 3, 0xFFAAAAAA);
         guiGraphics.drawString(font, layout.displayName(),
                 mapX + mapW - font.width(layout.displayName()) - 2, 3, 0xFFFFFFFF);
+
+        // Last, so the open menu covers the map rather than the other way
+        // round. Everything above has already drawn by this point.
+        drawDropdown(guiGraphics, mouseX, mouseY);
     }
 
     /**
@@ -780,7 +1049,9 @@ public class AirportMapScreen extends Screen {
 
     private String hint() {
         return switch (mode) {
-            case RUNWAY -> runwayHint();
+            case MOVE -> "drag any node to move it - joined lines follow";
+            case RUNWAY, ARRIVAL_RUNWAY -> runwayHint();
+            case DEPARTURE_RUNWAY -> "2 clicks: gate end, then far end - departures only";
             case TAXIWAY -> "pairs; click a drawn segment to flip its direction";
             case HOLDING_PATTERN -> "the airborne racetrack - click a loop of 3+ points";
             case FINAL_LEG -> "2 points: from holding pattern, to runway";
