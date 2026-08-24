@@ -143,6 +143,9 @@ public class AirportMapScreen extends Screen {
 
     /** Index into ZOOM_LEVELS; starts at 4 blocks/pixel. */
     private int zoomIndex = 2;
+    /** How far the view has been dragged from the station, in blocks. */
+    private int panBlocksX;
+    private int panBlocksZ;
 
     private Button heightValueButton;
     private Button directionButton;
@@ -189,9 +192,14 @@ public class AirportMapScreen extends Screen {
         // row that changes length as you toggle is worse than a list.
         int runwayToggleW = 92;
         dropdownX = mapX;
-        dropdownW = mapW - runwayToggleW - 4;
+        dropdownW = mapW - runwayToggleW - 60;
         dropdownY = row1Y;
         dropdownH = rowH;
+
+        addRenderableWidget(Button.builder(Component.literal("Centre"),
+                        b -> { panBlocksX = 0; panBlocksZ = 0; sampleTerrain(); })
+                .bounds(mapX + mapW - runwayToggleW - 56, row1Y, 52, rowH)
+                .build());
 
         addRenderableWidget(Button.builder(runwayToggleLabel(), b -> toggleRunwayCount())
                 .bounds(mapX + mapW - runwayToggleW, row1Y, runwayToggleW, rowH)
@@ -717,6 +725,17 @@ public class AirportMapScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        // Right-drag pans, in every mode. Deliberately the right button:
+        // the left one is already spoken for by placing, dragging nodes and
+        // flipping segment directions, and a modifier key nobody is told
+        // about is not discoverable either.
+        if (button == 1 && isInsideMap(mouseX, mouseY)) {
+            panBlocksX -= (int) Math.round(dragX) * blocksPerPixel();
+            panBlocksZ -= (int) Math.round(dragY) * blocksPerPixel();
+            sampleTerrain();
+            return true;
+        }
+
         if (button == 0 && dragging != null) {
             BlockPos to = screenToWorld((int) mouseX, (int) mouseY);
             moveNode(dragging, to);
@@ -766,6 +785,9 @@ public class AirportMapScreen extends Screen {
             for (Waypoint w : layout.waypoints(type)) nodes.add(w.pos());
         }
         nodes.addAll(layout.gates().values());
+        // Helipads too. Leaving them out meant a pad could never be dragged
+        // or joined to, which is not a rule anyone would guess at.
+        nodes.addAll(layout.helipads().values());
         return nodes;
     }
 
@@ -940,7 +962,7 @@ public class AirportMapScreen extends Screen {
     private BlockPos screenToWorldRaw(int screenX, int screenY) {
         int dx = (screenX - mapX - mapW / 2) * blocksPerPixel();
         int dz = (screenY - mapY - mapH / 2) * blocksPerPixel();
-        return new BlockPos(stationPos.getX() + dx, stationPos.getY(), stationPos.getZ() + dz);
+        return new BlockPos(centreX() + dx, stationPos.getY(), centreZ() + dz);
     }
 
     /** Clicks land on the exact block under the cursor - the pixel-to-block
@@ -955,11 +977,28 @@ public class AirportMapScreen extends Screen {
     }
 
     private int worldToScreenX(BlockPos pos) {
-        return mapX + mapW / 2 + (pos.getX() - stationPos.getX()) / blocksPerPixel();
+        return mapX + mapW / 2 + (pos.getX() - centreX()) / blocksPerPixel();
     }
 
     private int worldToScreenY(BlockPos pos) {
-        return mapY + mapH / 2 + (pos.getZ() - stationPos.getZ()) / blocksPerPixel();
+        return mapY + mapH / 2 + (pos.getZ() - centreZ()) / blocksPerPixel();
+    }
+
+    /**
+     * What the map is centred on: the station, shifted by however far the
+     * view has been dragged.
+     *
+     * The editor could only zoom before, which meant any node outside the
+     * window simply could not be reached - and zooming out far enough to see
+     * it made placing anything precisely impossible. On a large field that is
+     * most of the airport.
+     */
+    private int centreX() {
+        return stationPos.getX() + panBlocksX;
+    }
+
+    private int centreZ() {
+        return stationPos.getZ() + panBlocksZ;
     }
 
     /** Samples real terrain colors into a coarse cached grid - called on open

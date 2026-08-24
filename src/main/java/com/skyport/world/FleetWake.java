@@ -93,11 +93,58 @@ public final class FleetWake {
     }
 
     /**
+     * How long each aircraft has been promised, separate from the tickets
+     * currently held for it.
+     *
+     * The two are not the same thing, and conflating them is what made a
+     * woken aircraft sleep again after a couple of minutes. Tickets are
+     * dropped as soon as it starts flying under its own bubble - correctly,
+     * they would only hold a second patch of world open at an airport it has
+     * left - but the promise was "ten minutes of running", and it parks at
+     * the far end with nothing holding it and goes straight back to sleep.
+     * The deadline outlives the tickets so it can be reasserted there.
+     */
+    private static final java.util.Map<UUID, Long> WOKEN_UNTIL = new java.util.HashMap<>();
+
+    /**
+     * Re-issue a wake ticket at an aircraft's current position if its wake
+     * window is still open.
+     *
+     * Called when one settles at a gate: that is the moment it stops holding
+     * its own chunks and would otherwise sleep, however much of its wake
+     * remained.
+     */
+    public static void reassert(MinecraftServer server, UUID planeId, String dimension, ChunkPos at) {
+        Long until = WOKEN_UNTIL.get(planeId);
+        if (until == null) return;
+
+        long now = server.overworld().getGameTime();
+        if (now >= until) {
+            WOKEN_UNTIL.remove(planeId);
+            return;
+        }
+        if (holdsTicket(planeId)) return;
+
+        ServerLevel level = levelFor(server, dimension);
+        if (level == null) return;
+
+        int radius = SkyportConfig.parkedChunkRadius;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                ChunkPos chunk = new ChunkPos(at.x + dx, at.z + dz);
+                CONTROLLER.forceChunk(level, planeId, chunk.x, chunk.z, true, true);
+                ACTIVE.add(new Waking(level.dimension(), chunk, planeId, until));
+            }
+        }
+    }
+
+    /**
      * Drop an aircraft's wake tickets early.
      *
      * Called the moment it starts holding its own flying bubble: at that
      * point the wake ticket has done exactly what it was for and is only
-     * keeping a second patch of world open behind it.
+     * keeping a second patch of world open behind it. The wake DEADLINE
+     * survives this, so parking at the far end re-arms rather than sleeping.
      */
     public static void release(MinecraftServer server, UUID planeId) {
         ACTIVE.removeIf(waking -> {
@@ -133,6 +180,8 @@ public final class FleetWake {
         if (level == null) return false;
 
         long expiry = server.overworld().getGameTime() + minutes * 60L * 20L;
+        // The promise, kept separately from the tickets - see WOKEN_UNTIL.
+        WOKEN_UNTIL.put(aircraft.planeId(), expiry);
 
         // Push the expiry back on tickets this aircraft already holds rather
         // than skipping it. Asking again used to be a no-op for anything
@@ -221,6 +270,7 @@ public final class FleetWake {
         if (now % 20 != 0) return;
 
         runPendingChecks(server, now);
+        WOKEN_UNTIL.values().removeIf(until -> now >= until);
         if (ACTIVE.isEmpty()) return;
 
         ACTIVE.removeIf(waking -> {

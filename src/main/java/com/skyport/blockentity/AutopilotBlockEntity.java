@@ -635,6 +635,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                         SkyportConfig.parkedChunkRadius);
             } else {
                 releaseChunks();
+                // Parked, so nothing of ours holds this patch open any more.
+                // If this aircraft was woken and its window has not run out,
+                // re-arm here: it was promised a stretch of running time, and
+                // arriving somewhere is not a reason to cut that short.
+                FleetWake.reassert(serverLevel.getServer(), planeId(),
+                        serverLevel.dimension().location().toString(),
+                        new ChunkPos(BlockPos.containing(simulatedPosition)));
             }
             tickWaiting(serverLevel);
             return;
