@@ -22,6 +22,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.core.SectionPos;
@@ -210,6 +212,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private static final double VERTICAL_FULL_AUTHORITY_BLOCKS = 5.0;
     /** How often to re-check power and burn fuel. One second. */
     private static final int POWER_CHECK_INTERVAL_TICKS = 20;
+    /** The arrival chime: two note-block bells a fourth apart, high then low,
+     *  which is roughly what a cabin seatbelt sign sounds like. */
+    private static final float CHIME_VOLUME = 1.0f;
+    private static final float CHIME_HIGH_PITCH = 1.335f;
+    private static final float CHIME_LOW_PITCH = 1.0f;
+    /** Long enough to read as two notes rather than a chord. */
+    private static final int CHIME_GAP_TICKS = 7;
     /** Most world time one fuel check may charge for. A craft that has been
      *  unloaded for an hour was not flying for that hour, and should not be
      *  billed as though it were. */
@@ -298,6 +307,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** Game time of the last power check, to keep the cadence honest
      *  regardless of how often this gets called. */
     private long lastPowerCheckGameTime;
+    /** Game time the answering chime note is due, or 0 for none. */
+    private long chimeSecondNoteAt;
     /** Cached answer from the last power check, so the steering code can ask
      *  every tick without paying for a container sweep every tick. */
     private boolean hasPowerNow = true;
@@ -516,6 +527,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     }
 
     public void disengage() {
+        // Going idle stops this block entity ticking altogether, so a chime
+        // still waiting on its second note would never get one. The last stop
+        // of a schedule is exactly when that happens, and a half-played
+        // arrival chime is more noticeable than none at all.
+        flushArrivalChime();
         releaseApproach();
         releasePad();
         releaseChunks();
@@ -588,6 +604,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
     private void runFlightLogic(ServerLevel serverLevel) {
         if (simulatedPosition == null) return;
+
+        // Before the state switch, so the answering note lands whatever the
+        // aircraft went on to do - including a final arrival, which leaves
+        // the state machine idle and would otherwise swallow it.
+        tickArrivalChime(serverLevel);
 
         if (state == FlightState.WAITING) {
             // Parked at a gate: stop holding the world open. A stationary
@@ -965,6 +986,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private void arrive() {
         ScheduleEntry entry = currentEntry();
         message("Arrived at " + (entry == null ? "gate" : entry.gateName()) + ".");
+        playArrivalChime();
         // Parked and out of everyone's way - the airport is free now, and
         // this plane is no longer traffic to be separated from.
         releaseApproach();
@@ -2198,6 +2220,55 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             }
         }
         return best;
+    }
+
+    /**
+     * The two-tone cabin chime, on arriving at a gate.
+     *
+     * Built from vanilla note-block bells rather than a bundled sound file:
+     * two notes a fourth apart, the high one first, which is what a seatbelt
+     * sign sounds like. A real recording would be better and this mod ships
+     * no audio assets at all, so borrowing an instrument that is already in
+     * everyone's resource pack is the version that actually exists.
+     *
+     * The second note is scheduled rather than played immediately, because a
+     * chord is not a chime. Nothing here needs a radius check - playSound
+     * already only reaches players near the aircraft, which for once is
+     * exactly the rule we want.
+     */
+    private void playArrivalChime() {
+        ServerLevel world = worldLevel();
+        if (world == null || simulatedPosition == null) return;
+        world.playSound(null, simulatedPosition.x, simulatedPosition.y, simulatedPosition.z,
+                SoundEvents.NOTE_BLOCK_BELL.value(), SoundSource.BLOCKS,
+                CHIME_VOLUME, CHIME_HIGH_PITCH);
+        chimeSecondNoteAt = world.getGameTime() + CHIME_GAP_TICKS;
+    }
+
+    /** Plays the answering note once its moment arrives. */
+    private void tickArrivalChime(ServerLevel serverLevel) {
+        if (chimeSecondNoteAt <= 0 || serverLevel.getGameTime() < chimeSecondNoteAt) return;
+        playSecondChimeNote(serverLevel);
+    }
+
+    /**
+     * Play the answering note now, due or not.
+     *
+     * Going idle stops this block entity ticking, so a chime still waiting on
+     * its second note would never get one - and the last stop of a schedule
+     * is exactly when that happens.
+     */
+    private void flushArrivalChime() {
+        ServerLevel world = worldLevel();
+        if (chimeSecondNoteAt > 0 && world != null) playSecondChimeNote(world);
+    }
+
+    private void playSecondChimeNote(ServerLevel world) {
+        chimeSecondNoteAt = 0;
+        if (simulatedPosition == null) return;
+        world.playSound(null, simulatedPosition.x, simulatedPosition.y, simulatedPosition.z,
+                SoundEvents.NOTE_BLOCK_BELL.value(), SoundSource.BLOCKS,
+                CHIME_VOLUME, CHIME_LOW_PITCH);
     }
 
     private static BlockPos midpoint(BlockPos a, BlockPos b) {
