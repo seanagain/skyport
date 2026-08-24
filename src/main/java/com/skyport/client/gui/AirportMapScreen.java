@@ -565,9 +565,9 @@ public class AirportMapScreen extends Screen {
                     Waypoint.Type type = toWaypointType(mode);
                     List<Waypoint> points = layout.waypoints(type);
                     if (isLineMode(mode) && points.size() >= 2) points.clear();
-                    // One hold line per airport, drawn as two points across
-                    // the taxiway. A third click starts it over.
-                    if (mode == EditMode.HOLD_SHORT && points.size() >= 2) points.clear();
+                    // Hold lines are pairs, like taxiway segments, and there
+                    // can be as many as the field needs - one guarding each
+                    // runway is the case that matters. Nothing is cleared.
                     points.add(new Waypoint(world, type, points.size()));
                 }
             }
@@ -1154,7 +1154,7 @@ public class AirportMapScreen extends Screen {
             case HOLDING_PATTERN -> "the airborne racetrack - click a loop of 3+ points";
             case FINAL_LEG -> "2 points: from holding pattern, to runway";
             case GATE -> "click the end of a runway or taxiway line";
-            case HOLD_SHORT -> "2 clicks across the taxiway - planes hold behind this line";
+            case HOLD_SHORT -> "pairs; a line across the taxiway, one per runway";
             case HELIPAD -> "click anywhere - helicopters and blimps land here";
         };
     }

@@ -65,9 +65,11 @@ build a runway where you drew one, or find the taxiway to tow an aircraft to.
    - **Final** - 2 clicks: holding-pattern side first, then the runway's
      far end. This is the descent path.
    - **Gate** - one click per gate, auto-named Gate A, Gate B, ...
-   - **Hold line** - 2 clicks, drawn across the taxiway. Aircraft stop behind
-     it and only cross once the runway ahead is clear, the way a train waits
-     at a signal for the next section.
+   - **Hold line** - clicks in *pairs*, each pair a line across the taxiway.
+     Aircraft stop behind one and only cross once the runway ahead is clear,
+     the way a train waits at a signal. Draw as many as you like; each guards
+     whichever runway it was drawn nearest, so a field with two runways wants
+     one for each.
    - **Pad** - helipads for rotorcraft, which need no runway at all.
    One-way taxiways are set from Taxiway mode itself: click the *body* of an
    already-drawn segment to cycle it two-way -> one-way -> one-way reversed,

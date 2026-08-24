@@ -677,7 +677,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // safe to wait, so the whole airport has to be claimed up front.
             case TAXI_OUT -> {
                 AirportLayout origin = originLayout(serverLevel);
-                BlockPos holdShort = origin == null ? null : holdShortPoint(origin);
+                // The line guarding the runway this departure is using.
+                BlockPos holdShort = origin == null ? null
+                        : holdShortPoint(origin, origin.departureRunway());
 
                 // Nobody leaves a gate while another plane is on the taxiway,
                 // hold point included - there's nowhere to pass, so a second
@@ -879,7 +881,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // to the gate, since there's no defined point at which the plane
             // stops being in the way.
             case TAXI_IN -> {
-                BlockPos holdShort = holdShortPoint(destination);
+                BlockPos holdShort = holdShortPoint(destination, destination.arrivalRunway());
                 if (holdShort != null && !clearedPastHoldShort
                         && horizontalDistance(holdShort, BlockPos.containing(simulatedPosition)) <= CRAFT_ARRIVAL_RADIUS) {
                     clearedPastHoldShort = true;
@@ -2172,12 +2174,33 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * line existed has, and it is exactly the position they were using.
      */
     @org.jetbrains.annotations.Nullable
-    private static BlockPos holdShortPoint(AirportLayout layout) {
+    private static BlockPos holdShortPoint(AirportLayout layout, List<BlockPos> runway) {
         List<BlockPos> points = positionsOf(layout, Waypoint.Type.HOLD_SHORT);
         if (points.isEmpty()) return null;
-        if (points.size() == 1) return points.get(0);
-        BlockPos a = points.get(0);
-        BlockPos b = points.get(1);
+
+        // Which line guards this runway? The nearest one to the end aircraft
+        // enter and leave by. An airport can draw as many as it likes - one
+        // per runway is the case that matters, and a field with two runways
+        // wants two - so picking by proximity means each line ends up
+        // protecting the strip it was drawn beside, without anyone having to
+        // say so.
+        BlockPos reference = runway.isEmpty() ? null : runway.get(0);
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (int i = 0; i < points.size(); i += 2) {
+            BlockPos middle = i + 1 < points.size() ? midpoint(points.get(i), points.get(i + 1))
+                    : points.get(i); // a lone point: a hold line from before they were lines
+            if (reference == null) return middle;
+            double distance = horizontalDistance(middle, reference);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = middle;
+            }
+        }
+        return best;
+    }
+
+    private static BlockPos midpoint(BlockPos a, BlockPos b) {
         return new BlockPos((a.getX() + b.getX()) / 2, a.getY(), (a.getZ() + b.getZ()) / 2);
     }
 
