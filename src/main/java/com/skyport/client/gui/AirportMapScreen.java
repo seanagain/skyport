@@ -192,14 +192,9 @@ public class AirportMapScreen extends Screen {
         // row that changes length as you toggle is worse than a list.
         int runwayToggleW = 92;
         dropdownX = mapX;
-        dropdownW = mapW - runwayToggleW - 60;
+        dropdownW = mapW - runwayToggleW - 4;
         dropdownY = row1Y;
         dropdownH = rowH;
-
-        addRenderableWidget(Button.builder(Component.literal("Centre"),
-                        b -> { panBlocksX = 0; panBlocksZ = 0; sampleTerrain(); })
-                .bounds(mapX + mapW - runwayToggleW - 56, row1Y, 52, rowH)
-                .build());
 
         addRenderableWidget(Button.builder(runwayToggleLabel(), b -> toggleRunwayCount())
                 .bounds(mapX + mapW - runwayToggleW, row1Y, runwayToggleW, rowH)
@@ -254,6 +249,14 @@ public class AirportMapScreen extends Screen {
         zoomButton.active = false;
         addRenderableWidget(Button.builder(Component.literal("+"), b -> zoom(-1))
                 .bounds(zoomX + 86, footerY, 20, rowH)
+                .build());
+
+        // Beside the zoom controls: this is the other half of "where am I
+        // looking", and it belongs with them rather than up among the things
+        // that decide what a click draws.
+        addRenderableWidget(Button.builder(Component.literal("Center"),
+                        b -> { panBlocksX = 0; panBlocksZ = 0; sampleTerrain(); })
+                .bounds(zoomX + 110, footerY, 52, rowH)
                 .build());
 
         addRenderableWidget(Button.builder(Component.translatable("gui.skyport.airport_map.save"), b -> saveAndClose())
