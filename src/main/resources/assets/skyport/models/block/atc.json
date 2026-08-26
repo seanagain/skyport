@@ -1,6 +1,5 @@
 {
-  "__comment": "Control tower: a chunky plinth, a short wide shaft, and a cabin that only slightly overhangs.",
-  "__comment2": "Every face uses the WHOLE texture rather than a slice of it. The block textures are complete framed panels - brass border around a screen - so taking a rectangle out of one yields a stripe of border or a fragment of screen, which is what made the first attempt look broken. Showing each element a whole panel reads as stacked casings instead, which is at least deliberate. Proper part-textures would be better and are the real fix.",
+  "credit": "Skyport - Air Traffic Control. Plinth, shaft, overhanging cabin. Faces map the whole texture rather than a slice: the block textures are complete framed panels, so any sub-rectangle comes out as a stripe of border or a fragment of screen.",
   "parent": "block/block",
   "textures": {
     "particle": "skyport:block/atc_side",
@@ -9,40 +8,40 @@
   },
   "elements": [
     {
-      "__comment": "Plinth - wide and low",
+      "name": "Plinth",
       "from": [1, 0, 1],
       "to": [15, 4, 15],
       "faces": {
         "north": { "uv": [0, 0, 16, 16], "texture": "#side" },
         "south": { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "west":  { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "east":  { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "down":  { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "down" },
-        "up":    { "uv": [0, 0, 16, 16], "texture": "#side" }
+        "west": { "uv": [0, 0, 16, 16], "texture": "#side" },
+        "east": { "uv": [0, 0, 16, 16], "texture": "#side" },
+        "down": { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "down" },
+        "up": { "uv": [0, 0, 16, 16], "texture": "#side" }
       }
     },
     {
-      "__comment": "Shaft - wide enough to carry the cabin without looking like a stem",
+      "name": "Shaft",
       "from": [4, 4, 4],
       "to": [12, 10, 12],
       "faces": {
         "north": { "uv": [0, 0, 16, 16], "texture": "#side" },
         "south": { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "west":  { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "east":  { "uv": [0, 0, 16, 16], "texture": "#side" }
+        "west": { "uv": [0, 0, 16, 16], "texture": "#side" },
+        "east": { "uv": [0, 0, 16, 16], "texture": "#side" }
       }
     },
     {
-      "__comment": "Cabin - a modest overhang, not a mushroom cap",
+      "name": "Cabin",
       "from": [2, 10, 2],
       "to": [14, 16, 14],
       "faces": {
         "north": { "uv": [0, 0, 16, 16], "texture": "#side" },
         "south": { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "west":  { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "east":  { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "down":  { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "up":    { "uv": [0, 0, 16, 16], "texture": "#top", "cullface": "up" }
+        "west": { "uv": [0, 0, 16, 16], "texture": "#side" },
+        "east": { "uv": [0, 0, 16, 16], "texture": "#side" },
+        "down": { "uv": [0, 0, 16, 16], "texture": "#side" },
+        "up": { "uv": [0, 0, 16, 16], "texture": "#top", "cullface": "up" }
       }
     }
   ]

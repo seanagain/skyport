@@ -1,5 +1,5 @@
 {
-  "__comment": "A drafting console: a low casing with the map surface sunk into a raised bezel. This is the block you plan an airport at, so it should read as a table you lean over rather than as a machine - the sunken face is what says 'look down at this'.",
+  "credit": "Skyport - Airport Station. A console with the map surface sunk into a raised bezel. Side faces slice the casing texture so the casing and the bezel above it reconstruct ONE continuous 16px face - giving each piece the whole texture instead squashes a full panel into a 2px band. Only the sunken floor shows the map screen; the bezel tops sample a flat patch of casing, or the screen appears five times.",
   "parent": "block/block",
   "textures": {
     "particle": "skyport:block/airport_station_side",
@@ -8,57 +8,60 @@
   },
   "elements": [
     {
-      "__comment": "Main casing, a whole block minus the recessed top",
+      "name": "Casing",
       "from": [0, 0, 0],
       "to": [16, 14, 16],
       "faces": {
-        "north": { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "north" },
-        "south": { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "south" },
-        "west":  { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "west" },
-        "east":  { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "east" },
-        "down":  { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "down" },
-        "up":    { "uv": [0, 0, 16, 16], "texture": "#top" }
+        "north": { "uv": [0, 2, 16, 16], "texture": "#casing", "cullface": "north" },
+        "south": { "uv": [0, 2, 16, 16], "texture": "#casing", "cullface": "south" },
+        "west": { "uv": [0, 2, 16, 16], "texture": "#casing", "cullface": "west" },
+        "east": { "uv": [0, 2, 16, 16], "texture": "#casing", "cullface": "east" },
+        "down": { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "down" },
+        "up": { "uv": [0, 0, 16, 16], "texture": "#top" }
       }
     },
     {
-      "__comment": "Bezel around the map surface, leaving it recessed",
+      "name": "Bezel north",
       "from": [0, 14, 0],
       "to": [16, 16, 3],
       "faces": {
-        "north": { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "north" },
-        "south": { "uv": [0, 0, 16, 16], "texture": "#casing" },
-        "west":  { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "west" },
-        "east":  { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "east" },
-        "up":    { "uv": [0, 0, 16, 16], "texture": "#top", "cullface": "up" }
+        "north": { "uv": [0, 0, 16, 2], "texture": "#casing", "cullface": "north" },
+        "south": { "uv": [4, 6, 10, 8], "texture": "#casing" },
+        "west": { "uv": [0, 0, 3, 2], "texture": "#casing", "cullface": "west" },
+        "east": { "uv": [13, 0, 16, 2], "texture": "#casing", "cullface": "east" },
+        "up": { "uv": [4, 6, 10, 8], "texture": "#casing", "cullface": "up" }
       }
     },
     {
+      "name": "Bezel south",
       "from": [0, 14, 13],
       "to": [16, 16, 16],
       "faces": {
-        "north": { "uv": [0, 0, 16, 16], "texture": "#casing" },
-        "south": { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "south" },
-        "west":  { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "west" },
-        "east":  { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "east" },
-        "up":    { "uv": [0, 0, 16, 16], "texture": "#top", "cullface": "up" }
+        "north": { "uv": [4, 6, 10, 8], "texture": "#casing" },
+        "south": { "uv": [0, 0, 16, 2], "texture": "#casing", "cullface": "south" },
+        "west": { "uv": [13, 0, 16, 2], "texture": "#casing", "cullface": "west" },
+        "east": { "uv": [0, 0, 3, 2], "texture": "#casing", "cullface": "east" },
+        "up": { "uv": [4, 6, 10, 8], "texture": "#casing", "cullface": "up" }
       }
     },
     {
+      "name": "Bezel west",
       "from": [0, 14, 3],
       "to": [3, 16, 13],
       "faces": {
-        "west":  { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "west" },
-        "east":  { "uv": [0, 0, 16, 16], "texture": "#casing" },
-        "up":    { "uv": [0, 0, 16, 16], "texture": "#top", "cullface": "up" }
+        "west": { "uv": [3, 0, 13, 2], "texture": "#casing", "cullface": "west" },
+        "east": { "uv": [4, 6, 10, 8], "texture": "#casing" },
+        "up": { "uv": [4, 6, 10, 8], "texture": "#casing", "cullface": "up" }
       }
     },
     {
+      "name": "Bezel east",
       "from": [13, 14, 3],
       "to": [16, 16, 13],
       "faces": {
-        "west":  { "uv": [0, 0, 16, 16], "texture": "#casing" },
-        "east":  { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "east" },
-        "up":    { "uv": [0, 0, 16, 16], "texture": "#top", "cullface": "up" }
+        "west": { "uv": [4, 6, 10, 8], "texture": "#casing" },
+        "east": { "uv": [3, 0, 13, 2], "texture": "#casing", "cullface": "east" },
+        "up": { "uv": [4, 6, 10, 8], "texture": "#casing", "cullface": "up" }
       }
     }
   ]

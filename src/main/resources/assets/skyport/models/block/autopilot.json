@@ -1,5 +1,5 @@
 {
-  "__comment": "An avionics box with a raised instrument housing on top. Deliberately still a full cube at the base: this block is bolted to a flying craft that Sable simulates as real blocks, and a model that is visibly smaller than its collision reads as a bug the first time an aircraft clips something. The housing is inset from every edge so the block still tiles cleanly against fuselage plating.",
+  "credit": "Skyport - Autopilot. An instrument box with its face recessed into the top. Nothing stands above y=16: this block is built into a flying craft, and anything proud clips through fuselage plating placed on it. Side faces slice the casing texture so case and rim reconstruct one continuous 16px face; only the sunken floor carries the instrument face.",
   "parent": "block/block",
   "textures": {
     "particle": "skyport:block/autopilot_side",
@@ -8,57 +8,60 @@
   },
   "elements": [
     {
-      "__comment": "The box, stopping short of the top so the instrument face sits in a well",
+      "name": "Case",
       "from": [0, 0, 0],
       "to": [16, 15, 16],
       "faces": {
-        "north": { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "north" },
-        "south": { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "south" },
-        "west":  { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "west" },
-        "east":  { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "east" },
-        "down":  { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "down" },
-        "up":    { "uv": [0, 0, 16, 16], "texture": "#top" }
+        "north": { "uv": [0, 1, 16, 16], "texture": "#side", "cullface": "north" },
+        "south": { "uv": [0, 1, 16, 16], "texture": "#side", "cullface": "south" },
+        "west": { "uv": [0, 1, 16, 16], "texture": "#side", "cullface": "west" },
+        "east": { "uv": [0, 1, 16, 16], "texture": "#side", "cullface": "east" },
+        "down": { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "down" },
+        "up": { "uv": [0, 0, 16, 16], "texture": "#top" }
       }
     },
     {
-      "__comment": "Rim around the instrument face. Recessed rather than proud: anything standing above y=16 would clip straight through fuselage plating placed on top, and this block is meant to be built into an aircraft.",
+      "name": "Rim north",
       "from": [0, 15, 0],
       "to": [16, 16, 3],
       "faces": {
-        "north": { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "north" },
-        "south": { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "west":  { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "west" },
-        "east":  { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "east" },
-        "up":    { "uv": [0, 0, 16, 16], "texture": "#top", "cullface": "up" }
+        "north": { "uv": [0, 0, 16, 1], "texture": "#side", "cullface": "north" },
+        "south": { "uv": [5, 3, 11, 6], "texture": "#side" },
+        "west": { "uv": [0, 0, 3, 1], "texture": "#side", "cullface": "west" },
+        "east": { "uv": [13, 0, 16, 1], "texture": "#side", "cullface": "east" },
+        "up": { "uv": [5, 3, 11, 6], "texture": "#side", "cullface": "up" }
       }
     },
     {
+      "name": "Rim south",
       "from": [0, 15, 13],
       "to": [16, 16, 16],
       "faces": {
-        "north": { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "south": { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "south" },
-        "west":  { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "west" },
-        "east":  { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "east" },
-        "up":    { "uv": [0, 0, 16, 16], "texture": "#top", "cullface": "up" }
+        "north": { "uv": [5, 3, 11, 6], "texture": "#side" },
+        "south": { "uv": [0, 0, 16, 1], "texture": "#side", "cullface": "south" },
+        "west": { "uv": [13, 0, 16, 1], "texture": "#side", "cullface": "west" },
+        "east": { "uv": [0, 0, 3, 1], "texture": "#side", "cullface": "east" },
+        "up": { "uv": [5, 3, 11, 6], "texture": "#side", "cullface": "up" }
       }
     },
     {
+      "name": "Rim west",
       "from": [0, 15, 3],
       "to": [3, 16, 13],
       "faces": {
-        "west": { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "west" },
-        "east": { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "up":   { "uv": [0, 0, 16, 16], "texture": "#top", "cullface": "up" }
+        "west": { "uv": [3, 0, 13, 1], "texture": "#side", "cullface": "west" },
+        "east": { "uv": [5, 3, 11, 6], "texture": "#side" },
+        "up": { "uv": [5, 3, 11, 6], "texture": "#side", "cullface": "up" }
       }
     },
     {
+      "name": "Rim east",
       "from": [13, 15, 3],
       "to": [16, 16, 13],
       "faces": {
-        "west": { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "east": { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "east" },
-        "up":   { "uv": [0, 0, 16, 16], "texture": "#top", "cullface": "up" }
+        "west": { "uv": [5, 3, 11, 6], "texture": "#side" },
+        "east": { "uv": [3, 0, 13, 1], "texture": "#side", "cullface": "east" },
+        "up": { "uv": [5, 3, 11, 6], "texture": "#side", "cullface": "up" }
       }
     }
   ]
