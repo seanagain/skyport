@@ -13,10 +13,43 @@ the listing can be recreated or corrected without reconstructing it from memory.
 | Secondary | Automation, Create-related if the pack offers it |
 | Mod loader | NeoForge |
 | Game version | 1.21.1 |
-| License | LGPL-3.0-or-later (choose "Custom" and link the repo if LGPL-3.0 is not listed) |
+| License | LGPL-3.0-or-later — if the dropdown does not list it, choose "Custom" and paste the block under [Custom license text](#custom-license-text) |
 | Source | https://github.com/seanagain/skyport |
 | Issues | https://github.com/seanagain/skyport/issues |
 | Logo | `branding/logo.png` (512×512) |
+
+## Custom license text
+
+If CurseForge's dropdown has no LGPL-3.0 entry, pick "Custom" and paste this
+verbatim. Do not paste the full LGPL and GPL texts — they run to some 43,000
+characters together, and the box is not the place for them. Naming the licence
+by its SPDX identifier and linking the canonical text is what actually
+identifies it; the summary is explicitly marked informal so it cannot be read
+as altering the terms.
+
+---
+
+Skyport is licensed under the **GNU Lesser General Public License, version 3
+or (at your option) any later version** (SPDX: `LGPL-3.0-or-later`).
+
+Full licence text:
+- LGPL-3.0: https://www.gnu.org/licenses/lgpl-3.0.txt
+- GPL-3.0, which the LGPL extends: https://www.gnu.org/licenses/gpl-3.0.txt
+
+Both are included in the mod's source repository as `LICENSE` and `COPYING`:
+https://github.com/seanagain/skyport
+
+**In plain terms** — informal summary only; the licence text above governs:
+
+- Play with it, and include it in any modpack, public or private, free or
+  paid. No permission needed and none need be asked for.
+- Write a mod that depends on Skyport, and keep your own mod under whatever
+  licence you like. Depending on it does not make your code LGPL.
+- Modify Skyport itself and distribute that, and those modifications must be
+  released under the LGPL as well, with source available.
+- No warranty is given.
+
+---
 
 ## Relations — add all four
 
