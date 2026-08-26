@@ -144,6 +144,49 @@ everything.
 
 Bugs and suggestions welcome on the issue tracker.
 
+### Where it is going
+
+Nothing below is promised or dated. It is the order things are likely to
+happen in, so you can tell whether the mod is heading somewhere you want.
+
+**Finishing the beta**
+
+- Autopilot restricted to actual aircraft, instead of any block
+- The engage packet validated, so open servers are safe
+- In-game guides rewritten for the current editor
+- Terrain on the ATC map for players who have not flown there themselves
+- Engine noise, and radio chatter at the tower
+- Advancements, and a log of completed flights
+
+**More aviation**
+
+- Performance taken from the propellers you actually built, so a heavier
+  aircraft needs a longer runway and a bigger powertrain
+- Wind: a headwind that costs you fuel, a storm that closes a field
+- Villagers as passengers, boarding and disembarking
+- Progressive taxi clearance, so a long taxiway can hold several aircraft in
+  sequence instead of one at a time
+- Diversion to an alternate when the destination is unusable
+- Schedules that keep running without holding chunks open
+
+**Land and sea**
+
+The longer-term direction, and less of a leap than it sounds. The routing
+graph underneath the taxiways is already a road network — directed segments,
+one-way rules, shortest path, junction reservations. Schedules, cargo
+conditions, fuel, the live map and the dispatch system never cared what kind
+of vehicle they were moving.
+
+- Depots and roads for ground vehicles, using that same routing
+- Right of way at junctions, and level crossings with Steam 'n' Rails
+- Harbours, berths and sea lanes for ships, with depth kept under the keel
+- One schedule spanning several vehicles: flown in, trucked to a depot,
+  shipped onward
+- A single dispatcher screen for everything moving, not only what is flying
+
+If a particular one of these matters to you, say so on the issue tracker -
+that is largely how the order gets decided.
+
 ---
 
 ## File upload
