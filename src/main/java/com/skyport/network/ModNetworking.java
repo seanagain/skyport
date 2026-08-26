@@ -97,9 +97,11 @@ public class ModNetworking {
         context.enqueueWork(() -> {
             ServerPlayer player = (ServerPlayer) context.player();
             if (player.level().getBlockEntity(payload.pos()) instanceof AutopilotBlockEntity autopilot) {
-                // TODO: validate the player is actually allowed to control
-                // this autopilot block (distance check, ownership, etc.)
-                // before trusting a client-sent payload.
+                // Known limitation: nothing here checks that this player is
+                // near the block, or entitled to it. On a public server a
+                // crafted packet could engage any autopilot in the world.
+                // A distance and ownership check belongs here before this
+                // runs anywhere untrusted - see the README's known limits.
                 autopilot.engage(payload.schedule(), player);
             }
         });

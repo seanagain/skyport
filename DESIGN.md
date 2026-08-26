@@ -56,14 +56,24 @@ visual mockup of both screens. Summary of the decisions it encodes:
   to expose more than that to the player; the interesting complexity is
   all server-side.
 
-## Open questions for later
+## Resolved since
 
-- Real map background: the mockup fakes terrain with a repeating tile
-  pattern. The real screen should sample `MapItemSavedData` colors (see
-  the TODO in `AirportMapScreen`) - worth revisiting this file's color
-  choices once that's in and you can see real terrain colors under the
-  drawn lines.
-- Whether holding-pattern direction (which way the racetrack turns)
-  needs to be player-chosen or can just always be drawn one way.
-- Gate icons could eventually carry a small glyph per cargo type instead
-  of a bare letter, if that ends up mattering for a busier airport.
+- **Terrain background.** The editor and the tower both sample real
+  `MapColor` values from loaded chunks, with relief shading from the height
+  step to the north, dimmed so it reads as backdrop rather than competing
+  with the drawn lines. Unloaded ground stays a flat blue-grey on purpose:
+  "not surveyed" and "flat terrain" must not look alike.
+- **Holding-pattern direction** is player-chosen, via the CW/CCW button. It
+  turned out to matter — which way a racetrack turns decides whether the
+  pattern sits over a mountain or a valley.
+- **A second runway** needed a colour of its own. Two white lines say nothing
+  about which one arrivals use, and getting that backwards means drawing the
+  final leg to the wrong strip.
+
+## Open questions
+
+- Gate icons could carry a small glyph per cargo type rather than a bare
+  letter, if that ends up mattering at a busy airport.
+- One-way arrowheads are drawn dark, as markings *on* the taxiway rather than
+  as a second line beside it. That reads well at close zoom and is nearly
+  invisible when zoomed out; a scale-aware size might be better.

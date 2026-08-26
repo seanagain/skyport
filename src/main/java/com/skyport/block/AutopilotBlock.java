@@ -27,10 +27,10 @@ import org.jetbrains.annotations.Nullable;
  * entity's flight state machine takes over steering the contraption - see
  * AutopilotBlockEntity for where that actually happens.
  *
- * TODO: this almost certainly needs to require being placed on a valid
- * Create Aeronautics contraption (not just anywhere) - look at how Create
- * Aeronautics' own control seat / helm blocks restrict placement, since
- * this block should follow the same rule.
+ * Known limitation: placement is unrestricted, so this can be put on any
+ * block rather than only on an assembled craft. Convenient while drawing a
+ * layout, wrong for a finished mod - Create Aeronautics' own control seat
+ * and helm blocks are the precedent to follow when tightening it.
  */
 public class AutopilotBlock extends Block implements EntityBlock {
 

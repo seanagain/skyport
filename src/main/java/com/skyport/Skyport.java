@@ -47,8 +47,5 @@ public class Skyport {
         // ModNetworking listens for RegisterPayloadHandlersEvent itself
         // (see @EventBusSubscriber on that class) so nothing to call here -
         // just needs to be class-loaded, which importing it guarantees.
-
-        // TODO: as you add data generation (blockstates/models/loot
-        // tables/recipes), register a GatherDataEvent listener here too.
     }
 }
