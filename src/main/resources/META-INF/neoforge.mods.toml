@@ -7,8 +7,8 @@ issueTrackerURL = "https://github.com/seanagain/skyport/issues"
 modId = "${mod_id}"
 version = "${mod_version}"
 displayName = "${mod_name}"
+logoFile = "logo.png"
 authors = "${mod_authors}"
-logoFile = "skyport_logo.png"
 displayURL = "https://github.com/seanagain/skyport"
 description = '''${mod_description}'''
 
