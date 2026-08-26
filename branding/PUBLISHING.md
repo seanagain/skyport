@@ -28,6 +28,35 @@ CurseForge uses these to fetch dependencies automatically for pack users.
 - Sable
 - (NeoForge and Minecraft versions are set by the file, not by relations)
 
+## Checked against CurseForge moderation policy
+
+The policy is at
+`support.curseforge.com/support/solutions/articles/9000197279-moderation-policies`.
+What it demands of a listing, and how this one answers:
+
+- **Descriptions must be clear, informative and specific.** Vague claims like
+  "changes core game" are grounds for rejection. The description below leads
+  with concrete mechanics — what the blocks do, how traffic is separated, what
+  the survival options cost — rather than adjectives.
+- **Do not copy descriptions from other projects.** Nothing here is lifted
+  from Create or Create Aeronautics. Say what *this* adds, and link the
+  dependencies rather than describing them.
+- **Name must be English and carry no version or technical detail.**
+  "Skyport" qualifies.
+- **AI-modified showcase images that could misrepresent the mod need a visible
+  disclaimer.** The logo is the Airport Station block texture scaled up by
+  whole-number nearest-neighbour — the mod's own art, not a generated image,
+  and not a misrepresentation, so no disclaimer applies. Keep it that way for
+  screenshots: use real gameplay, uncomposited. If a promotional image is ever
+  made that does not reflect what the mod looks like in game, it needs the
+  disclaimer.
+- **Third-party content needs licensing.** Skyport bundles nothing. Its
+  dependencies are declared, not shipped, and are credited in `CREDITS.md`.
+- **Loader compatibility must match across dependencies.** Everything here is
+  NeoForge 1.21.1.
+- **Donation and promotional links belong at the page bottom.** There are none
+  in the copy below; if any are added later, put them last.
+
 ## Summary
 
 Short blurb, ~80 characters. CurseForge shows this under the title in search
@@ -42,76 +71,91 @@ plain bold lines.
 
 ---
 
-**Skyport** is an airport and air-logistics addon for Create Aeronautics.
+**Skyport** adds airports to Create Aeronautics, and aircraft that use them
+without a pilot.
 
-Draw an airport on a map — runway, taxiways, gates, helipads — then give an
-aircraft a schedule. It flies itself, gate to gate, with traffic separation
-and no pilot.
+You draw an airport on a map — runway, taxiways, gates, helipads, holding
+pattern — and give an aircraft a list of stops. It then flies that schedule on
+its own: pushes back from the gate, taxis out, holds short of the runway until
+it is clear, accelerates, rotates, climbs out on the runway heading, cruises to
+the next airport, joins a holding pattern or goes straight in, descends the
+final approach, lands, and taxis to its gate.
 
-Aircraft are flown for real, through Sable's rigid-body physics. Nothing here
-is an animation or a scripted path: they accelerate down the runway, rotate,
-climb out on the runway heading, cruise, join a holding pattern or go straight
-in when the runway is clear, descend the final leg, land, and taxi to a gate.
+The aircraft is flown through Sable's rigid-body physics, the same physics that
+moves it when you fly it yourself. It is steered by force, not teleported along
+a path, so it banks into turns, takes a runway's length to get airborne, and
+can be knocked about on the way.
 
-### Three blocks
+### The three blocks
 
-**Airport Station** — defines one airport. Name it, set its taxi speed, and
-draw its layout on a terrain-accurate map. The airport registers world-wide,
-so any aircraft anywhere can be sent to it. Hold the block after drawing and
-the layout is traced in the world in front of you, so you can build a runway
-where you drew one.
+**Airport Station** — one airport. Name it, set how fast aircraft taxi there,
+and draw its layout on a map that shows the real terrain around it. The airport
+registers world-wide, so any aircraft anywhere can be sent to it. Hold the
+block after drawing and the layout is projected onto the ground in front of
+you, so you can build a runway exactly where you drew one.
 
-**Autopilot** — goes on an assembled aircraft, arrow pointing along the
-fuselage. Pick Plane, Heli or Blimp, set a cruise speed and altitude, and build
-a schedule of stops — each with a departure condition: a timer, a player
-boarding, or cargo being loaded or unloaded. Engage from its screen or with a
-redstone signal.
+**Autopilot** — placed on an assembled aircraft, its arrow along the fuselage.
+Choose Plane, Heli or Blimp, set cruise speed and altitude, and build a
+schedule. Each stop waits for a condition before departing: a timer, a player
+boarding, cargo being loaded, or cargo being unloaded. Engage from its screen,
+or wire it to a redstone signal.
 
-**Air Traffic Control** — one live map of every airport and every aircraft,
-with a strip listing what each one is doing. Point a Create Display Link at it,
-or at a station, for a departures board.
+**Air Traffic Control** — every airport and every aircraft on one live map,
+with a list of what each aircraft is doing right now. Aircraft in unloaded
+chunks are listed separately and can be woken from here. Point a Create Display
+Link at this block, or at a station, to drive a departures board.
 
-### Traffic actually gets separated
+### Aircraft keep out of each other's way
 
-One aircraft per runway, one on the taxiway, one per helipad, and altitude
-separation in the air. Departures wait behind the hold line until the runway
-ahead is clear, the way a train waits at a signal.
+One aircraft on a runway at a time, one on the taxiway, one per helipad, and
+altitude separation in the air. A departure waits behind the hold line until
+the runway ahead is free, the way a train waits at a signal, and an arrival
+holds in the pattern rather than landing on top of someone.
 
-Airports can have a **second runway** used only by departures, so a departure
-stops queueing behind a landing aircraft. Taxiway segments can be made
-**one-way**, so a loop with an inbound and an outbound half lets arrivals and
-departures pass instead of sharing one strip.
+An airport can have a **second runway** that only departures use, so a
+departing aircraft stops queueing behind one that is landing. Taxiway segments
+can be made **one-way**, so a loop with an inbound and an outbound half lets
+arrivals and departures pass instead of sharing a single strip.
 
-### Survival
+### Optional survival cost
 
-Out of the box flight is free, which is right for building and a cheat in
-survival. One config option changes that:
+By default flight costs nothing, which suits creative building. Two config
+options make it cost something:
 
-- **Rotation** — Create rotational force must reach the Autopilot block. Feed
-  it from the powertrain your aircraft already carries.
-- **Fuel** — the autopilot burns furnace fuel from any container aboard. Faster
-  cruise speeds cost more fuel *per block travelled*, not just per second, so
-  choosing a cruise speed is a real decision. Run out mid-flight and it is an
-  engine failure, not a pause: the wings stay level and the aircraft comes down.
+- **Rotation** — Create rotational force has to reach the Autopilot block. Run
+  a shaft or cogwheel to it from the powertrain your aircraft already carries.
+- **Fuel** — the autopilot burns furnace fuel from any container aboard.
+  Flying faster costs more fuel *per block travelled*, not merely per second,
+  so cruise speed becomes a real trade between range and speed. Running dry in
+  flight is an engine failure rather than a pause: the wings stay level, but
+  the aircraft comes down.
 
 ### Requirements
 
-Minecraft 1.21.1, NeoForge 21.1.0+, Create 6.0.0+, Create Aeronautics 1.3.0+,
-and Sable.
+Minecraft 1.21.1 · NeoForge 21.1.0 or newer · Create 6.0.0+ · Create
+Aeronautics 1.3.0+ · Sable
 
-### Beta
+All four are required. Skyport does not bundle them.
 
-This is a first public build. It has been flown end to end — two-runway
-airports, both survival power modes, dedicated servers — but you are among the
-first people other than the author to run it. Known limits are listed in the
-README, including two worth knowing up front: the Autopilot can be placed on
-any block rather than only an assembled craft, and the engage packet is not
-validated, so a public server with untrusted players is not yet a good home
-for it.
+### This is a beta
 
-There are no in-game Ponder guides in this release. The old ones described an
-earlier version of the editor, and a tutorial that is confidently wrong is
-worse than none. The README covers everything.
+A first public build. Two-runway airports, both survival modes, and dedicated
+servers have all been flown end to end, but few people other than the author
+have run it yet.
+
+Two limits worth knowing before you install:
+
+- The Autopilot can currently be placed on any block, not only on an assembled
+  aircraft.
+- The engage packet is not yet validated, so on a public server with untrusted
+  players a crafted packet could start an aircraft that is not theirs. Fine for
+  single-player and private servers; not yet suited to an open one.
+
+There are no in-game Ponder guides in this release. The previous ones described
+an older version of the layout editor, and a guide that is confidently wrong is
+worse than none — the README covers everything instead.
+
+Bug reports and suggestions are welcome on the issue tracker.
 
 ---
 
