@@ -1,6 +1,65 @@
 {
-  "parent": "minecraft:block/cube_all",
+  "__comment": "A drafting console: a low casing with the map surface sunk into a raised bezel. This is the block you plan an airport at, so it should read as a table you lean over rather than as a machine - the sunken face is what says 'look down at this'.",
+  "parent": "block/block",
   "textures": {
-    "all": "skyport:block/airport_station"
-  }
+    "particle": "skyport:block/airport_station_side",
+    "casing": "skyport:block/airport_station_side",
+    "top": "skyport:block/airport_station"
+  },
+  "elements": [
+    {
+      "__comment": "Main casing, a whole block minus the recessed top",
+      "from": [0, 0, 0],
+      "to": [16, 14, 16],
+      "faces": {
+        "north": { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "north" },
+        "south": { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "south" },
+        "west":  { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "west" },
+        "east":  { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "east" },
+        "down":  { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "down" },
+        "up":    { "uv": [0, 0, 16, 16], "texture": "#top" }
+      }
+    },
+    {
+      "__comment": "Bezel around the map surface, leaving it recessed",
+      "from": [0, 14, 0],
+      "to": [16, 16, 3],
+      "faces": {
+        "north": { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "north" },
+        "south": { "uv": [0, 0, 16, 16], "texture": "#casing" },
+        "west":  { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "west" },
+        "east":  { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "east" },
+        "up":    { "uv": [0, 0, 16, 16], "texture": "#top", "cullface": "up" }
+      }
+    },
+    {
+      "from": [0, 14, 13],
+      "to": [16, 16, 16],
+      "faces": {
+        "north": { "uv": [0, 0, 16, 16], "texture": "#casing" },
+        "south": { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "south" },
+        "west":  { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "west" },
+        "east":  { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "east" },
+        "up":    { "uv": [0, 0, 16, 16], "texture": "#top", "cullface": "up" }
+      }
+    },
+    {
+      "from": [0, 14, 3],
+      "to": [3, 16, 13],
+      "faces": {
+        "west":  { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "west" },
+        "east":  { "uv": [0, 0, 16, 16], "texture": "#casing" },
+        "up":    { "uv": [0, 0, 16, 16], "texture": "#top", "cullface": "up" }
+      }
+    },
+    {
+      "from": [13, 14, 3],
+      "to": [16, 16, 13],
+      "faces": {
+        "west":  { "uv": [0, 0, 16, 16], "texture": "#casing" },
+        "east":  { "uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "east" },
+        "up":    { "uv": [0, 0, 16, 16], "texture": "#top", "cullface": "up" }
+      }
+    }
+  ]
 }
