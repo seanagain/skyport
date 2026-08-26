@@ -81,12 +81,18 @@ public final class LayoutProjector {
         // glowing at everyone standing near it.
         if (!isHoldingStation(player)) return;
 
-        trace(level, player, showing.waypoints(Waypoint.Type.RUNWAY), RUNWAY, false);
+        // Pairs, not a path: with two runways drawn, tracing them as one
+        // connected line put a stripe across the airfield joining the end of
+        // one to the start of the other.
+        traceSegmentPairs(level, player, showing.waypoints(Waypoint.Type.RUNWAY), RUNWAY);
         traceSegmentPairs(level, player, showing.waypoints(Waypoint.Type.TAXIWAY), TAXIWAY);
         trace(level, player, showing.waypoints(Waypoint.Type.FINAL_LEG), FINAL_LEG, false);
         trace(level, player, showing.waypoints(Waypoint.Type.HOLDING_PATTERN), PATTERN, true);
         markers(level, player, showing.gates(), GATE);
         markers(level, player, showing.helipads(), PAD);
+        // Hold lines are pairs too - draw the line across the taxiway, and
+        // a pillar at each end so it is findable from the ground.
+        traceSegmentPairs(level, player, showing.waypoints(Waypoint.Type.HOLD_SHORT), HOLD);
         for (Waypoint hold : showing.waypoints(Waypoint.Type.HOLD_SHORT)) {
             pillar(level, player, hold.pos(), HOLD);
         }

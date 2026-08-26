@@ -1,4 +1,4 @@
-# Skyport (working title)
+# Skyport
 
 A Create Aeronautics addon: draw an airport's runway, taxiways, gates and
 holding pattern on a map at an **Airport Station** block, then set a
