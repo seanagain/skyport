@@ -220,6 +220,12 @@ Each of these is a reasonable next step rather than an oversight:
 
 ## Build status
 
+**1.0.0-beta.1.** Two runways, fuel and rotation power modes have all been
+flown end to end; the dedicated server boots clean; `./gradlew test` is green.
+Ponder scenes are deliberately switched off for this release - see
+`PonderRegistration` - because they describe an older version of the editor.
+
+
 This **builds and runs** (`./gradlew build`, `./gradlew runClient`) against
 a real NeoForge/Create toolchain, and both blocks show up and work in game.
 
