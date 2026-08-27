@@ -3,10 +3,12 @@ package com.skyport.client;
 import com.skyport.client.gui.AirportStationScreen;
 import com.skyport.client.gui.AtcScreen;
 import com.skyport.client.gui.AutopilotScreen;
+import com.skyport.client.gui.PasscodeScreen;
 import com.skyport.network.AtcTrafficPayload;
 import com.skyport.network.OpenAirportMapPayload;
 import com.skyport.network.OpenAtcPayload;
 import com.skyport.network.OpenAutopilotPayload;
+import com.skyport.network.OpenPasscodePayload;
 import net.minecraft.client.Minecraft;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
@@ -52,6 +54,12 @@ public final class ClientPayloadHandlers {
         context.enqueueWork(() ->
                 Minecraft.getInstance().setScreen(
                         new AtcScreen(payload.atcPos(), payload.airports(), payload.traffic())));
+    }
+
+    public static void openPasscode(OpenPasscodePayload payload, IPayloadContext context) {
+        context.enqueueWork(() ->
+                Minecraft.getInstance().setScreen(new PasscodeScreen(
+                        payload.pos(), payload.setting(), payload.hasCode(), payload.label())));
     }
 
     public static void openAutopilot(OpenAutopilotPayload payload, IPayloadContext context) {

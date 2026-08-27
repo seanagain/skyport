@@ -117,6 +117,27 @@ enough to finish a gate wait and get moving. Everything about this is
 configurable, including off; `performance.chunkRadius` is the single biggest
 cost this mod imposes on a server.
 
+## Locks
+
+An Airport Station or Autopilot belongs to whoever placed it. Nobody else can
+open it, change it, engage it, or break it — the last one matters most, since
+breaking a station deletes its airport and every aircraft heading there loses
+its destination.
+
+To let someone else in, **sneak + right-click** the block with both hands empty
+and set a passcode. Anyone who enters it can use that block, and anything else
+you locked with the same code, until the server restarts. Only the owner can
+change or remove the code — knowing a code gets you into a block, not into its
+lock.
+
+Server operators always have access. Blocks placed before this existed have no
+owner recorded and stay open to everyone; break and replace one to claim it.
+The whole thing is `protection.protectBlocks` in the config, on by default.
+
+The checks run on the server for every action, not in the screen — the screen
+only produces packets, and a modified client can produce them without ever
+opening anything. Turning the setting off turns off that enforcement too.
+
 ## Known limits
 
 - **Terrain on the maps is client-side**, sampled from loaded chunks and
@@ -124,9 +145,9 @@ cost this mod imposes on a server.
 - **Waypoints have no altitude of their own** except the holding pattern.
   Everything else sits at the station's height.
 - **The Autopilot can be placed on anything**, not only an assembled craft.
-- **The engage packet is not validated**, so on a public server a crafted
-  packet could engage any autopilot. Fine for single-player and trusted
-  servers; worth knowing before running it anywhere open.
+- **Locks stop players, not explosions.** A creeper or a TNT cannon will still
+  take out a locked block; the check runs on the break event, which a blast
+  does not go through.
 - **Ponder scenes are switched off** in this release. They described an older
   version of the editor, and a tutorial that is confidently wrong is worse
   than none.

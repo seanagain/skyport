@@ -9,6 +9,13 @@
   "gui.skyport.airport_station.save": "Save & Close",
   "gui.skyport.airport_station.edit_map": "Edit Map",
 
+  "gui.skyport.passcode.set_title": "Set Passcode",
+  "gui.skyport.passcode.enter_title": "Locked",
+  "gui.skyport.passcode.field": "Passcode",
+  "gui.skyport.passcode.save": "Set",
+  "gui.skyport.passcode.unlock": "Unlock",
+  "gui.skyport.passcode.clear": "Remove Passcode",
+
   "gui.skyport.airport_map.title": "Airport Layout",
   "gui.skyport.airport_map.save": "Save",
   "gui.skyport.airport_map.clear": "Clear",

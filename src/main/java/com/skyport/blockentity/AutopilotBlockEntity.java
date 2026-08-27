@@ -77,7 +77,14 @@ import java.util.UUID;
  * aircraft is: on the ground away from any drawn infrastructure it refuses
  * and says where to tow it, and mid-air it picks up from the climb.
  */
-public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubLevelActor {
+public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubLevelActor, com.skyport.data.Lockable {
+
+    private final com.skyport.data.BlockLock lock = new com.skyport.data.BlockLock();
+
+    @Override
+    public com.skyport.data.BlockLock skyportLock() {
+        return lock;
+    }
 
     public enum FlightState {
         IDLE, PUSHBACK, TAXI_OUT, TAKEOFF_ROLL, CLIMB, CRUISE, HOLDING, APPROACH, TAXI_IN, WAITING,
@@ -2927,6 +2934,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // not transient flight state, and losing it on reload would mean
         // retyping the whole itinerary.
         tag.put("schedule", schedule.save());
+        lock.save(tag);
         tag.putInt("scheduleIndex", scheduleIndex);
         if (controllingPlayerId != null) tag.putUUID("controllingPlayerId", controllingPlayerId);
         if (planeId != null) tag.putUUID("planeId", planeId);
@@ -2946,6 +2954,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     @Override
     protected void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
         super.loadAdditional(tag, registries);
+        lock.load(tag);
         if (tag.contains("schedule")) schedule = FlightSchedule.load(tag.getCompound("schedule"));
         scheduleIndex = tag.getInt("scheduleIndex");
         if (tag.hasUUID("controllingPlayerId")) controllingPlayerId = tag.getUUID("controllingPlayerId");

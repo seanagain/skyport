@@ -21,7 +21,14 @@ import java.util.UUID;
  * keeping it registered in the world's {@link AirportRegistry} so the
  * autopilot GUI can find it from anywhere.
  */
-public class AirportStationBlockEntity extends BlockEntity {
+public class AirportStationBlockEntity extends BlockEntity implements com.skyport.data.Lockable {
+
+    private final com.skyport.data.BlockLock lock = new com.skyport.data.BlockLock();
+
+    @Override
+    public com.skyport.data.BlockLock skyportLock() {
+        return lock;
+    }
 
     @org.jetbrains.annotations.Nullable
     private UUID airportId;
@@ -86,11 +93,13 @@ public class AirportStationBlockEntity extends BlockEntity {
     protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
         super.saveAdditional(tag, registries);
         if (airportId != null) tag.putUUID("airportId", airportId);
+        lock.save(tag);
     }
 
     @Override
     protected void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
         super.loadAdditional(tag, registries);
         if (tag.hasUUID("airportId")) airportId = tag.getUUID("airportId");
+        lock.load(tag);
     }
 }

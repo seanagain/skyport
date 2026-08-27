@@ -157,6 +157,14 @@ Flight is free by default, which is right for building. Two options are not:
   against range. Run dry mid-flight and it is an engine failure, not a pause:
   wings level, and down you go.
 
+### On a shared server
+
+Airport Stations and Autopilots belong to whoever placed them. Nobody else can
+open one, engage it, or break it — and breaking a station would take its airport
+down with every flight routed there. Sneak + right-click to set a passcode and
+let other people in. Operators always have access, and the whole thing switches
+off in the config for a server where everyone is trusted.
+
 ### Requirements
 
 Minecraft 1.21.1 · NeoForge 21.1.0+ · Create 6.0.0+ · Create Aeronautics
@@ -165,11 +173,9 @@ Minecraft 1.21.1 · NeoForge 21.1.0+ · Create 6.0.0+ · Create Aeronautics
 ### It is a beta
 
 Two-runway airports, both survival modes and dedicated servers have been flown
-end to end, but hardly anyone outside the author has run this yet. Two limits
+end to end, but hardly anyone outside the author has run this yet. One limit
 before you install: the Autopilot can be placed on any block rather than only
-on an aircraft, and the engage packet is not yet validated, so an open server
-with untrusted players is not a good home for it. Single-player and private
-servers are fine.
+on an aircraft.
 
 No in-game Ponder guides this release — the old ones described an older editor,
 and a guide that is confidently wrong is worse than none. The README has
@@ -185,7 +191,7 @@ happen in, so you can tell whether the mod is heading somewhere you want.
 **Finishing the beta**
 
 - Autopilot restricted to actual aircraft, instead of any block
-- The engage packet validated, so open servers are safe
+- Trusted access lists, so a group can share an airport without sharing a code
 - In-game guides rewritten for the current editor
 - Terrain on the ATC map for players who have not flown there themselves
 - Engine noise, and radio chatter at the tower

@@ -63,11 +63,32 @@ public class AutopilotBlock extends Block implements EntityBlock {
         return defaultBlockState().setValue(FACING, context.getHorizontalDirection());
     }
 
+    /** Remember who put it down - see BlockLock. */
+    @Override
+    public void setPlacedBy(Level level, BlockPos pos, BlockState state,
+                            @Nullable net.minecraft.world.entity.LivingEntity placer,
+                            net.minecraft.world.item.ItemStack stack) {
+        super.setPlacedBy(level, pos, state, placer, stack);
+        if (level.isClientSide || !(placer instanceof ServerPlayer player)) return;
+        if (level.getBlockEntity(pos) instanceof AutopilotBlockEntity autopilot) {
+            autopilot.skyportLock().claim(player.getUUID(), player.getGameProfile().getName());
+            autopilot.setChanged();
+            LockInteraction.announceClaim(player, "Autopilot");
+        }
+    }
+
     @Override
     public InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
         if (!level.isClientSide && level.getBlockEntity(pos) instanceof AutopilotBlockEntity autopilot) {
             if (player instanceof ServerPlayer serverPlayer) {
-                autopilot.openDestinationPicker(serverPlayer);
+                // Sneaking is how the owner reaches the lock itself; a plain
+                // right-click is the ordinary way in, which the lock may
+                // refuse or answer with a passcode box.
+                if (serverPlayer.isShiftKeyDown()) {
+                    LockInteraction.administer(serverPlayer, autopilot, pos, "Autopilot");
+                } else if (LockInteraction.mayOpen(serverPlayer, autopilot, pos, "Autopilot")) {
+                    autopilot.openDestinationPicker(serverPlayer);
+                }
             }
             return InteractionResult.CONSUME;
         }

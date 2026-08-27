@@ -6,7 +6,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.EntityBlock;
@@ -54,11 +56,31 @@ public class AirportStationBlock extends Block implements EntityBlock {
         super.onRemove(state, level, pos, newState, movedByPiston);
     }
 
+    /** Remember who put it down - see BlockLock. */
+    @Override
+    public void setPlacedBy(Level level, BlockPos pos, BlockState state,
+                            @Nullable LivingEntity placer, ItemStack stack) {
+        super.setPlacedBy(level, pos, state, placer, stack);
+        if (level.isClientSide || !(placer instanceof ServerPlayer player)) return;
+        if (level.getBlockEntity(pos) instanceof AirportStationBlockEntity station) {
+            station.skyportLock().claim(player.getUUID(), player.getGameProfile().getName());
+            station.setChanged();
+            LockInteraction.announceClaim(player, "Airport Station");
+        }
+    }
+
     @Override
     public InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
         if (!level.isClientSide && level.getBlockEntity(pos) instanceof AirportStationBlockEntity station) {
             if (player instanceof ServerPlayer serverPlayer) {
-                station.openMapEditor(serverPlayer);
+                // Sneaking is how the owner reaches the lock itself; a plain
+                // right-click is the ordinary way in, which the lock may
+                // refuse or answer with a passcode box.
+                if (serverPlayer.isShiftKeyDown()) {
+                    LockInteraction.administer(serverPlayer, station, pos, "Airport Station");
+                } else if (LockInteraction.mayOpen(serverPlayer, station, pos, "Airport Station")) {
+                    station.openMapEditor(serverPlayer);
+                }
             }
             return InteractionResult.CONSUME;
         }

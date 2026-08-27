@@ -177,7 +177,24 @@ public final class SkyportConfig {
                      "retuned burns exactly what it always did.")
             .defineInRange("survival.fuelReferenceSpeed", 24, 4, 80);
 
+    public static final ModConfigSpec.BooleanValue PROTECT_BLOCKS = BUILDER
+            .comment("Lock the Airport Station and Autopilot to the player who placed them.",
+                     "",
+                     "On (default): only the owner, a server operator, or someone who",
+                     "knows the block's passcode can open it, change it, or break it.",
+                     "Blocks placed before this setting existed have no owner recorded",
+                     "and stay open to everyone - break and replace one to claim it.",
+                     "",
+                     "Off: anyone can use anything, as the mod behaved before. Reasonable",
+                     "on a single-player world or a server where everyone is trusted.",
+                     "",
+                     "This is enforced on the server for every action, not just in the",
+                     "screen, so it holds against a modified client. Turning it off also",
+                     "turns off that enforcement.")
+            .define("protection.protectBlocks", true);
+
     public static final ModConfigSpec SPEC = BUILDER.build();
+
 
     private SkyportConfig() { }
 
@@ -199,6 +216,7 @@ public final class SkyportConfig {
     public static double fuelEfficiency = 1.0;
     public static double fuelSpeedExponent = 2.0;
     public static int fuelReferenceSpeed = 24;
+    public static boolean protectBlocks = true;
 
     public static void refresh() {
         chatMessages = CHAT_MESSAGES.get();
@@ -217,5 +235,6 @@ public final class SkyportConfig {
         fuelEfficiency = FUEL_EFFICIENCY.get();
         fuelSpeedExponent = FUEL_SPEED_EXPONENT.get();
         fuelReferenceSpeed = FUEL_REFERENCE_SPEED.get();
+        protectBlocks = PROTECT_BLOCKS.get();
     }
 }
