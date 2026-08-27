@@ -161,8 +161,8 @@ Flight is free by default, which is right for building. Two options are not:
 
 Airport Stations and Autopilots belong to whoever placed them. Nobody else can
 open one, engage it, or break it — and breaking a station would take its airport
-down with every flight routed there. Sneak + right-click to set a passcode and
-let other people in. Operators always have access, and the whole thing switches
+down with every flight routed there. Open one and press Passcode to let
+somebody else in. Operators always have access, and the whole thing switches
 off in the config for a server where everyone is trusted.
 
 ### Requirements

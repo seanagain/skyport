@@ -15,6 +15,7 @@
   "gui.skyport.passcode.save": "Set",
   "gui.skyport.passcode.unlock": "Unlock",
   "gui.skyport.passcode.clear": "Remove Passcode",
+  "gui.skyport.passcode.button": "Passcode",
 
   "gui.skyport.airport_map.title": "Airport Layout",
   "gui.skyport.airport_map.save": "Save",

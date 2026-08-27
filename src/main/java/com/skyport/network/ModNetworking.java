@@ -87,6 +87,11 @@ public class ModNetworking {
                 PasscodePayload.STREAM_CODEC,
                 ModNetworking::handlePasscode);
 
+        registrar.playToServer(
+                LockRequestPayload.TYPE,
+                LockRequestPayload.STREAM_CODEC,
+                ModNetworking::handleLockRequest);
+
         registrar.playToClient(
                 AtcTrafficPayload.TYPE,
                 AtcTrafficPayload.STREAM_CODEC,
@@ -201,6 +206,33 @@ public class ModNetworking {
             PacketDistributor.sendToPlayer(player, new AtcTrafficPayload(
                     List.copyOf(registry.all()),
                     List.copyOf(registry.allTraffic(player.serverLevel().getGameTime()))));
+        });
+    }
+
+    /**
+     * The owner asking for the passcode box, from the button inside the
+     * block's own screen.
+     *
+     * The check is here and not on the button. The button only knows that
+     * somebody clicked it; whether that person may set a code on this block
+     * is the server's to answer, and answering it anywhere else would mean
+     * a modified client could open a lock it does not own - which is the
+     * one thing a lock has to refuse.
+     */
+    private static void handleLockRequest(LockRequestPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            ServerPlayer player = (ServerPlayer) context.player();
+            if (!(player.level().getBlockEntity(payload.pos()) instanceof Lockable lockable)) return;
+            BlockLock lock = lockable.skyportLock();
+
+            if (!AccessControl.mayAdminister(player, lock)) {
+                player.sendSystemMessage(Component.literal(
+                        "[Skyport] Only " + lock.ownerName() + " can change this lock."));
+                return;
+            }
+            String label = lockable instanceof AirportStationBlockEntity ? "Airport Station" : "Autopilot";
+            PacketDistributor.sendToPlayer(player,
+                    new OpenPasscodePayload(payload.pos(), true, lock.hasPasscode(), label));
         });
     }
 

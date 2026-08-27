@@ -137,9 +137,17 @@ public class AutopilotScreen extends Screen {
         addRenderableWidget(Button.builder(Component.literal("+"), b -> adjustCruiseSpeed(4))
                 .bounds(left + half + 26 + valueW + 2, top + 96, 20, 20).build());
 
+        // Shares the row with Engage rather than adding one below it, so the
+        // panel does not grow a line taller and start clipping off the
+        // bottom of a small window.
+        int lockW = 80;
         engageButton = addRenderableWidget(Button.builder(Component.translatable("gui.skyport.autopilot.engage"),
                         b -> engage())
-                .bounds(left, top + 120, panelW, 20).build());
+                .bounds(left, top + 120, panelW - lockW - 4, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("gui.skyport.passcode.button"),
+                        b -> net.neoforged.neoforge.network.PacketDistributor.sendToServer(
+                                new com.skyport.network.LockRequestPayload(autopilotPos)))
+                .bounds(left + panelW - lockW, top + 120, lockW, 20).build());
 
         // Seed with one stop so there's something to edit immediately - an
         // empty schedule with every control disabled is a confusing landing.

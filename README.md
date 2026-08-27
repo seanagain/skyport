@@ -124,8 +124,8 @@ open it, change it, engage it, or break it — the last one matters most, since
 breaking a station deletes its airport and every aircraft heading there loses
 its destination.
 
-To let someone else in, **sneak + right-click** the block with both hands empty
-and set a passcode. Anyone who enters it can use that block, and anything else
+To let someone else in, open the block and press **Passcode**. Anyone who
+enters it can use that block, and anything else
 you locked with the same code, until the server restarts. Only the owner can
 change or remove the code — knowing a code gets you into a block, not into its
 lock.

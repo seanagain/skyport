@@ -74,6 +74,16 @@ public class AirportStationScreen extends Screen {
                         b -> saveAndClose())
                 .bounds(left, top + 74, boxW, 20)
                 .build());
+
+        // Reaching the lock through the screen rather than through sneak +
+        // right-click: sneaking only reaches a block when both hands are
+        // empty, and the player is nearly always still holding the block
+        // they just placed.
+        addRenderableWidget(Button.builder(Component.translatable("gui.skyport.passcode.button"),
+                        b -> PacketDistributor.sendToServer(
+                                new com.skyport.network.LockRequestPayload(stationPos)))
+                .bounds(left, top + 98, boxW, 20)
+                .build());
     }
 
     private Component taxiSpeedLabel() {
