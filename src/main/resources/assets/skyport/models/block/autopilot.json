@@ -1,5 +1,5 @@
 {
-  "credit": "Skyport - Autopilot. An instrument box with its face recessed into the top. Nothing stands above y=16: this block is built into a flying craft, and anything proud clips through fuselage plating placed on it. Side faces slice the casing texture so case and rim reconstruct one continuous 16px face; only the sunken floor carries the instrument face.",
+  "credit": "Skyport - Autopilot. An instrument box with its face recessed into the top. Nothing stands above y=16: this block is built into a flying craft, and anything proud clips through fuselage plating placed on it. Every face samples the patch of texture that lies where it sits, so case and rim reconstruct one continuous surface; each rim's TOP samples the texture in plan - north rows 0-3, west columns 0-3 - so the brass edging turns the corner onto the top of the block and meets the brass line on the wall below it. Only the sunken floor carries the instrument face.",
   "parent": "block/block",
   "textures": {
     "particle": "skyport:block/autopilot_side",
@@ -29,7 +29,7 @@
         "south": { "uv": [5, 3, 11, 6], "texture": "#side" },
         "west": { "uv": [0, 0, 3, 1], "texture": "#side", "cullface": "west" },
         "east": { "uv": [13, 0, 16, 1], "texture": "#side", "cullface": "east" },
-        "up": { "uv": [5, 3, 11, 6], "texture": "#side", "cullface": "up" }
+        "up": { "uv": [0, 0, 16, 3], "texture": "#side", "cullface": "up" }
       }
     },
     {
@@ -41,7 +41,7 @@
         "south": { "uv": [0, 0, 16, 1], "texture": "#side", "cullface": "south" },
         "west": { "uv": [13, 0, 16, 1], "texture": "#side", "cullface": "west" },
         "east": { "uv": [0, 0, 3, 1], "texture": "#side", "cullface": "east" },
-        "up": { "uv": [5, 3, 11, 6], "texture": "#side", "cullface": "up" }
+        "up": { "uv": [0, 13, 16, 16], "texture": "#side", "cullface": "up" }
       }
     },
     {
@@ -51,7 +51,7 @@
       "faces": {
         "west": { "uv": [3, 0, 13, 1], "texture": "#side", "cullface": "west" },
         "east": { "uv": [5, 3, 11, 6], "texture": "#side" },
-        "up": { "uv": [5, 3, 11, 6], "texture": "#side", "cullface": "up" }
+        "up": { "uv": [0, 3, 3, 13], "texture": "#side", "cullface": "up" }
       }
     },
     {
@@ -61,7 +61,7 @@
       "faces": {
         "west": { "uv": [5, 3, 11, 6], "texture": "#side" },
         "east": { "uv": [3, 0, 13, 1], "texture": "#side", "cullface": "east" },
-        "up": { "uv": [5, 3, 11, 6], "texture": "#side", "cullface": "up" }
+        "up": { "uv": [13, 3, 16, 13], "texture": "#side", "cullface": "up" }
       }
     }
   ]

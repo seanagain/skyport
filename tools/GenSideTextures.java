@@ -32,6 +32,21 @@ public class GenSideTextures {
     static final int BRASS = 0xFFDEB060;
     static final int BRASS_DARK = 0xFFA37A3A;
 
+    /**
+     * The outer three pixels of every face are reserved; detail belongs
+     * inside FEATURE_MIN..FEATURE_MAX.
+     *
+     * Not an aesthetic margin. The station and the autopilot both have a
+     * raised rim around a sunken screen, and that rim's TOP surface samples
+     * this texture in plan - the north rim takes rows 0-3, the west rim takes
+     * columns 0-3, and so on, so that the brass edging carries round the top
+     * of the block and meets the brass line on the wall below it. Anything
+     * drawn in that ring lands on the rim as well, which is how a nameplate
+     * ends up smeared across the top of the console.
+     */
+    static final int FEATURE_MIN = 3;
+    static final int FEATURE_MAX = 12;
+
     public static void main(String[] args) throws Exception {
         File dir = new File(args.length > 0 ? args[0] : ".");
         dir.mkdirs();
@@ -52,7 +67,7 @@ public class GenSideTextures {
         // below it. Two features, not four: at sixteen pixels a face holds
         // very little before it turns to noise, and the first attempt read
         // as a radiator because the vents filled half of it.
-        for (int x = 3; x <= 12; x++) {
+        for (int x = FEATURE_MIN; x <= FEATURE_MAX; x++) {
             set(t, x, 4, BRASS);
             set(t, x, 5, BRASS_DARK);
         }
@@ -73,13 +88,15 @@ public class GenSideTextures {
         brassFrame(t);
 
         // Horizontal seam where the two halves of the case meet.
-        for (int x = 2; x <= 13; x++) {
+        for (int x = FEATURE_MIN; x <= FEATURE_MAX; x++) {
             set(t, x, 7, ANDESITE_DARK);
             set(t, x, 8, ANDESITE_LIGHT);
         }
 
-        // Bolts at each corner of the panel.
-        int[][] bolts = { { 3, 3 }, { 12, 3 }, { 3, 12 }, { 12, 12 } };
+        // Bolts at each corner of the panel. The lower pair sit at y=11, not
+        // y=12, because each bolt is two pixels tall and the shadow pixel
+        // would otherwise fall in the reserved ring.
+        int[][] bolts = { { 3, 3 }, { 12, 3 }, { 3, 11 }, { 12, 11 } };
         for (int[] b : bolts) {
             set(t, b[0], b[1], BRASS);
             set(t, b[0], b[1] + 1, BRASS_DARK);
@@ -92,29 +109,30 @@ public class GenSideTextures {
         return t;
     }
 
-    /** The tower shaft: vertical ribs, and a band of windows near the top
-     *  where the cabin sits. */
+    /**
+     * The tower: fluted ribs running the full height of the face.
+     *
+     * The ribs run edge to edge and not part way. atc.json slices this one
+     * texture across three stacked pieces - cabin, shaft, plinth - so
+     * anything that stops short lands as a band on one piece and reads as a
+     * seam between them rather than as one tower. A band of windows drawn
+     * here did exactly that: it sat on the cabin alone and made it look like
+     * a separate object balanced on top. Continuous ribs make the slicing
+     * invisible, which is the whole point of slicing it.
+     *
+     * The reserved ring does not apply here - the tower has no rim, and its
+     * top face is atc_top.
+     */
     static BufferedImage atcSide() {
         BufferedImage t = base();
         brassFrame(t);
 
-        // Structural ribs up the shaft.
         for (int x : new int[] { 4, 7, 10 }) {
-            for (int y = 6; y <= 13; y++) {
+            for (int y = 1; y <= 14; y++) {
                 set(t, x, y, ANDESITE_DARK);
                 set(t, x + 1, y, ANDESITE_LIGHT);
             }
         }
-
-        // Window band - dark glass between brass sills.
-        for (int x = 2; x <= 13; x++) {
-            set(t, x, 2, BRASS_DARK);
-            set(t, x, 5, BRASS_DARK);
-            for (int y = 3; y <= 4; y++) set(t, x, y, 0xFF1D2A33);
-        }
-        // Two lit panes, so the tower looks occupied.
-        set(t, 4, 3, 0xFF6FD3E0);
-        set(t, 10, 4, 0xFF6FD3E0);
         return t;
     }
 
@@ -127,7 +145,7 @@ public class GenSideTextures {
         for (int x = 0; x < 16; x++) {
             for (int y = 0; y < 16; y++) t.setRGB(x, y, ANDESITE);
         }
-        int[][] speckle = { { 3, 6 }, { 11, 4 }, { 6, 13 }, { 13, 9 }, { 2, 10 }, { 9, 2 } };
+        int[][] speckle = { { 3, 6 }, { 11, 4 }, { 6, 12 }, { 12, 9 }, { 4, 10 }, { 9, 3 } };
         for (int i = 0; i < speckle.length; i++) {
             set(t, speckle[i][0], speckle[i][1], i % 2 == 0 ? ANDESITE_DARK : ANDESITE_LIGHT);
         }

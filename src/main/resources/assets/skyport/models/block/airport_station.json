@@ -1,5 +1,5 @@
 {
-  "credit": "Skyport - Airport Station. A console with the map surface sunk into a raised bezel. Side faces slice the casing texture so the casing and the bezel above it reconstruct ONE continuous 16px face - giving each piece the whole texture instead squashes a full panel into a 2px band. Only the sunken floor shows the map screen; the bezel tops sample a flat patch of casing, or the screen appears five times.",
+  "credit": "Skyport - Airport Station. A console with the map surface sunk into a raised bezel. Every face samples the patch of texture that lies where it sits, so the pieces reconstruct one continuous surface instead of each wearing a copy: the walls take rows 2-16 and the bezel the two rows above them, and each bezel's TOP samples the texture in plan - north rows 0-3, west columns 0-3 - so the brass edging turns the corner onto the top of the block and meets the brass line running along the wall below it. Give a piece the whole texture instead and a full 16px panel is squashed into a 2px band. Only the sunken floor shows the map screen, or the screen appears five times.",
   "parent": "block/block",
   "textures": {
     "particle": "skyport:block/airport_station_side",
@@ -29,7 +29,7 @@
         "south": { "uv": [4, 6, 10, 8], "texture": "#casing" },
         "west": { "uv": [0, 0, 3, 2], "texture": "#casing", "cullface": "west" },
         "east": { "uv": [13, 0, 16, 2], "texture": "#casing", "cullface": "east" },
-        "up": { "uv": [4, 6, 10, 8], "texture": "#casing", "cullface": "up" }
+        "up": { "uv": [0, 0, 16, 3], "texture": "#casing", "cullface": "up" }
       }
     },
     {
@@ -41,7 +41,7 @@
         "south": { "uv": [0, 0, 16, 2], "texture": "#casing", "cullface": "south" },
         "west": { "uv": [13, 0, 16, 2], "texture": "#casing", "cullface": "west" },
         "east": { "uv": [0, 0, 3, 2], "texture": "#casing", "cullface": "east" },
-        "up": { "uv": [4, 6, 10, 8], "texture": "#casing", "cullface": "up" }
+        "up": { "uv": [0, 13, 16, 16], "texture": "#casing", "cullface": "up" }
       }
     },
     {
@@ -51,7 +51,7 @@
       "faces": {
         "west": { "uv": [3, 0, 13, 2], "texture": "#casing", "cullface": "west" },
         "east": { "uv": [4, 6, 10, 8], "texture": "#casing" },
-        "up": { "uv": [4, 6, 10, 8], "texture": "#casing", "cullface": "up" }
+        "up": { "uv": [0, 3, 3, 13], "texture": "#casing", "cullface": "up" }
       }
     },
     {
@@ -61,7 +61,7 @@
       "faces": {
         "west": { "uv": [4, 6, 10, 8], "texture": "#casing" },
         "east": { "uv": [3, 0, 13, 2], "texture": "#casing", "cullface": "east" },
-        "up": { "uv": [4, 6, 10, 8], "texture": "#casing", "cullface": "up" }
+        "up": { "uv": [13, 3, 16, 13], "texture": "#casing", "cullface": "up" }
       }
     }
   ]
