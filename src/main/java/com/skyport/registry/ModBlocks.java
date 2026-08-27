@@ -13,7 +13,18 @@ import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
-/** All blocks this addon adds, plus a matching BlockItem for each. */
+/**
+ * All blocks this addon adds, plus a matching BlockItem for each.
+ *
+ * Every one of them sets noOcclusion(), and must keep doing so. None of
+ * these three fills its block space: the tower is inset above its plinth,
+ * and the station and the autopilot both stop short of y=16 except for a
+ * thin rim round the edge. Without noOcclusion() the game still treats
+ * them as solid cubes, so a neighbour culls the face it shares with one -
+ * and then nothing draws there at all. You get a hole straight through to
+ * the sky, which is what a player sees the moment they place two of these
+ * side by side, or lay fuselage plating over an autopilot.
+ */
 public class ModBlocks {
 
     public static final DeferredRegister.Blocks REGISTER = DeferredRegister.createBlocks(Skyport.MOD_ID);
@@ -28,7 +39,8 @@ public class ModBlocks {
                     .mapColor(MapColor.METAL)
                     .strength(3.5f)
                     .sound(SoundType.METAL)
-                    .requiresCorrectToolForDrops()));
+                    .requiresCorrectToolForDrops()
+                    .noOcclusion()));
 
     // Placed on an assembled Create Aeronautics plane. Right-clicking it
     // opens the destination picker (see AutopilotScreen).
@@ -38,7 +50,8 @@ public class ModBlocks {
                     .mapColor(MapColor.COLOR_LIGHT_BLUE)
                     .strength(2.5f)
                     .sound(SoundType.METAL)
-                    .requiresCorrectToolForDrops()));
+                    .requiresCorrectToolForDrops()
+                    .noOcclusion()));
 
     // The control tower desk - see AtcBlock.
     public static final DeferredBlock<AtcBlock> ATC = REGISTER.register(
@@ -47,7 +60,8 @@ public class ModBlocks {
                     .mapColor(MapColor.COLOR_GREEN)
                     .strength(3.5f)
                     .sound(SoundType.METAL)
-                    .requiresCorrectToolForDrops()));
+                    .requiresCorrectToolForDrops()
+                    .noOcclusion()));
 
     public static final DeferredHolder<Item, BlockItem> AIRPORT_STATION_ITEM = ITEMS.register(
             "airport_station", () -> new BlockItem(AIRPORT_STATION.get(), new Item.Properties()));
