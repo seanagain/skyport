@@ -232,12 +232,40 @@ that is largely how the order gets decided.
 
 | Field | Value |
 | --- | --- |
-| File | `build/libs/skyport-1.0.0-beta.1.jar` |
-| Display name | Skyport 1.0.0-beta.1 |
+| File | `build/libs/skyport-1.0.0-beta.2.jar` |
+| Display name | Skyport 1.0.0-beta.2 |
 | Release type | **Beta** |
 | Game version | 1.21.1 |
 | Loader | NeoForge |
 | Java | 21 |
+
+### Changelog for 1.0.0-beta.2
+
+> **Airports and aircraft now belong to whoever placed them.** Nobody else
+> can open, engage, or break your Airport Station or Autopilot — and breaking
+> a station would have taken its airport down with every flight routed there.
+> Open a block and press Passcode to let someone else in; operators always
+> have access, and it all switches off in the config.
+>
+> The important part is where that is checked. Five packets changed state and
+> none of them verified who sent it, so a modified client could engage any
+> autopilot or overwrite any airport layout in the world without ever opening
+> a screen. Every one is now checked on the server.
+>
+> **Server settings are now binding.** Config was a single COMMON file that
+> loaded on both sides and synced neither, so a server and a client could
+> disagree about the rules. It is now server config, pushed to clients on
+> connect. Still `config/skyport-server.toml`; a per-world override in
+> `<world>/serverconfig/` is optional. One client-only setting moved to
+> `config/skyport-client.toml`.
+>
+> Note: the old `config/skyport-common.toml` is ignored, so anything you
+> changed in it needs setting again.
+>
+> **Better block models.** All three blocks got real geometry and their own
+> side textures instead of wearing the same screen on every face. Fixes a
+> hole straight through to the sky when two of them sat side by side, which
+> came from all three claiming to be solid cubes when none of them is.
 
 ### Changelog for the first file
 
