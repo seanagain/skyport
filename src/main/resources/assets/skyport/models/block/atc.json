@@ -1,5 +1,5 @@
 {
-  "credit": "Skyport - Air Traffic Control. Plinth, shaft and cabin, the plinth full width so it sits flush on the ground rather than leaving a gap round its base, and the shaft flush with the cabin so nothing shows through between them - the tower reads from the plinth step and the window bands instead of from an overhang. Faces map the whole texture rather than a slice: the block textures are complete framed panels, so any sub-rectangle comes out as a stripe of border or a fragment of screen.",
+  "credit": "Skyport - Air Traffic Control. Plinth, shaft and cabin stacked flush, so the block reaches its own boundary at the base and nothing shows through. The three pieces SHARE the side texture between them rather than each taking a copy: plinth gets rows 12-16, shaft rows 6-12, cabin rows 0-6, full width horizontally on every piece so the brass edging runs unbroken up the block. Give every piece the whole texture instead and the window band repeats three times up the tower.",
   "parent": "block/block",
   "textures": {
     "particle": "skyport:block/atc_side",
@@ -12,12 +12,12 @@
       "from": [0, 0, 0],
       "to": [16, 4, 16],
       "faces": {
-        "north": { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "north" },
-        "south": { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "south" },
-        "west": { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "west" },
-        "east": { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "east" },
+        "north": { "uv": [0, 12, 16, 16], "texture": "#side", "cullface": "north" },
+        "south": { "uv": [0, 12, 16, 16], "texture": "#side", "cullface": "south" },
+        "west": { "uv": [0, 12, 16, 16], "texture": "#side", "cullface": "west" },
+        "east": { "uv": [0, 12, 16, 16], "texture": "#side", "cullface": "east" },
         "down": { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "down" },
-        "up": { "uv": [0, 0, 16, 16], "texture": "#side" }
+        "up": { "uv": [12, 7, 14, 9], "texture": "#side" }
       }
     },
     {
@@ -25,10 +25,10 @@
       "from": [2, 4, 2],
       "to": [14, 10, 14],
       "faces": {
-        "north": { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "south": { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "west": { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "east": { "uv": [0, 0, 16, 16], "texture": "#side" }
+        "north": { "uv": [0, 6, 16, 12], "texture": "#side" },
+        "south": { "uv": [0, 6, 16, 12], "texture": "#side" },
+        "west": { "uv": [0, 6, 16, 12], "texture": "#side" },
+        "east": { "uv": [0, 6, 16, 12], "texture": "#side" }
       }
     },
     {
@@ -36,11 +36,10 @@
       "from": [2, 10, 2],
       "to": [14, 16, 14],
       "faces": {
-        "north": { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "south": { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "west": { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "east": { "uv": [0, 0, 16, 16], "texture": "#side" },
-        "down": { "uv": [0, 0, 16, 16], "texture": "#side" },
+        "north": { "uv": [0, 0, 16, 6], "texture": "#side" },
+        "south": { "uv": [0, 0, 16, 6], "texture": "#side" },
+        "west": { "uv": [0, 0, 16, 6], "texture": "#side" },
+        "east": { "uv": [0, 0, 16, 6], "texture": "#side" },
         "up": { "uv": [0, 0, 16, 16], "texture": "#top", "cullface": "up" }
       }
     }
