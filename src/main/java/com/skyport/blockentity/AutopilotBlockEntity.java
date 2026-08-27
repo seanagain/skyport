@@ -358,6 +358,29 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private float pitchDegrees = 0;
     private int tickCounter = 0;
 
+    /**
+     * The tick this aircraft entered its current state, for the phases that
+     * can wait forever without anything being wrong enough to notice.
+     *
+     * Not persisted - it exists to catch a stall inside one run, and after a
+     * reload the aircraft gets a fresh benefit of the doubt.
+     */
+    private transient int stateEnteredTick = 0;
+
+    /**
+     * How long pushback may take before the aircraft gives up on it.
+     *
+     * Pushback drives in a straight reverse line toward a junction on the
+     * taxiway, which is the one manoeuvre here that does not follow the
+     * routing graph - so anything in the way, a stand whose junction sits
+     * somewhere the aircraft cannot reverse to, or a node it can never get
+     * close enough to, leaves it grinding backwards forever. It had no
+     * timeout and no message either, so the failure looked like the mod
+     * doing nothing at all rather than like an aircraft stuck against a
+     * wall. Twenty seconds is far longer than a real pushback here takes.
+     */
+    private static final int PUSHBACK_TIMEOUT_TICKS = 400;
+
     public AutopilotBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.AUTOPILOT.get(), pos, state);
     }
@@ -705,6 +728,17 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                     joinPoint = null;
                     note("Pushback complete.");
                     setState(FlightState.TAXI_OUT);
+                } else if (tickCounter - stateEnteredTick > PUSHBACK_TIMEOUT_TICKS) {
+                    // Never got there. Say so, and taxi forward from wherever
+                    // it actually is rather than reversing into whatever is
+                    // behind it for the rest of the session - pushback is a
+                    // nicety, and the route out is still drivable from here.
+                    message("Could not push back - something is behind the aircraft, or the stand's "
+                            + "taxiway junction is unreachable. Taxiing out from here instead.");
+                    joinPoint = null;
+                    setState(FlightState.TAXI_OUT);
+                } else if (tickCounter % 100 == 0) {
+                    note("Pushing back to " + back.getX() + ", " + back.getZ() + ".");
                 }
             }
             // Taxi out to the hold point without needing clearance, then wait
@@ -1112,6 +1146,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private void setState(FlightState newState) {
         this.state = newState;
         this.currentWaypointIndex = 0;
+        this.stateEnteredTick = tickCounter;
         invalidatePath();
         // Each ground phase starts on the near side of the hold point again:
         // taxiing out hasn't been cleared onto the runway yet, and taxiing in
