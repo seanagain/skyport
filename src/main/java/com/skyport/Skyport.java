@@ -33,19 +33,28 @@ public class Skyport {
         ModBlockEntities.REGISTER.register(modEventBus);
         ModCreativeTabs.register(modEventBus);
 
-        modContainer.registerConfig(ModConfig.Type.COMMON, SkyportConfig.SPEC);
-        // Cache the values whenever the file loads or is edited in game, so
+        // SERVER rather than COMMON, so a server's settings are pushed to
+        // every client that connects and a player editing their own copy
+        // changes nothing. The cost is that this file is per-world, in
+        // <world>/serverconfig/ rather than config/ - see SkyportConfig.
+        modContainer.registerConfig(ModConfig.Type.SERVER, SkyportConfig.SERVER_SPEC);
+        modContainer.registerConfig(ModConfig.Type.CLIENT, SkyportConfig.CLIENT_SPEC);
+
+        // Cache the values whenever a file loads or is edited in game, so
         // the flight code can read plain fields rather than going through the
-        // config machinery on every message and every tick.
-        modEventBus.addListener((ModConfigEvent.Loading event) -> {
-            if (event.getConfig().getSpec() == SkyportConfig.SPEC) SkyportConfig.refresh();
-        });
-        modEventBus.addListener((ModConfigEvent.Reloading event) -> {
-            if (event.getConfig().getSpec() == SkyportConfig.SPEC) SkyportConfig.refresh();
-        });
+        // config machinery on every message and every tick. The two halves
+        // refresh separately: a dedicated server never loads CLIENT_SPEC,
+        // and reading from an unloaded spec throws.
+        modEventBus.addListener((ModConfigEvent.Loading event) -> refresh(event.getConfig()));
+        modEventBus.addListener((ModConfigEvent.Reloading event) -> refresh(event.getConfig()));
 
         // ModNetworking listens for RegisterPayloadHandlersEvent itself
         // (see @EventBusSubscriber on that class) so nothing to call here -
         // just needs to be class-loaded, which importing it guarantees.
+    }
+
+    private static void refresh(ModConfig config) {
+        if (config.getSpec() == SkyportConfig.SERVER_SPEC) SkyportConfig.refreshServer();
+        else if (config.getSpec() == SkyportConfig.CLIENT_SPEC) SkyportConfig.refreshClient();
     }
 }

@@ -85,8 +85,8 @@ lock an airport permanently.
 
 By default flight is free — the autopilot writes velocity onto the craft, so
 an Autopilot on a solid cube of iron flies as well as a real aeroplane. Fine
-for building; a cheat in survival. Set `survival.powerRequirement` in
-`config/skyport-common.toml`:
+for building; a cheat in survival. Set `survival.powerRequirement` in the
+config (see [Config](#config) for where it lives):
 
 - **`NONE`** (default) — flight costs nothing.
 - **`ROTATION`** — Create rotational force must reach the Autopilot block. Put
@@ -137,6 +137,31 @@ The whole thing is `protection.protectBlocks` in the config, on by default.
 The checks run on the server for every action, not in the screen — the screen
 only produces packets, and a modified client can produce them without ever
 opening anything. Turning the setting off turns off that enforcement too.
+
+## Config
+
+Two files, and which one a setting is in decides who gets to choose it.
+
+**`<world>/serverconfig/skyport-server.toml`** — nearly everything: messages,
+chunk loading, survival costs, block protection. This is *server* config in
+NeoForge's sense, meaning the server owns it and pushes it to every client on
+connect. A player editing their own copy changes nothing, which is what makes
+a server's rules binding.
+
+Being server config, it lives inside the world rather than in `config/` — for
+a dedicated server that is `world/serverconfig/`, and for single-player
+`saves/<world name>/serverconfig/`. Settings are per-world and no longer
+follow you between saves.
+
+**`config/skyport-client.toml`** — one setting, `client.terrainMemoryLimit`,
+which caps how much remembered terrain the ATC map keeps in your own memory.
+No server has any business deciding that for you.
+
+> **Updating from an earlier build:** this used to be a single
+> `config/skyport-common.toml`, which loaded on both sides and synced neither.
+> That file is now ignored. Anything you changed in it needs setting again in
+> the new location; a fresh file with defaults is written the first time a
+> world loads.
 
 ## Known limits
 
