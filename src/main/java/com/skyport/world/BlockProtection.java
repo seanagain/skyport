@@ -39,4 +39,12 @@ public final class BlockProtection {
         player.sendSystemMessage(Component.literal(
                 "[Skyport] That belongs to " + lock.ownerName() + " - you cannot break it."));
     }
+
+    /** Passcode grants last a session; this is where a session ends. Matters
+     *  on a single-player client, which starts and stops a server for every
+     *  world without the process ever restarting. */
+    @SubscribeEvent
+    static void onServerStopping(net.neoforged.neoforge.event.server.ServerStoppingEvent event) {
+        AccessControl.forgetEverything();
+    }
 }

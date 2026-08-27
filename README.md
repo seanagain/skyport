@@ -142,16 +142,16 @@ opening anything. Turning the setting off turns off that enforcement too.
 
 Two files, and which one a setting is in decides who gets to choose it.
 
-**`<world>/serverconfig/skyport-server.toml`** — nearly everything: messages,
-chunk loading, survival costs, block protection. This is *server* config in
-NeoForge's sense, meaning the server owns it and pushes it to every client on
-connect. A player editing their own copy changes nothing, which is what makes
-a server's rules binding.
+**`config/skyport-server.toml`** — nearly everything: messages, chunk loading,
+survival costs, block protection. This is *server* config in NeoForge's sense,
+meaning the server owns it and pushes it to every client on connect. A player
+editing their own copy changes nothing, which is what makes a server's rules
+binding.
 
-Being server config, it lives inside the world rather than in `config/` — for
-a dedicated server that is `world/serverconfig/`, and for single-player
-`saves/<world name>/serverconfig/`. Settings are per-world and no longer
-follow you between saves.
+It sits in `config/` and applies to every world, the same as any other config
+file. If you want one world to differ, drop a copy at
+`<world>/serverconfig/skyport-server.toml` and it overrides the global one for
+that world only — per-world is available but opt-in.
 
 **`config/skyport-client.toml`** — one setting, `client.terrainMemoryLimit`,
 which caps how much remembered terrain the ATC map keeps in your own memory.
@@ -173,6 +173,12 @@ No server has any business deciding that for you.
 - **Locks stop players, not explosions.** A creeper or a TNT cannon will still
   take out a locked block; the check runs on the break event, which a blast
   does not go through.
+- **Redstone is not covered by the lock.** A signal reaching a locked Autopilot
+  still engages and disengages it, because a redstone pulse arrives with no
+  player attached and there is nothing to check it against. Someone who can
+  place a lever next to your aircraft can still start or stop it — and stopping
+  it mid-flight brings it down. Guarding it would mean breaking redstone
+  control for the owner too, which is the worse trade.
 - **Ponder scenes are switched off** in this release. They described an older
   version of the editor, and a tutorial that is confidently wrong is worse
   than none.

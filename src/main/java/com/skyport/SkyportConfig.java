@@ -15,11 +15,10 @@ import net.neoforged.neoforge.common.ModConfigSpec;
  * loads on both sides and syncs neither, so the two could disagree and
  * nothing said which one was true.
  *
- * The price is where the file lives. SERVER config is per-world, not
- * global: look in <world>/serverconfig/skyport-server.toml, which for a
- * dedicated server means world/serverconfig/ and for single-player means
- * saves/<name>/serverconfig/. Settings no longer follow you from world to
- * world, and that is the trade for having them authoritative.
+ * The file stays where it always was, config/skyport-server.toml, and
+ * still applies to every world. NeoForge treats <world>/serverconfig/ as an
+ * optional per-world override rather than as the home of the file, so
+ * making this authoritative cost nothing in convenience.
  *
  * Only terrainMemoryLimit is CLIENT, and only because it is a budget for
  * the player's own memory that no server has any business dictating.

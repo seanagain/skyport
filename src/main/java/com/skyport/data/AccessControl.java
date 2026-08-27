@@ -114,4 +114,20 @@ public final class AccessControl {
         String fingerprint = lock.passcodeFingerprint();
         GRANTS.removeIf(grant -> grant.passcode().equals(fingerprint));
     }
+
+    /**
+     * Drop everything when the server stops.
+     *
+     * These are meant to last a session, and on a dedicated server the
+     * process ending is the session ending, so nothing was needed. A
+     * single-player client is one process that starts and stops a server
+     * every time a world is opened and closed - so without this, grants
+     * outlive the world they were given in and pile up for as long as the
+     * game is running. Nothing can be opened with a stale one (the salt
+     * makes every code's fingerprint unique to the block it was set on),
+     * but "session" should mean what it says.
+     */
+    public static void forgetEverything() {
+        GRANTS.clear();
+    }
 }
