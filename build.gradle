@@ -171,6 +171,15 @@ dependencies {
 tasks.named("test", Test).configure {
     useJUnitPlatform()
     testLogging { events "failed" }
+
+    // Lets RealLayoutDiagnosticTest be pointed at a real saved world:
+    //   ./gradlew test --tests "*RealLayout*" -Dskyport.layout=<path> --rerun
+    // Without this the property stays on the Gradle daemon and never
+    // reaches the test JVM, so the test just skips and reports success.
+    if (System.getProperty("skyport.layout")) {
+        systemProperty "skyport.layout", System.getProperty("skyport.layout")
+        testLogging { showStandardStreams = true }
+    }
 }
 
 // Expands the placeholders below (${mod_id}, ${mod_version}, etc.) into
