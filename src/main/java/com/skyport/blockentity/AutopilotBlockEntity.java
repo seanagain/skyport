@@ -570,6 +570,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // aircraft with no schedule left to fly would otherwise be woken by
         // every ATC visit for the rest of the world's life.
         forgetParked();
+        ENGAGED.remove(planeId());
         setState(FlightState.IDLE);
         controllingPlayerId = null;
         originAirportId = null;
@@ -601,6 +602,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (!(subLevel.getLevel() instanceof ServerLevel serverLevel)) return;
 
         keepAwake(subLevel, serverLevel);
+        ENGAGED.put(planeId(), this);
 
         this.activeSubLevel = subLevel;
         this.lastPhysicsTickGameTime = serverLevel.getGameTime();
@@ -1792,6 +1794,67 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         SubLevelPhysicsSystem system = SubLevelPhysicsSystem.get(parent);
         if (system == null) return;
         system.getPipeline().wakeUp(subLevel);
+    }
+
+    /**
+     * Every aircraft currently under autopilot, so something outside the
+     * physics tick can reach one that has stopped getting physics ticks.
+     *
+     * The whole point is that this cannot live inside sable$physicsTick. A
+     * parked body is not ticked, so any recovery written there is
+     * unreachable by definition - it can prevent a stall, never end one,
+     * and preventing it did not turn out to be enough.
+     */
+    private static final java.util.Map<java.util.UUID, AutopilotBlockEntity> ENGAGED =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * How long without a physics tick counts as stalled.
+     *
+     * Generously longer than a dropped tick or two: a craft being stepped
+     * normally reports every tick, so half a second of total silence means
+     * the body has been parked rather than that the server hiccuped.
+     */
+    private static final int STALL_TICKS = 10;
+
+    /**
+     * Nudge any engaged aircraft whose physics body has gone to sleep.
+     *
+     * This is the fix for a deadlock that froze aircraft permanently: a
+     * body at rest gets parked by the physics engine, a parked body stops
+     * being physics-ticked, and everything this block entity does - the
+     * steering, the state machine, the ATC heartbeat - happens inside that
+     * tick. The aircraft could not apply the velocity that would have woken
+     * it, because applying velocity was the thing it had stopped being able
+     * to do. It froze mid-manoeuvre and vanished off the tower's map in the
+     * same instant.
+     *
+     * A tiny impulse rather than a wake flag, because that is the version
+     * known to work: the bug was diagnosed by lifting a frozen aircraft
+     * with a physics wand, at which point it immediately flew off and
+     * reappeared on ATC. This is that nudge, minus the wand. It is small
+     * enough not to move the craft anywhere - it exists to hand the body
+     * back to the simulation, and the autopilot takes over from there.
+     */
+    public static void nudgeStalledAircraft(ServerLevel overworld) {
+        if (ENGAGED.isEmpty()) return;
+        long now = overworld.getGameTime();
+
+        ENGAGED.values().removeIf(autopilot -> {
+            if (autopilot.isRemoved() || autopilot.state == FlightState.IDLE) return true;
+            ServerSubLevel subLevel = autopilot.activeSubLevel;
+            if (subLevel == null || subLevel.isRemoved()) return false;
+            if (now - autopilot.lastPhysicsTickGameTime < STALL_TICKS) return false;
+
+            RigidBodyHandle body = RigidBodyHandle.of(subLevel);
+            if (body == null || !body.isValid()) return false;
+            // Straight up, and barely: enough to count as activity, far too
+            // little to shift an aircraft or disturb one that is parked on
+            // purpose.
+            body.applyLinearAndAngularImpulse(
+                    new org.joml.Vector3d(0, 0.001, 0), new org.joml.Vector3d(), true);
+            return false;
+        });
     }
 
     private BlockPos pushbackTarget(AirportLayout origin) {
