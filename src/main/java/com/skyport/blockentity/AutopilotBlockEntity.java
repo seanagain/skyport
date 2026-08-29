@@ -587,6 +587,51 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     }
 
     /**
+     * Sable's other actor callback, which runs on the game tick rather than
+     * the physics step - so it still runs for a craft the physics engine is
+     * not stepping at all.
+     *
+     * That distinction is the whole bug. An aircraft standing at a gate is
+     * at rest on the ground, so it is never physics-stepped - not "stops
+     * being stepped once it settles", never - and everything the autopilot
+     * did lived in sable$physicsTick. Engaging one therefore changed
+     * nothing: no steering, no state machine, no ATC heartbeat. It looked
+     * like an aircraft that had frozen. It was an aircraft that had never
+     * been started.
+     *
+     * Proved by instrumenting it: across a whole session the watchdog logged
+     * CLIMB, CRUISE, APPROACH and TAXI_IN and never once PUSHBACK, because
+     * only aircraft already airborne were ever reaching the physics tick to
+     * register themselves. The one that flew was the one lifted into the air
+     * by hand.
+     *
+     * So: take the sub-level from here, where it is available without the
+     * body being stepped, and nudge the body back into the simulation when
+     * the physics tick has gone quiet.
+     */
+    @Override
+    public void sable$tick(ServerSubLevel subLevel) {
+        if (state == FlightState.IDLE) return;
+        this.activeSubLevel = subLevel;
+        if (!(subLevel.getLevel() instanceof ServerLevel parent)) return;
+
+        long silent = parent.getGameTime() - lastPhysicsTickGameTime;
+        if (silent < STALL_TICKS) return;
+
+        RigidBodyHandle body = RigidBodyHandle.of(subLevel);
+        if (body == null || !body.isValid()) return;
+        // Barely anything - this is to count as activity and hand the body
+        // back to the simulation, not to move the aircraft. Once it is being
+        // stepped the autopilot does the actual flying.
+        body.applyLinearAndAngularImpulse(
+                new org.joml.Vector3d(0, 0.001, 0), new org.joml.Vector3d(), true);
+        if (parent.getGameTime() % 20 == 0) {
+            Skyport.LOGGER.info("[stall] sable$tick nudged {} after {} silent ticks",
+                    callsign(), silent);
+        }
+    }
+
+    /**
      * Sable's hook: called every physics tick while this block is part of an
      * assembled craft, handing over that craft's rigid body. This is where
      * the autopilot stops being a simulation and actually flies something.
@@ -603,7 +648,6 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (!(subLevel.getLevel() instanceof ServerLevel serverLevel)) return;
 
         keepAwake(subLevel, serverLevel);
-        ENGAGED.put(planeId(), this);
 
         this.activeSubLevel = subLevel;
         this.lastPhysicsTickGameTime = serverLevel.getGameTime();
@@ -1153,6 +1197,19 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         this.state = newState;
         this.currentWaypointIndex = 0;
         this.stateEnteredTick = tickCounter;
+        // Registered here rather than in the physics tick, and that
+        // distinction is the entire bug the watchdog was written for. An
+        // aircraft standing at a gate is at rest on the ground, so the
+        // physics engine never steps it - not "stops stepping it after it
+        // slows down", never. Registering from inside sable$physicsTick
+        // therefore only ever saw aircraft that were already flying, which
+        // are exactly the ones that do not need rescuing, and the parked
+        // ones it existed for were invisible to it.
+        if (newState == FlightState.IDLE) {
+            ENGAGED.remove(planeId());
+        } else {
+            ENGAGED.put(planeId(), this);
+        }
         invalidatePath();
         // Each ground phase starts on the near side of the hold point again:
         // taxiing out hasn't been cleared onto the runway yet, and taxiing in
@@ -1859,6 +1916,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 if (report) Skyport.LOGGER.info("[stall] dropping - removed or idle");
                 return true;
             }
+            // activeSubLevel is now populated by sable$tick as well as by
+            // sable$physicsTick, so it is available for an aircraft the
+            // physics engine has never stepped - which is the only kind that
+            // ever needed this.
             ServerSubLevel subLevel = autopilot.activeSubLevel;
             long silent = now - autopilot.lastPhysicsTickGameTime;
             if (report) {
