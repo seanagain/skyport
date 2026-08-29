@@ -25,6 +25,10 @@ public class Skyport {
 
     public static final String MOD_ID = "skyport";
 
+    /** Shared logger. Diagnostics go here rather than to chat: a fault that
+     *  needs a timeline needs a file, and chat is radius-gated. */
+    public static final org.slf4j.Logger LOGGER = com.mojang.logging.LogUtils.getLogger();
+
     // NeoForge injects whichever of these constructor parameters you ask
     // for, in any order - IEventBus, ModContainer, FMLModContainer, Dist.
     // We only need the event bus to wire up our registries.

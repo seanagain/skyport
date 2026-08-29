@@ -1,5 +1,6 @@
 package com.skyport.blockentity;
 
+import com.skyport.Skyport;
 import com.skyport.SkyportConfig;
 import com.skyport.data.AirportLayout;
 import com.skyport.data.CraftType;
@@ -1837,22 +1838,51 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * back to the simulation, and the autopilot takes over from there.
      */
     public static void nudgeStalledAircraft(ServerLevel overworld) {
-        if (ENGAGED.isEmpty()) return;
         long now = overworld.getGameTime();
 
+        // Diagnostic, kept until this bug is actually closed. Two rounds of
+        // fixes for the freeze have now been written against a guess about
+        // where the tick dies, and both were wrong in a way that only showed
+        // up in a playtest. This says plainly what is true at the moment an
+        // aircraft is stuck: whether the watchdog runs at all, whether it
+        // can see the aircraft, whether it thinks it is stalled, and whether
+        // the nudge reached a valid body. One line a second, only while
+        // something is engaged.
+        boolean report = now % 20 == 0 && !ENGAGED.isEmpty();
+        if (report) {
+            Skyport.LOGGER.info("[stall] tick={} engaged={}", now, ENGAGED.size());
+        }
+        if (ENGAGED.isEmpty()) return;
+
         ENGAGED.values().removeIf(autopilot -> {
-            if (autopilot.isRemoved() || autopilot.state == FlightState.IDLE) return true;
+            if (autopilot.isRemoved() || autopilot.state == FlightState.IDLE) {
+                if (report) Skyport.LOGGER.info("[stall] dropping - removed or idle");
+                return true;
+            }
             ServerSubLevel subLevel = autopilot.activeSubLevel;
+            long silent = now - autopilot.lastPhysicsTickGameTime;
+            if (report) {
+                Skyport.LOGGER.info("[stall] {} state={} subLevel={} silentTicks={}",
+                        autopilot.callsign(), autopilot.state,
+                        subLevel == null ? "null" : "ok", silent);
+            }
             if (subLevel == null || subLevel.isRemoved()) return false;
-            if (now - autopilot.lastPhysicsTickGameTime < STALL_TICKS) return false;
+            if (silent < STALL_TICKS) return false;
 
             RigidBodyHandle body = RigidBodyHandle.of(subLevel);
-            if (body == null || !body.isValid()) return false;
+            if (body == null || !body.isValid()) {
+                if (report) Skyport.LOGGER.info("[stall] {} has no valid body", autopilot.callsign());
+                return false;
+            }
             // Straight up, and barely: enough to count as activity, far too
             // little to shift an aircraft or disturb one that is parked on
             // purpose.
             body.applyLinearAndAngularImpulse(
                     new org.joml.Vector3d(0, 0.001, 0), new org.joml.Vector3d(), true);
+            if (report) {
+                Skyport.LOGGER.info("[stall] nudged {} after {} silent ticks",
+                        autopilot.callsign(), silent);
+            }
             return false;
         });
     }
