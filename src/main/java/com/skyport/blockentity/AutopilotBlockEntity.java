@@ -38,6 +38,7 @@ import com.skyport.block.AutopilotBlock;
 import dev.ryanhcode.sable.api.block.BlockEntitySubLevelActor;
 import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
+import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 import net.minecraft.core.Direction;
 import org.joml.AxisAngle4d;
 import org.joml.Quaterniond;
@@ -598,6 +599,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     public void sable$physicsTick(ServerSubLevel subLevel, RigidBodyHandle body, double deltaSeconds) {
         if (state == FlightState.IDLE) return;
         if (!(subLevel.getLevel() instanceof ServerLevel serverLevel)) return;
+
+        keepAwake(subLevel, serverLevel);
 
         this.activeSubLevel = subLevel;
         this.lastPhysicsTickGameTime = serverLevel.getGameTime();
@@ -1757,6 +1760,38 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 (int) Math.round(holdShort.getX() + dx / length * HOLD_LINE_STANDOFF_BLOCKS),
                 holdShort.getY(),
                 (int) Math.round(holdShort.getZ() + dz / length * HOLD_LINE_STANDOFF_BLOCKS));
+    }
+
+    /**
+     * Stop the physics engine putting an engaged aircraft to sleep.
+     *
+     * This is load-bearing, not a tuning detail. Rapier parks a rigid body
+     * that has come to rest, and a parked body stops being physics-ticked -
+     * which for this block entity means it stops entirely. Everything the
+     * autopilot does happens inside sable$physicsTick: the steering, the
+     * state machine, the ATC heartbeat, the clearance leases. There is no
+     * second path. serverTick looks like one and is not - it opens with
+     * {@code level instanceof ServerLevel}, and the level of a block on an
+     * assembled craft is a ServerSubLevel, which does not extend
+     * ServerLevel. So it returns immediately, every time, for every
+     * aircraft that is actually flying.
+     *
+     * The result was a deadlock with no way out. An aircraft that slowed to
+     * a stop - easiest during pushback, the slowest manoeuvre here, where
+     * the alignment clamp can cut the throttle to nothing - had its body
+     * parked, lost its tick, and could never apply the velocity that would
+     * have woken it. It froze mid-manoeuvre and vanished off the tower's
+     * map at the same moment, because the heartbeat died with everything
+     * else. Two symptoms, one cause, and it read as two separate bugs.
+     *
+     * Asking to stay awake every tick while engaged is the fix: an aircraft
+     * under autopilot is one the server has already agreed to simulate, and
+     * the cost of keeping it stepping is the cost of it working at all.
+     */
+    private void keepAwake(ServerSubLevel subLevel, ServerLevel parent) {
+        SubLevelPhysicsSystem system = SubLevelPhysicsSystem.get(parent);
+        if (system == null) return;
+        system.getPipeline().wakeUp(subLevel);
     }
 
     private BlockPos pushbackTarget(AirportLayout origin) {
