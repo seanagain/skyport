@@ -1493,6 +1493,35 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return advanceSimulatedTowards(target);
     }
 
+
+    /**
+     * The point the craft's centre should be steered at, which is the
+     * waypoint itself everywhere except the stand.
+     *
+     * Steering is done from the centre of mass, because that is what the
+     * craft rotates about and measuring from anywhere else makes the
+     * heading controller chase its own corrections. But a gate is not a
+     * navigation point, it is where the aeroplane parks, and what should
+     * end up on it is the Autopilot block - the part a player placed
+     * deliberately, and the part that marks the aircraft on the stand.
+     *
+     * So for the last waypoint of a taxi-in the aim point is shifted by the
+     * offset from the block to the centre, which puts the block on the gate
+     * node while everything else still steers from the middle of the craft.
+     * Computed every tick rather than cached because the offset is a world
+     * vector: it rotates with the aircraft, so it is different on the way in
+     * than it was on the way out.
+     */
+    private Vec3 aimPointFor(BlockPos target) {
+        Vec3 waypoint = Vec3.atCenterOf(target);
+        if (state != FlightState.TAXI_IN || !steeringToLastWaypoint) return waypoint;
+        if (activeSubLevel == null) return waypoint;
+
+        Vec3 blockPosition = activeSubLevel.logicalPose().transformPosition(getBlockPos().getCenter());
+        // centre - block: aim the centre this much beyond the gate, and the
+        // block lands on it.
+        return waypoint.add(simulatedPosition.subtract(blockPosition));
+    }
     /**
      * Flies the real craft toward a waypoint by nudging its velocity, rather
      * than by setting its position.
@@ -1506,7 +1535,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      */
     private boolean steerCraftTowards(BlockPos target) {
         Vec3 position = simulatedPosition;
-        Vec3 delta = Vec3.atCenterOf(target).subtract(position);
+        Vec3 delta = aimPointFor(target).subtract(position);
         double distance = delta.length();
 
         // A new waypoint starts with no history, or the check below would
