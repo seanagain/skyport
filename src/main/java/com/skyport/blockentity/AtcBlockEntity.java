@@ -11,6 +11,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import dev.ryanhcode.sable.api.block.BlockEntitySubLevelActor;
+import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.network.PacketDistributor;
@@ -22,10 +24,46 @@ import java.util.List;
  * in {@link AirportRegistry}, so this just takes a snapshot on request and
  * sends it to whoever opened the screen.
  */
-public class AtcBlockEntity extends BlockEntity {
+public class AtcBlockEntity extends BlockEntity implements BlockEntitySubLevelActor {
 
     public AtcBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.ATC.get(), pos, state);
+    }
+
+    /**
+     * The craft this tower is riding on, when it is riding on one.
+     *
+     * Set from Sable's actor tick rather than looked up, because there is no
+     * lookup: a block entity has no idea it is inside a sub-level. This is
+     * the callback that tells it.
+     */
+    private transient ServerSubLevel activeSubLevel;
+
+    @Override
+    public void sable$tick(ServerSubLevel subLevel) {
+        this.activeSubLevel = subLevel;
+    }
+
+    /**
+     * Where this block actually is in the world.
+     *
+     * On the ground these are the same thing and this is a no-op. Mounted on
+     * an aircraft they are not: getBlockPos() returns coordinates inside the
+     * craft's own sub-level, which are local to the contraption and have
+     * nothing to do with where it is flying. Sent to the screen unconverted,
+     * the tower would mark itself somewhere near the sub-level origin and
+     * drag the map's auto-fit out to include it - so opening the tower in
+     * flight would show a map zoomed out to nothing, with the "you are here"
+     * cross in an empty quarter of the world.
+     *
+     * The sub-level's pose is the transform from those local coordinates to
+     * world ones, which is the same conversion the autopilot uses to know
+     * where its aircraft is.
+     */
+    public BlockPos worldPosition() {
+        if (activeSubLevel == null || activeSubLevel.isRemoved()) return getBlockPos();
+        return BlockPos.containing(
+                activeSubLevel.logicalPose().transformPosition(getBlockPos().getCenter()));
     }
 
     /**
@@ -75,6 +113,6 @@ public class AtcBlockEntity extends BlockEntity {
         List<AirportLayout> airports = List.copyOf(registry.all());
         List<TrafficReport> traffic = List.copyOf(registry.allTraffic(serverLevel.getGameTime()));
 
-        PacketDistributor.sendToPlayer(player, new OpenAtcPayload(getBlockPos(), airports, traffic));
+        PacketDistributor.sendToPlayer(player, new OpenAtcPayload(worldPosition(), airports, traffic));
     }
 }
