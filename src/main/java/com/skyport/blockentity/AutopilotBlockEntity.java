@@ -745,6 +745,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                         serverLevel.dimension().location().toString(),
                         new ChunkPos(BlockPos.containing(simulatedPosition)));
             }
+            applyParkingBrake();
             tickWaiting(serverLevel);
             return;
         }
@@ -1157,6 +1158,37 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * Sits at a gate until this stop's departure condition is met, then flies
      * the next leg (or stops, if the schedule has run out and isn't looping).
      */
+
+    /** How much of a parked craft's residual motion is taken out per second.
+     *  Firm enough to settle it in about a second, gentle enough that it
+     *  reads as an aircraft coming to rest rather than being switched off. */
+    private static final double PARKING_BRAKE = 3.0;
+
+    /**
+     * Bring a parked aircraft to a stop.
+     *
+     * WAITING deliberately does no steering - there is nowhere left to go -
+     * and that turned out to be the problem rather than the point. The craft
+     * arrives at its stand still carrying whatever motion it had, the
+     * autopilot then commands nothing at all, and the rigid body is left to
+     * shed that on its own against the ground. What that looks like is an
+     * aeroplane parked at a gate quietly rocking.
+     *
+     * So the last thing the autopilot does is stop. Horizontal motion and
+     * rotation are damped out; the vertical axis is left alone, because
+     * settling the craft down onto its wheels is gravity's job and cancelling
+     * it would hold the aircraft up off the ground.
+     */
+    private void applyParkingBrake() {
+        if (activeBody == null) return;
+        double bite = Math.min(1.0, PARKING_BRAKE * physicsStepSeconds);
+
+        Vector3dc v = activeBody.getLinearVelocity();
+        Vector3dc spin = activeBody.getAngularVelocity();
+        activeBody.addLinearAndAngularVelocity(
+                new Vector3d(-v.x() * bite, 0, -v.z() * bite),
+                new Vector3d(-spin.x() * bite, -spin.y() * bite, -spin.z() * bite));
+    }
     private void tickWaiting(ServerLevel serverLevel) {
         ScheduleEntry entry = currentEntry();
         if (entry == null) {
