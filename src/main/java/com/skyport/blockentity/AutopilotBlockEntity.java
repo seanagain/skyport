@@ -1744,9 +1744,25 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         desiredSpin.fma(clampRate(pitchError * rollGain), right);
         desiredSpin.fma(clampRate(-rollError * rollGain), noseUnit);
 
+        // Correct a fraction of the error per SECOND, not per call - the same
+        // treatment the linear steering already gets, and for the same
+        // reason. A flat per-call fraction means the turn is driven harder
+        // the more often this happens to run, so on a server with uneven
+        // steps the craft over-corrects on a long tick, overshoots the
+        // heading, over-corrects back, and sits there oscillating. That is
+        // the shaking: not a waypoint it cannot reach, a heading it cannot
+        // settle on. It shows up worst just after pushback, where the
+        // aircraft is pointing backwards and has a full half-turn to make at
+        // the misalignment throttle floor, so it is turning almost in place
+        // with nothing but this loop to damp it.
+        //
+        // Capped at 1 so it converges rather than overshooting when a step
+        // runs long.
+        double damping = onGround ? GROUND_TURN_DAMPING : TURN_DAMPING;
+        double gain = Math.min(1.0, damping * physicsStepSeconds / NOMINAL_STEP_SECONDS);
+
         Vector3dc current = activeBody.getAngularVelocity();
-        return desiredSpin.sub(current.x(), current.y(), current.z())
-                .mul(onGround ? GROUND_TURN_DAMPING : TURN_DAMPING);
+        return desiredSpin.sub(current.x(), current.y(), current.z()).mul(gain);
     }
 
     private static double clampRate(double rate) {
