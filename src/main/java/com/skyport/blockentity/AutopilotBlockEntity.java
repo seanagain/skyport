@@ -1371,8 +1371,20 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // further than the radius and it never registers, so it turns around
         // and comes back for a point it has already passed. Receding from a
         // waypoint it had got close to counts as reaching it.
+        //
+        // Parking is the exception. Anywhere else, overshooting a point and
+        // carrying on is right - the aircraft is on its way somewhere else
+        // anyway. At the stand there is nowhere else to be, and accepting
+        // the overshoot means calling it parked while five blocks past the
+        // gate and still moving away from it. So the last ground waypoint
+        // has to be genuinely reached, not merely approached and abandoned;
+        // an aircraft that sails past its stand comes round and settles on
+        // it, which is what parking at a gate is.
+        double passedWithin = isGroundState() && steeringToLastWaypoint
+                ? arrivalRadius()
+                : arrivalRadius() * 2.5;
         boolean passed = distance > lastWaypointDistance
-                && lastWaypointDistance <= arrivalRadius() * 2.5;
+                && lastWaypointDistance <= passedWithin;
         if (distance <= arrivalRadius() || passed) {
             pitchDegrees = 0;
             lastWaypointTarget = null;
