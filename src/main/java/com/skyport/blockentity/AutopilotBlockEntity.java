@@ -207,6 +207,21 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      *  fast it may rotate (radians/second) - a contraption spinning to face a
      *  new waypoint instantly looks wrong. */
     private static final double TURN_GAIN = 1.5;
+    /**
+     * Yaw gain while taxiing, well below the airborne one.
+     *
+     * Airborne, a craft turns against nothing and a stiff gain just turns
+     * it. On the ground it is swinging a heavy contraption against friction,
+     * where the same gain builds command until the craft breaks grip and
+     * slews past the heading - then does it again the other way.
+     */
+    private static final double GROUND_YAW_GAIN = 0.6;
+
+    /** Heading error small enough to leave alone, about two degrees. Without
+     *  a deadzone there is no error too small to correct, so a craft already
+     *  on its heading is nudged either side of it indefinitely. */
+    private static final double YAW_DEADZONE_RADIANS = Math.toRadians(2);
+
     private static final double MAX_TURN_RATE_RAD_PER_SEC = 0.9;
     /** Fraction of the rotation error corrected per tick; damped so the craft
      *  settles on a heading instead of oscillating around it. */
@@ -1739,8 +1754,25 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         Vector3d noseUnit = new Vector3d(nose).normalize();
         double rollGain = onGround ? GROUND_LEVEL_GAIN : TURN_GAIN;
 
+        // Yaw is gentler on the ground, and stops entirely once close.
+        //
+        // In the air a craft turns against nothing, so a stiff gain simply
+        // turns it. On the ground it is turning a heavy contraption against
+        // friction: the command builds until the craft breaks grip, it swings
+        // past the heading, the error reverses, and the same thing happens the
+        // other way. That is the shake, and it appears exactly when the
+        // aircraft has a turn to make - worst just after pushback, which is a
+        // half-turn from a standstill.
+        //
+        // The deadzone is the other half. Without one there is no heading
+        // error small enough to be left alone, so a craft that has arrived on
+        // its heading keeps being nudged either side of it forever. A couple
+        // of degrees is far below what anyone can see on a taxiway.
+        double yawGain = onGround ? GROUND_YAW_GAIN : TURN_GAIN;
+        double yawCommand = Math.abs(yawError) < YAW_DEADZONE_RADIANS ? 0 : yawError * yawGain;
+
         Vector3d desiredSpin = new Vector3d();
-        desiredSpin.fma(clampRate(yawError * TURN_GAIN), worldUp);
+        desiredSpin.fma(clampRate(yawCommand), worldUp);
         desiredSpin.fma(clampRate(pitchError * rollGain), right);
         desiredSpin.fma(clampRate(-rollError * rollGain), noseUnit);
 
@@ -1762,6 +1794,27 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         double gain = Math.min(1.0, damping * physicsStepSeconds / NOMINAL_STEP_SECONDS);
 
         Vector3dc current = activeBody.getAngularVelocity();
+
+        // Behind the telemetry switch, off by default, because a craft that
+        // will not settle on a heading cannot be diagnosed by watching it.
+        // Four attempts at the ground shake were spent on the pathing before
+        // it was clear the aircraft was reaching its waypoints perfectly well
+        // and simply could not hold an attitude. These are the three axes and
+        // the step length, which is the whole state this controller has: if
+        // one error term is swinging sign every reading, that axis is
+        // ringing, and if the step length is jumping around then the loop is
+        // being asked at a rate it cannot damp.
+        if (onGround && SkyportConfig.telemetry && tickCounter % 20 == 0) {
+            Skyport.LOGGER.info(
+                    "[turn] {} state={} yawErr={} pitchErr={} rollErr={} spin=({}, {}, {}) step={}s",
+                    callsign(), state,
+                    String.format("%.3f", yawError), String.format("%.3f", pitchError),
+                    String.format("%.3f", rollError),
+                    String.format("%.3f", current.x()), String.format("%.3f", current.y()),
+                    String.format("%.3f", current.z()),
+                    String.format("%.4f", physicsStepSeconds));
+        }
+
         return desiredSpin.sub(current.x(), current.y(), current.z()).mul(gain);
     }
 
