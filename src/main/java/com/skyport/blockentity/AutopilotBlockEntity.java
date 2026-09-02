@@ -192,7 +192,17 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * every corner and tracked visibly off the pavement. Airborne that same
      * slack is what stops a plane pivoting around each point.
      */
-    private static final double GROUND_ARRIVAL_RADIUS = 2.0;
+    private static final double GROUND_ARRIVAL_RADIUS = 4.0;
+
+    /**
+     * How close counts as parked, at the stand specifically.
+     *
+     * Tighter than a taxiway node and safe to be, because the stand is the
+     * last waypoint of the route and the aircraft decelerates into its last
+     * waypoint. It closes on the gate rather than barrelling at it, so a
+     * small sphere is something it settles into instead of overshooting.
+     */
+    private static final double GROUND_PARKING_RADIUS = 2.5;
     /** How hard the craft turns toward its heading, and the ceiling on how
      *  fast it may rotate (radians/second) - a contraption spinning to face a
      *  new waypoint instantly looks wrong. */
@@ -1310,11 +1320,27 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         }
     }
 
-    /** How close counts as arriving. Tight while taxiing so the aircraft
-     *  tracks the drawn line; loose in the air so it flies through turns
-     *  instead of pivoting on each point. */
+    /**
+     * How close counts as arriving, which is three different questions.
+     *
+     * Airborne is loosest, so a plane flies through its turns rather than
+     * pivoting on each point.
+     *
+     * A taxiway node is tighter, because on the ground the drawn line is the
+     * instruction - but not as tight as the stand. Intermediate nodes are
+     * driven at full taxi speed with no deceleration, so a contraption
+     * overshoots a small sphere, then has to turn back at the misalignment
+     * throttle floor, which is a crawl. The result is an aircraft stopped on
+     * the taxiway shaking at a node it cannot quite hit. The radius has to be
+     * bigger than the distance it covers while turning around.
+     *
+     * The stand can afford to be tight because it is the last waypoint, and
+     * the last waypoint is the one the aircraft decelerates into - so it
+     * converges rather than overshooting, and parks on the gate node.
+     */
     private double arrivalRadius() {
-        return isGroundState() ? GROUND_ARRIVAL_RADIUS : CRAFT_ARRIVAL_RADIUS;
+        if (!isGroundState()) return CRAFT_ARRIVAL_RADIUS;
+        return steeringToLastWaypoint ? GROUND_PARKING_RADIUS : GROUND_ARRIVAL_RADIUS;
     }
 
     /**
