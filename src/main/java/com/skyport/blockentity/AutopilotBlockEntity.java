@@ -133,6 +133,26 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private static final double PUSHBACK_SPEED_FRACTION = 0.75;
     /** Rotation speed, reached by half the runway's length. */
     private static final double CRAFT_TAKEOFF_SPEED = 14.0;
+
+    /**
+     * How much of the runway the takeoff roll uses to build speed.
+     *
+     * Was half. Accelerating to cruise rather than to the old minimum
+     * flying speed needs more room, and using three quarters of the strip
+     * is also what makes a departure read as a takeoff roll rather than a
+     * short dash and a hop.
+     */
+    private static final double TAKEOFF_ROLL_FRACTION = 0.75;
+
+    /**
+     * The point on the runway where the aircraft rotates regardless.
+     *
+     * Rotation is normally decided by actual speed, which is the honest
+     * test. This is the backstop for a craft that cannot reach it: the far
+     * end of the runway is coming either way, and a sluggish climb beats
+     * running off the end still accelerating.
+     */
+    private static final double TAKEOFF_ROTATE_LATEST = 0.9;
     /** Climb-out angle. Shallower than the 30-degree structural cap because
      *  a departure that steep looks like a rocket, not a plane. */
     private static final double CLIMB_PITCH_DEGREES = 20.0;
@@ -2605,6 +2625,15 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return Math.abs(simulatedPosition.y - holdingAltitude(destination)) <= HOLDING_ALTITUDE_TOLERANCE;
     }
 
+
+    /** The craft's actual speed over the ground, as opposed to the speed it
+     *  is being asked for. Zero before the body exists, which reads as "not
+     *  yet fast enough" and is the safe answer everywhere it is used. */
+    private double horizontalSpeed() {
+        if (activeBody == null) return 0;
+        Vector3dc v = activeBody.getLinearVelocity();
+        return Math.sqrt(v.x() * v.x() + v.z() * v.z());
+    }
     private double cruiseSpeed() {
         return schedule.cruiseSpeed();
     }
@@ -2645,18 +2674,32 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 Math.pow(simulatedPosition.x - takeoffStart.x, 2)
                         + Math.pow(simulatedPosition.z - takeoffStart.z, 2));
 
-        // Full speed by half the runway, then hold it to the end.
-        double ramp = runwayLength <= 1 ? 1 : Math.min(1.0, rolled / (runwayLength * 0.5));
-        double speed = CRAFT_TAXI_SPEED + (CRAFT_TAKEOFF_SPEED - CRAFT_TAXI_SPEED) * ramp;
+        // Accelerate toward cruise, not merely to the minimum flying speed.
+        // Rotating at 14 and then flying the climb at 24 meant the aircraft
+        // left the ground slower than it was about to fly and made up the
+        // difference in the air, which is backwards: the runway is where a
+        // departure gains its speed, and the length of it is the whole
+        // reason a plane needs one.
+        double rollTarget = Math.max(CRAFT_TAKEOFF_SPEED, cruiseSpeed());
+        double ramp = runwayLength <= 1 ? 1 : Math.min(1.0, rolled / (runwayLength * TAKEOFF_ROLL_FRACTION));
+        double speed = CRAFT_TAXI_SPEED + (rollTarget - CRAFT_TAXI_SPEED) * ramp;
 
         flyHeading(centreline, speed);
 
-        // Rotate at the halfway mark, which is also where the speed ramp
-        // finishes - so the plane is up to speed exactly when it starts to
-        // climb, and has the back half of the runway as margin rather than
-        // running to the far end first.
-        boolean atRotationSpeed = ramp >= 1.0;
-        if (atRotationSpeed) {
+        // Rotate on actual speed rather than on distance alone - the point of
+        // a longer roll is to leave the ground genuinely flying, and distance
+        // only stands in for that while the craft accelerates as expected. A
+        // heavy contraption that does not will otherwise rotate on schedule
+        // and mush into the ground beyond the threshold.
+        //
+        // The distance cap is the safety net: whatever the aircraft has
+        // managed by the last of the runway, it goes now. Running off the end
+        // still trying to reach a speed it cannot make is worse than a
+        // sluggish climb, and without this an underpowered craft would never
+        // rotate at all.
+        boolean fastEnough = ramp >= 1.0 && horizontalSpeed() >= CRAFT_TAKEOFF_SPEED;
+        boolean outOfRunway = runwayLength > 1 && rolled >= runwayLength * TAKEOFF_ROTATE_LATEST;
+        if (fastEnough || outOfRunway) {
             takeoffStart = null;
             takeoffHoldTicks = 0;
             // Climb out along the runway heading. Locking it here rather than
