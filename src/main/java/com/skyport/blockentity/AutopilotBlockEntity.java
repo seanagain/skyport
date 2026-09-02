@@ -38,6 +38,7 @@ import net.minecraft.world.phys.Vec3;
 import com.skyport.block.AutopilotBlock;
 import dev.ryanhcode.sable.api.block.BlockEntitySubLevelActor;
 import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
+import dev.ryanhcode.sable.api.physics.mass.MassData;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 import net.minecraft.core.Direction;
@@ -654,6 +655,46 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     }
 
 
+
+    /** If the mass centre resolves further than this from the autopilot
+     *  block, it is not in the coordinate space assumed and gets ignored. No
+     *  contraption is a hundred and thirty blocks across, so this can only
+     *  trip on a wrong answer - and steering an aircraft from a point that
+     *  is not on it would be far worse than the wobble this fixes. */
+    private static final double CRAFT_CENTRE_SANITY_BLOCKS = 64;
+
+    /**
+     * Where the aircraft "is", for steering purposes: its centre of mass,
+     * not the autopilot block.
+     *
+     * The physics body rotates about its centre of mass. Steering from the
+     * autopilot block meant the reference point swung in an arc every time
+     * the craft yawed - so correcting a heading moved the point being
+     * measured from, which changed the bearing to the waypoint, which
+     * changed the heading error. The controller was chasing a target that
+     * its own corrections were moving. On a craft with the autopilot mounted
+     * well off centre the lever arm is long enough for that loop to sustain
+     * itself, which is why the wobble eased when the aircraft was nudged
+     * onto the centreline: less offset, less swing, less feedback.
+     *
+     * Rotating about the centre is also simply what an aircraft does. The
+     * autopilot block says which way the nose points; it was never meant to
+     * be where the aeroplane is.
+     */
+    private Vec3 craftReferencePosition(ServerSubLevel subLevel) {
+        Vec3 blockPosition = subLevel.logicalPose().transformPosition(getBlockPos().getCenter());
+
+        MassData mass = subLevel.getMassTracker();
+        if (mass == null || mass.isInvalid()) return blockPosition;
+        Vector3dc centre = mass.getCenterOfMass();
+        if (centre == null) return blockPosition;
+
+        Vec3 centrePosition = subLevel.logicalPose()
+                .transformPosition(new Vec3(centre.x(), centre.y(), centre.z()));
+        return centrePosition.distanceTo(blockPosition) > CRAFT_CENTRE_SANITY_BLOCKS
+                ? blockPosition
+                : centrePosition;
+    }
     /**
      * Sable's hook: called every physics tick while this block is part of an
      * assembled craft, handing over that craft's rigid body. This is where
@@ -682,7 +723,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // coordinates inside the sub-level, and the sub-level's pose maps
         // those onto the world. This is the honest version of the position
         // engage() currently approximates with the player's.
-        this.simulatedPosition = subLevel.logicalPose().transformPosition(getBlockPos().getCenter());
+        this.simulatedPosition = craftReferencePosition(subLevel);
 
         this.activeBody = body;
         try {
