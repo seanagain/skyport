@@ -150,6 +150,29 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private static final double CRAFT_APPROACH_GAIN = 0.6;
     /** Planes are big; "arrived" has to be looser than for a point. */
     private static final double CRAFT_ARRIVAL_RADIUS = 6.0;
+
+    /**
+     * How many points the final leg is broken into for the descent.
+     *
+     * The autopilot tracks whatever waypoint is next and lets altitude
+     * follow, so a two-point final leg is a single instruction to be much
+     * lower by the far end - which an aircraft obeys by arriving high and
+     * dropping. Eight steps is enough to read as a slope without filling the
+     * path with points the turn logic then has to anticipate around.
+     */
+    private static final int GLIDE_SLOPE_STEPS = 8;
+
+    /**
+     * How close counts as reaching a waypoint while taxiing.
+     *
+     * Much tighter than the airborne figure, because on the ground the drawn
+     * line IS the instruction - a taxiway is a painted route, not a
+     * suggestion. At the airborne radius an aircraft could call a node
+     * reached from six blocks away and set off for the next one, so it cut
+     * every corner and tracked visibly off the pavement. Airborne that same
+     * slack is what stops a plane pivoting around each point.
+     */
+    private static final double GROUND_ARRIVAL_RADIUS = 2.0;
     /** How hard the craft turns toward its heading, and the ceiling on how
      *  fast it may rotate (radians/second) - a contraption spinning to face a
      *  new waypoint instantly looks wrong. */
@@ -383,16 +406,6 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      */
     private static final int PUSHBACK_TIMEOUT_TICKS = 400;
 
-    /**
-     * How long without a physics tick means the craft is not being
-     * simulated and needs handing back to the engine.
-     *
-     * Generously longer than a dropped tick or two: a craft being stepped
-     * normally reports every tick, so half a second of silence means the
-     * body is genuinely parked rather than that the server hiccuped.
-     */
-    private static final int STALL_TICKS = 10;
-
     public AutopilotBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.AUTOPILOT.get(), pos, state);
     }
@@ -595,46 +608,6 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         setChanged();
     }
 
-    /**
-     * Sable's other actor callback, which runs on the game tick rather than
-     * the physics step - so it still runs for a craft the physics engine is
-     * not stepping at all.
-     *
-     * That distinction is the whole bug. An aircraft standing at a gate is
-     * at rest on the ground, so it is never physics-stepped - not "stops
-     * being stepped once it settles", never - and everything the autopilot
-     * did lived in sable$physicsTick. Engaging one therefore changed
-     * nothing: no steering, no state machine, no ATC heartbeat. It looked
-     * like an aircraft that had frozen. It was an aircraft that had never
-     * been started.
-     *
-     * Proved by instrumenting it: across a whole session the watchdog logged
-     * CLIMB, CRUISE, APPROACH and TAXI_IN and never once PUSHBACK, because
-     * only aircraft already airborne were ever reaching the physics tick to
-     * register themselves. The one that flew was the one lifted into the air
-     * by hand.
-     *
-     * So: take the sub-level from here, where it is available without the
-     * body being stepped, and nudge the body back into the simulation when
-     * the physics tick has gone quiet.
-     */
-    @Override
-    public void sable$tick(ServerSubLevel subLevel) {
-        if (state == FlightState.IDLE) return;
-        this.activeSubLevel = subLevel;
-        if (!(subLevel.getLevel() instanceof ServerLevel parent)) return;
-
-        long silent = parent.getGameTime() - lastPhysicsTickGameTime;
-        if (silent < STALL_TICKS) return;
-
-        RigidBodyHandle body = RigidBodyHandle.of(subLevel);
-        if (body == null || !body.isValid()) return;
-        // Barely anything - this is to count as activity and hand the body
-        // back to the simulation, not to move the aircraft. Once it is being
-        // stepped the autopilot does the actual flying.
-        body.applyLinearAndAngularImpulse(
-                new org.joml.Vector3d(0, 0.001, 0), new org.joml.Vector3d(), true);
-    }
 
     /**
      * Sable's hook: called every physics tick while this block is part of an
@@ -1317,6 +1290,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         }
     }
 
+    /** How close counts as arriving. Tight while taxiing so the aircraft
+     *  tracks the drawn line; loose in the air so it flies through turns
+     *  instead of pivoting on each point. */
+    private double arrivalRadius() {
+        return isGroundState() ? GROUND_ARRIVAL_RADIUS : CRAFT_ARRIVAL_RADIUS;
+    }
+
     /**
      * How far out to begin cutting a corner: scaled to speed, because a
      * faster plane needs more room to come round, but never more than a
@@ -1392,8 +1372,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // and comes back for a point it has already passed. Receding from a
         // waypoint it had got close to counts as reaching it.
         boolean passed = distance > lastWaypointDistance
-                && lastWaypointDistance <= CRAFT_ARRIVAL_RADIUS * 2.5;
-        if (distance <= CRAFT_ARRIVAL_RADIUS || passed) {
+                && lastWaypointDistance <= arrivalRadius() * 2.5;
+        if (distance <= arrivalRadius() || passed) {
             pitchDegrees = 0;
             lastWaypointTarget = null;
             lastWaypointDistance = Double.MAX_VALUE;
@@ -2809,8 +2789,25 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         if (leg.size() == 2) {
             int runwayY = runway.isEmpty() ? leg.get(1).getY() : runway.get(1).getY();
-            path.add(withY(leg.get(0), destination.holdingPatternHeight()));
-            path.add(withY(leg.get(1), runwayY));
+            int topY = destination.holdingPatternHeight();
+            BlockPos from = leg.get(0);
+            BlockPos to = leg.get(1);
+
+            // Stepped rather than a single long segment, and that is the
+            // difference between a glide and a plummet. Given two points the
+            // autopilot steers at the far one and lets the height look after
+            // itself, so an aircraft with eighty blocks to lose arrives over
+            // the threshold still high and dumps the remainder vertically -
+            // the "descending like a helicopter" landing. Intermediate points
+            // give it a slope to actually track, so the height comes off
+            // evenly along the leg instead of all at the end.
+            for (int step = 0; step <= GLIDE_SLOPE_STEPS; step++) {
+                double t = (double) step / GLIDE_SLOPE_STEPS;
+                path.add(new BlockPos(
+                        (int) Math.round(from.getX() + (to.getX() - from.getX()) * t),
+                        (int) Math.round(topY + (runwayY - topY) * t),
+                        (int) Math.round(from.getZ() + (to.getZ() - from.getZ()) * t)));
+            }
         } else {
             path.addAll(leg);
         }
