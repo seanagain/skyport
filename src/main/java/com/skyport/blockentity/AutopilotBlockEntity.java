@@ -383,6 +383,16 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      */
     private static final int PUSHBACK_TIMEOUT_TICKS = 400;
 
+    /**
+     * How long without a physics tick means the craft is not being
+     * simulated and needs handing back to the engine.
+     *
+     * Generously longer than a dropped tick or two: a craft being stepped
+     * normally reports every tick, so half a second of silence means the
+     * body is genuinely parked rather than that the server hiccuped.
+     */
+    private static final int STALL_TICKS = 10;
+
     public AutopilotBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.AUTOPILOT.get(), pos, state);
     }
@@ -571,7 +581,6 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // aircraft with no schedule left to fly would otherwise be woken by
         // every ATC visit for the rest of the world's life.
         forgetParked();
-        ENGAGED.remove(planeId());
         setState(FlightState.IDLE);
         controllingPlayerId = null;
         originAirportId = null;
@@ -625,10 +634,6 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // stepped the autopilot does the actual flying.
         body.applyLinearAndAngularImpulse(
                 new org.joml.Vector3d(0, 0.001, 0), new org.joml.Vector3d(), true);
-        if (parent.getGameTime() % 20 == 0) {
-            Skyport.LOGGER.info("[stall] sable$tick nudged {} after {} silent ticks",
-                    callsign(), silent);
-        }
     }
 
     /**
@@ -647,7 +652,6 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (state == FlightState.IDLE) return;
         if (!(subLevel.getLevel() instanceof ServerLevel serverLevel)) return;
 
-        keepAwake(subLevel, serverLevel);
 
         this.activeSubLevel = subLevel;
         this.lastPhysicsTickGameTime = serverLevel.getGameTime();
@@ -1197,19 +1201,6 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         this.state = newState;
         this.currentWaypointIndex = 0;
         this.stateEnteredTick = tickCounter;
-        // Registered here rather than in the physics tick, and that
-        // distinction is the entire bug the watchdog was written for. An
-        // aircraft standing at a gate is at rest on the ground, so the
-        // physics engine never steps it - not "stops stepping it after it
-        // slows down", never. Registering from inside sable$physicsTick
-        // therefore only ever saw aircraft that were already flying, which
-        // are exactly the ones that do not need rescuing, and the parked
-        // ones it existed for were invisible to it.
-        if (newState == FlightState.IDLE) {
-            ENGAGED.remove(planeId());
-        } else {
-            ENGAGED.put(planeId(), this);
-        }
         invalidatePath();
         // Each ground phase starts on the near side of the hold point again:
         // taxiing out hasn't been cleared onto the runway yet, and taxiing in
@@ -1822,131 +1813,6 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 (int) Math.round(holdShort.getZ() + dz / length * HOLD_LINE_STANDOFF_BLOCKS));
     }
 
-    /**
-     * Stop the physics engine putting an engaged aircraft to sleep.
-     *
-     * This is load-bearing, not a tuning detail. Rapier parks a rigid body
-     * that has come to rest, and a parked body stops being physics-ticked -
-     * which for this block entity means it stops entirely. Everything the
-     * autopilot does happens inside sable$physicsTick: the steering, the
-     * state machine, the ATC heartbeat, the clearance leases. There is no
-     * second path. serverTick looks like one and is not - it opens with
-     * {@code level instanceof ServerLevel}, and the level of a block on an
-     * assembled craft is a ServerSubLevel, which does not extend
-     * ServerLevel. So it returns immediately, every time, for every
-     * aircraft that is actually flying.
-     *
-     * The result was a deadlock with no way out. An aircraft that slowed to
-     * a stop - easiest during pushback, the slowest manoeuvre here, where
-     * the alignment clamp can cut the throttle to nothing - had its body
-     * parked, lost its tick, and could never apply the velocity that would
-     * have woken it. It froze mid-manoeuvre and vanished off the tower's
-     * map at the same moment, because the heartbeat died with everything
-     * else. Two symptoms, one cause, and it read as two separate bugs.
-     *
-     * Asking to stay awake every tick while engaged is the fix: an aircraft
-     * under autopilot is one the server has already agreed to simulate, and
-     * the cost of keeping it stepping is the cost of it working at all.
-     */
-    private void keepAwake(ServerSubLevel subLevel, ServerLevel parent) {
-        SubLevelPhysicsSystem system = SubLevelPhysicsSystem.get(parent);
-        if (system == null) return;
-        system.getPipeline().wakeUp(subLevel);
-    }
-
-    /**
-     * Every aircraft currently under autopilot, so something outside the
-     * physics tick can reach one that has stopped getting physics ticks.
-     *
-     * The whole point is that this cannot live inside sable$physicsTick. A
-     * parked body is not ticked, so any recovery written there is
-     * unreachable by definition - it can prevent a stall, never end one,
-     * and preventing it did not turn out to be enough.
-     */
-    private static final java.util.Map<java.util.UUID, AutopilotBlockEntity> ENGAGED =
-            new java.util.concurrent.ConcurrentHashMap<>();
-
-    /**
-     * How long without a physics tick counts as stalled.
-     *
-     * Generously longer than a dropped tick or two: a craft being stepped
-     * normally reports every tick, so half a second of total silence means
-     * the body has been parked rather than that the server hiccuped.
-     */
-    private static final int STALL_TICKS = 10;
-
-    /**
-     * Nudge any engaged aircraft whose physics body has gone to sleep.
-     *
-     * This is the fix for a deadlock that froze aircraft permanently: a
-     * body at rest gets parked by the physics engine, a parked body stops
-     * being physics-ticked, and everything this block entity does - the
-     * steering, the state machine, the ATC heartbeat - happens inside that
-     * tick. The aircraft could not apply the velocity that would have woken
-     * it, because applying velocity was the thing it had stopped being able
-     * to do. It froze mid-manoeuvre and vanished off the tower's map in the
-     * same instant.
-     *
-     * A tiny impulse rather than a wake flag, because that is the version
-     * known to work: the bug was diagnosed by lifting a frozen aircraft
-     * with a physics wand, at which point it immediately flew off and
-     * reappeared on ATC. This is that nudge, minus the wand. It is small
-     * enough not to move the craft anywhere - it exists to hand the body
-     * back to the simulation, and the autopilot takes over from there.
-     */
-    public static void nudgeStalledAircraft(ServerLevel overworld) {
-        long now = overworld.getGameTime();
-
-        // Diagnostic, kept until this bug is actually closed. Two rounds of
-        // fixes for the freeze have now been written against a guess about
-        // where the tick dies, and both were wrong in a way that only showed
-        // up in a playtest. This says plainly what is true at the moment an
-        // aircraft is stuck: whether the watchdog runs at all, whether it
-        // can see the aircraft, whether it thinks it is stalled, and whether
-        // the nudge reached a valid body. One line a second, only while
-        // something is engaged.
-        boolean report = now % 20 == 0 && !ENGAGED.isEmpty();
-        if (report) {
-            Skyport.LOGGER.info("[stall] tick={} engaged={}", now, ENGAGED.size());
-        }
-        if (ENGAGED.isEmpty()) return;
-
-        ENGAGED.values().removeIf(autopilot -> {
-            if (autopilot.isRemoved() || autopilot.state == FlightState.IDLE) {
-                if (report) Skyport.LOGGER.info("[stall] dropping - removed or idle");
-                return true;
-            }
-            // activeSubLevel is now populated by sable$tick as well as by
-            // sable$physicsTick, so it is available for an aircraft the
-            // physics engine has never stepped - which is the only kind that
-            // ever needed this.
-            ServerSubLevel subLevel = autopilot.activeSubLevel;
-            long silent = now - autopilot.lastPhysicsTickGameTime;
-            if (report) {
-                Skyport.LOGGER.info("[stall] {} state={} subLevel={} silentTicks={}",
-                        autopilot.callsign(), autopilot.state,
-                        subLevel == null ? "null" : "ok", silent);
-            }
-            if (subLevel == null || subLevel.isRemoved()) return false;
-            if (silent < STALL_TICKS) return false;
-
-            RigidBodyHandle body = RigidBodyHandle.of(subLevel);
-            if (body == null || !body.isValid()) {
-                if (report) Skyport.LOGGER.info("[stall] {} has no valid body", autopilot.callsign());
-                return false;
-            }
-            // Straight up, and barely: enough to count as activity, far too
-            // little to shift an aircraft or disturb one that is parked on
-            // purpose.
-            body.applyLinearAndAngularImpulse(
-                    new org.joml.Vector3d(0, 0.001, 0), new org.joml.Vector3d(), true);
-            if (report) {
-                Skyport.LOGGER.info("[stall] nudged {} after {} silent ticks",
-                        autopilot.callsign(), silent);
-            }
-            return false;
-        });
-    }
 
     private BlockPos pushbackTarget(AirportLayout origin) {
         List<BlockPos> route = groundTaxiPath(origin, false);
