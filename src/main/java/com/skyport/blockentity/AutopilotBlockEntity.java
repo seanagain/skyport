@@ -1288,11 +1288,23 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         boolean isLast = currentWaypointIndex == targets.size() - 1;
         steeringToLastWaypoint = isLast;
 
-        // Start the turn early on intermediate waypoints: airborne, cut the
-        // corner well before arriving so the plane eases onto the new leg,
-        // rather than flying to the point, stopping, and pivoting. The last
-        // waypoint still has to be reached properly.
-        if (!isLast && !isGroundState() && activeBody != null) {
+        // Start the turn early on intermediate waypoints: cut the corner
+        // before arriving so the craft eases onto the new leg, rather than
+        // going to the point, stopping, and pivoting. The last waypoint still
+        // has to be reached properly.
+        //
+        // This used to be airborne-only, on the reasoning that a taxiing
+        // aircraft should track the painted line exactly. It cannot. An
+        // intermediate node was the one thing on the ground that had to be
+        // physically hit, and a contraption driven at full taxi speed
+        // overshoots a small sphere, then has to turn back - and while it is
+        // pointing the wrong way its throttle is at the misalignment floor,
+        // a crawl. So it sat beside the node shaking, too slow to reach a
+        // point it had already passed. Widening the sphere only moved the
+        // size of contraption it happened to; the fix is not requiring the
+        // hit at all. Aircraft do not stop at every taxiway node either -
+        // they round the corner.
+        if (!isLast && activeBody != null) {
             double distance = Math.sqrt(
                     Math.pow(target.getX() + 0.5 - simulatedPosition.x, 2)
                             + Math.pow(target.getZ() + 0.5 - simulatedPosition.z, 2));
@@ -1349,7 +1361,12 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * fraction of the leg it's actually flying, or it skips the leg entirely.
      */
     private double turnAnticipationRadius(double legLength) {
-        double cap = Math.max(CRAFT_ARRIVAL_RADIUS, legLength * MAX_CORNER_CUT);
+        // Floors on the radius that applies where the craft actually is, so
+        // the anticipation can never be smaller than the distance at which
+        // the waypoint would have counted as reached anyway - otherwise on
+        // the ground the two rules fight and the tighter one wins, which is
+        // the shaking this was meant to end.
+        double cap = Math.max(arrivalRadius(), legLength * MAX_CORNER_CUT);
         return Math.min(currentTopSpeed() * TURN_ANTICIPATION_SECONDS, cap);
     }
 
