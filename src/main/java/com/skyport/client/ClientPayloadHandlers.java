@@ -39,7 +39,7 @@ public final class ClientPayloadHandlers {
     public static void atcTraffic(AtcTrafficPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             if (Minecraft.getInstance().screen instanceof AtcScreen atc) {
-                atc.refresh(payload.airports(), payload.traffic());
+                atc.refresh(payload.airports(), payload.traffic(), payload.towerPos());
             }
         });
     }

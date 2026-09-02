@@ -91,7 +91,32 @@ public class AtcBlockEntity extends BlockEntity implements BlockEntitySubLevelAc
         }
     }
 
+    /**
+     * Which tower each player currently has open.
+     *
+     * The refresh packet has to report where the tower is, and it cannot
+     * work that out from coordinates: a tower on an aircraft lives in a
+     * sub-level, so looking up a block entity by world position finds
+     * nothing. Remembering which block answered the open is the only route
+     * back to it. Nothing here is persisted - a screen open across a
+     * restart is not a thing.
+     */
+    private static final java.util.Map<java.util.UUID, AtcBlockEntity> OPEN =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Where the tower this player has open currently is, or null if they
+     *  have none - the caller falls back to leaving the marker where it was. */
+    public static BlockPos openTowerPosition(ServerPlayer player) {
+        AtcBlockEntity tower = OPEN.get(player.getUUID());
+        if (tower == null || tower.isRemoved()) {
+            OPEN.remove(player.getUUID());
+            return null;
+        }
+        return tower.worldPosition();
+    }
+
     public void openScreen(ServerPlayer player) {
+        OPEN.put(player.getUUID(), this);
         ServerLevel serverLevel = player.serverLevel();
         AirportRegistry registry = AirportRegistry.get(serverLevel);
         pruneGhostAirports(serverLevel, registry);

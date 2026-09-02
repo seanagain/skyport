@@ -24,8 +24,17 @@ import java.util.List;
  * it stops the moment the screen closes - a plane that flies for an hour
  * with nobody watching costs nothing.
  */
+/**
+ * @param towerPos where the ATC block itself is, resent every refresh
+ *                 because a tower mounted on an aircraft moves. On the
+ *                 ground this is the same value every time and costs a
+ *                 handful of bytes; in the air it is the difference between
+ *                 a "you are here" marker that tracks and one frozen where
+ *                 the screen happened to be opened.
+ */
 public record AtcTrafficPayload(List<AirportLayout> airports,
-                                List<TrafficReport> traffic) implements CustomPacketPayload {
+                                List<TrafficReport> traffic,
+                                net.minecraft.core.BlockPos towerPos) implements CustomPacketPayload {
 
     public static final Type<AtcTrafficPayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath("skyport", "atc_traffic"));
@@ -36,6 +45,7 @@ public record AtcTrafficPayload(List<AirportLayout> airports,
                 for (AirportLayout airport : payload.airports()) airport.write(buf);
                 buf.writeVarInt(payload.traffic().size());
                 for (TrafficReport report : payload.traffic()) report.write(buf);
+                buf.writeBlockPos(payload.towerPos());
             },
             buf -> {
                 int airportCount = buf.readVarInt();
@@ -44,7 +54,7 @@ public record AtcTrafficPayload(List<AirportLayout> airports,
                 int count = buf.readVarInt();
                 List<TrafficReport> traffic = new ArrayList<>(count);
                 for (int i = 0; i < count; i++) traffic.add(TrafficReport.read(buf));
-                return new AtcTrafficPayload(airports, traffic);
+                return new AtcTrafficPayload(airports, traffic, buf.readBlockPos());
             });
 
     @Override

@@ -968,7 +968,18 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                     BlockPos entry = withY(loop.get(holdingEntryIndex), holdingAltitude(destination));
                     applyMotionTowards(entry);
                     if (horizontalDistance(entry, BlockPos.containing(simulatedPosition)) <= HOLDING_ENTRY_LEAD_BLOCKS) {
-                        if (claimArrival(serverLevel, destination)) {
+                        // Straight in only from pattern altitude. Arriving
+                        // above it and turning final anyway is what made
+                        // arrivals dive at the runway from cruise height:
+                        // the approach path starts at the holding altitude,
+                        // so all the descent got crammed into the final leg.
+                        // Circling down first spreads it around the circuit,
+                        // which is both how it is really done and what makes
+                        // it look flown rather than dropped.
+                        if (!atHoldingAltitude(destination)) {
+                            note("Descending to pattern altitude.");
+                            setState(FlightState.HOLDING);
+                        } else if (claimArrival(serverLevel, destination)) {
                             note("Runway clear - straight in.");
                             setState(FlightState.APPROACH);
                         } else {
@@ -982,7 +993,19 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // cleared to land - no real ATC/queueing yet (see DESIGN.md).
             // Circle until the runway frees up, re-asking each lap.
             case HOLDING -> followWaypoints(path(() -> holdingLap(destination)), () -> {
-                if (claimArrival(serverLevel, destination)) {
+                // Altitude before clearance, and in that order deliberately:
+                // asking for the runway while still descending would hold it
+                // against every other arrival for however many laps the
+                // descent takes. The lap waypoints already sit at pattern
+                // altitude, so flying the circuit is what does the
+                // descending - no separate manoeuvre, and the height comes
+                // off gradually across the loop.
+                if (!atHoldingAltitude(destination)) {
+                    currentWaypointIndex = 0;
+                    if (++holdingLaps % HOLDING_REPORT_EVERY_LAPS == 0) {
+                        note("Still descending to pattern altitude.");
+                    }
+                } else if (claimArrival(serverLevel, destination)) {
                     setState(FlightState.APPROACH);
                 } else {
                     // Still occupied - go round again rather than landing on
@@ -2570,6 +2593,24 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      *  the same pattern need to be at different heights, not the same one. */
     private int holdingAltitude(AirportLayout destination) {
         return destination.holdingPatternHeight() + currentSeparationOffset;
+    }
+
+    /**
+     * How close to pattern altitude counts as being at it.
+     *
+     * Loose on purpose. This gates turning final, and a tight band would
+     * have an aircraft circling repeatedly while a rigid-body simulation
+     * hunts the last two blocks of height - which reads as a plane that
+     * cannot make up its mind rather than one flying a circuit.
+     */
+    private static final int HOLDING_ALTITUDE_TOLERANCE = 10;
+
+    /** Is this aircraft down at the circuit height yet? Absolute Y, so it
+     *  works the same whether the field is on a mountain or in a superflat
+     *  world sitting below zero. */
+    private boolean atHoldingAltitude(AirportLayout destination) {
+        if (simulatedPosition == null) return true;
+        return Math.abs(simulatedPosition.y - holdingAltitude(destination)) <= HOLDING_ALTITUDE_TOLERANCE;
     }
 
     private double cruiseSpeed() {

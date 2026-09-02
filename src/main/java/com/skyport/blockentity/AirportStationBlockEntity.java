@@ -23,6 +23,11 @@ import java.util.UUID;
  */
 public class AirportStationBlockEntity extends BlockEntity implements com.skyport.data.Lockable {
 
+    /** Circuit height above the station, in blocks. High enough to clear
+     *  terrain and read as a pattern, low enough that the descent onto
+     *  final is a glide rather than a dive. */
+    private static final int DEFAULT_PATTERN_HEIGHT = 80;
+
     private final com.skyport.data.BlockLock lock = new com.skyport.data.BlockLock();
 
     @Override
@@ -83,6 +88,15 @@ public class AirportStationBlockEntity extends BlockEntity implements com.skypor
         }
 
         AirportLayout layout = new AirportLayout(UUID.randomUUID(), "New Airport", serverLevel.dimension());
+        layout.setStationPos(getBlockPos());
+        // Holding altitude is an absolute Y, and its default used to be an
+        // absolute 100 - which quietly assumed the airport was near sea
+        // level. On a superflat world sitting at y=-51 that put the pattern
+        // 150 blocks above the field, so arrivals climbed away from an
+        // airport they were trying to land at. Anchoring it to the station
+        // gives the same 80-block circuit wherever the ground happens to be,
+        // and the map editor's Hold Y control still overrides it.
+        layout.setHoldingPatternHeight(Math.min(320, getBlockPos().getY() + DEFAULT_PATTERN_HEIGHT));
         registry.put(layout);
         airportId = layout.id();
         setChanged();

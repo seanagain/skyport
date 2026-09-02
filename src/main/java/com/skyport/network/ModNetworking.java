@@ -203,9 +203,15 @@ public class ModNetworking {
             ServerPlayer player = (ServerPlayer) context.player();
             var registry = com.skyport.data.AirportRegistry.get(player.serverLevel());
             com.skyport.blockentity.AtcBlockEntity.pruneGhostAirports(player.serverLevel(), registry);
+            // Null when the tower has gone - broken, or its chunk unloaded
+            // under it. The player's own position is the honest stand-in:
+            // they are standing at the tower, or on the aircraft carrying
+            // it, so the marker stays somewhere true rather than freezing.
+            BlockPos tower = com.skyport.blockentity.AtcBlockEntity.openTowerPosition(player);
             PacketDistributor.sendToPlayer(player, new AtcTrafficPayload(
                     List.copyOf(registry.all()),
-                    List.copyOf(registry.allTraffic(player.serverLevel().getGameTime()))));
+                    List.copyOf(registry.allTraffic(player.serverLevel().getGameTime())),
+                    tower != null ? tower : player.blockPosition()));
         });
     }
 
