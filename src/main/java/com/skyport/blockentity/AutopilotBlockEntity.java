@@ -218,6 +218,36 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      */
     private static final double GROUND_YAW_GAIN = 0.6;
 
+    /**
+     * Corners tighter than this get stopped at and turned through rather
+     * than rounded. Held as the cosine so the check is a dot product.
+     *
+     * Thirty-five degrees: a gentle bend in a taxiway still flows, a real
+     * junction gets treated as one.
+     */
+    private static final double PIVOT_TURN_COS = Math.cos(Math.toRadians(35));
+
+    /** How square-on to the new leg counts as done turning - about fourteen
+     *  degrees. Tighter than this and a heavy contraption hunts the last
+     *  degree or two on the spot. */
+    private static final double PIVOT_ALIGNED = 0.97;
+
+    /** Five seconds, then continue regardless. Turning in place has no
+     *  forward progress to show it is working, so a craft that cannot quite
+     *  reach the threshold would otherwise hold the corner indefinitely -
+     *  and it is holding the taxiway while it does. */
+    private static final int PIVOT_MAX_TICKS = 100;
+
+    /** Ticks spent pivoting on the current corner, or -1 when not. */
+    private transient int pivotTicks = -1;
+
+    /** The gate this parking offset was measured for, and the offset itself -
+     *  frozen so the aim point cannot orbit the stand. See aimPointFor. */
+    @org.jetbrains.annotations.Nullable
+    private transient BlockPos parkingAimFor;
+    @org.jetbrains.annotations.Nullable
+    private transient Vec3 parkingAimOffset;
+
     /** Heading error small enough to leave alone, about two degrees. Without
      *  a deadzone there is no error too small to correct, so a craft already
      *  on its heading is nudged either side of it indefinitely. */
@@ -1315,6 +1345,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         this.state = newState;
         this.currentWaypointIndex = 0;
         this.stateEnteredTick = tickCounter;
+        this.pivotTicks = -1;
+        this.parkingAimFor = null;
         invalidatePath();
         // Each ground phase starts on the near side of the hold point again:
         // taxiing out hasn't been cleared onto the runway yet, and taxiing in
@@ -1376,6 +1408,31 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         boolean isLast = currentWaypointIndex == targets.size() - 1;
         steeringToLastWaypoint = isLast;
 
+        Vec3 outbound = outboundHeading(targets);
+        boolean sharpTurn = isGroundState() && outbound != null && isSharpGroundTurn(targets, outbound);
+
+        // Already stopped on a corner and turning: hold the brakes and swing
+        // round onto the new heading before going anywhere. A large aircraft
+        // takes a tight taxiway corner by stopping with itself over the
+        // junction and pivoting, not by arcing through it - and arcing is
+        // what put a wingspan's worth of aeroplane off the pavement.
+        //
+        // The tick cap is not decoration. Rotating in place is the one
+        // manoeuvre with no forward progress to show it is working, so a
+        // craft that cannot quite reach the alignment threshold would sit on
+        // the corner forever. Five seconds, then it goes anyway.
+        if (pivotTicks >= 0) {
+            boolean aligned = outbound == null || alignmentFactor(outbound) >= PIVOT_ALIGNED;
+            if (aligned || ++pivotTicks > PIVOT_MAX_TICKS) {
+                pivotTicks = -1;
+                currentWaypointIndex++;
+                if (currentWaypointIndex >= targets.size()) onFinished.run();
+                return;
+            }
+            flyHeading(outbound, 0); // stand still, keep turning
+            return;
+        }
+
         // Start the turn early on intermediate waypoints: cut the corner
         // before arriving so the craft eases onto the new leg, rather than
         // going to the point, stopping, and pivoting. The last waypoint still
@@ -1392,7 +1449,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // size of contraption it happened to; the fix is not requiring the
         // hit at all. Aircraft do not stop at every taxiway node either -
         // they round the corner.
-        if (!isLast && activeBody != null) {
+        // ...but not into a sharp one. Cutting a gentle bend keeps the craft
+        // flowing; cutting a near-right-angle taxiway corner is how an
+        // aircraft ends up crossing the grass inside it. Those get driven up
+        // to and pivoted through instead.
+        if (!isLast && activeBody != null && !sharpTurn) {
             double distance = Math.sqrt(
                     Math.pow(target.getX() + 0.5 - simulatedPosition.x, 2)
                             + Math.pow(target.getZ() + 0.5 - simulatedPosition.z, 2));
@@ -1415,9 +1476,45 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         }
 
         if (applyMotionTowards(target)) {
+            // Reached a corner that needs turning through: stop here and
+            // pivot rather than advancing straight onto the next leg while
+            // still pointing down the old one.
+            if (sharpTurn && activeBody != null) {
+                pivotTicks = 0;
+                return;
+            }
             currentWaypointIndex++;
             if (currentWaypointIndex >= targets.size()) onFinished.run();
         }
+    }
+
+    /** Which way the next leg runs, flat and normalised, or null at the end
+     *  of the route. */
+    @org.jetbrains.annotations.Nullable
+    private Vec3 outboundHeading(List<BlockPos> targets) {
+        int next = currentWaypointIndex + 1;
+        if (next >= targets.size()) return null;
+        return flatDirection(targets.get(currentWaypointIndex), targets.get(next));
+    }
+
+    /** Is the corner at the current waypoint tight enough to want stopping
+     *  and turning, rather than rounding? Measured between the leg being
+     *  driven and the one after it. */
+    private boolean isSharpGroundTurn(List<BlockPos> targets, Vec3 outbound) {
+        BlockPos previous = currentWaypointIndex > 0
+                ? targets.get(currentWaypointIndex - 1)
+                : BlockPos.containing(simulatedPosition);
+        Vec3 inbound = flatDirection(previous, targets.get(currentWaypointIndex));
+        if (inbound == null) return false;
+        return inbound.x * outbound.x + inbound.z * outbound.z < PIVOT_TURN_COS;
+    }
+
+    @org.jetbrains.annotations.Nullable
+    private static Vec3 flatDirection(BlockPos from, BlockPos to) {
+        double dx = to.getX() - from.getX();
+        double dz = to.getZ() - from.getZ();
+        double length = Math.sqrt(dx * dx + dz * dz);
+        return length < 1.0e-6 ? null : new Vec3(dx / length, 0, dz / length);
     }
 
     /**
@@ -1514,13 +1611,28 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      */
     private Vec3 aimPointFor(BlockPos target) {
         Vec3 waypoint = Vec3.atCenterOf(target);
-        if (state != FlightState.TAXI_IN || !steeringToLastWaypoint) return waypoint;
+        if (state != FlightState.TAXI_IN || !steeringToLastWaypoint) {
+            parkingAimFor = null;
+            return waypoint;
+        }
         if (activeSubLevel == null) return waypoint;
 
-        Vec3 blockPosition = activeSubLevel.logicalPose().transformPosition(getBlockPos().getCenter());
-        // centre - block: aim the centre this much beyond the gate, and the
-        // block lands on it.
-        return waypoint.add(simulatedPosition.subtract(blockPosition));
+        // Measured ONCE, when the final approach to this stand begins, and
+        // then held. The offset is a world vector, so recomputing it every
+        // tick makes the aim point orbit the gate as the aircraft yaws - the
+        // craft steers at it, which rotates it, which moves the aim point
+        // again. That is the same feedback loop that steering from the
+        // Autopilot block created in the first place, reintroduced at the one
+        // place still measuring from the block. Freezing it costs only the
+        // small error from whatever the craft rotates through on the last
+        // couple of blocks, and buys a target that holds still.
+        if (!target.equals(parkingAimFor)) {
+            parkingAimFor = target;
+            Vec3 blockPosition = activeSubLevel.logicalPose()
+                    .transformPosition(getBlockPos().getCenter());
+            parkingAimOffset = simulatedPosition.subtract(blockPosition);
+        }
+        return parkingAimOffset == null ? waypoint : waypoint.add(parkingAimOffset);
     }
     /**
      * Flies the real craft toward a waypoint by nudging its velocity, rather
