@@ -1634,6 +1634,38 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         }
         return parkingAimOffset == null ? waypoint : waypoint.add(parkingAimOffset);
     }
+
+    /** How close to runway height counts as landed. */
+    private static final double TOUCHDOWN_TOLERANCE = 1.5;
+
+    /**
+     * Has the aircraft actually got down onto the runway?
+     *
+     * Only asked of the last waypoint of an approach, and it exists because
+     * arrival is a sphere. The airborne radius is six blocks in three
+     * dimensions, so a plane could satisfy "reached the touchdown point"
+     * while still well above it - and the state it moves into next is
+     * TAXI_IN, which deliberately commands nothing vertical and leaves
+     * height to gravity and the wheels. The result was an aeroplane landing
+     * a couple of blocks up, sitting there, and then dropping the rest of
+     * the way the moment it started taxiing.
+     *
+     * The settled test is the escape hatch. If the drawn runway height is
+     * below the surface actually built - easy to do, the waypoint carries
+     * whatever Y it was drawn at - then the craft comes to rest on the real
+     * runway with the target still under it and would never close that gap.
+     * Resting on something with no vertical motion is landed, whatever the
+     * map says.
+     */
+    private boolean touchedDown(Vec3 delta) {
+        if (state != FlightState.APPROACH || !steeringToLastWaypoint) return true;
+
+        double above = -delta.y;
+        if (above <= TOUCHDOWN_TOLERANCE) return true;
+        return activeBody != null
+                && Math.abs(activeBody.getLinearVelocity().y()) < 0.05
+                && above <= TOUCHDOWN_TOLERANCE * 3;
+    }
     /**
      * Flies the real craft toward a waypoint by nudging its velocity, rather
      * than by setting its position.
@@ -1677,7 +1709,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 : arrivalRadius() * 2.5;
         boolean passed = distance > lastWaypointDistance
                 && lastWaypointDistance <= passedWithin;
-        if (distance <= arrivalRadius() || passed) {
+        if ((distance <= arrivalRadius() || passed) && touchedDown(delta)) {
             pitchDegrees = 0;
             lastWaypointTarget = null;
             lastWaypointDistance = Double.MAX_VALUE;
