@@ -529,7 +529,17 @@ public class AirportMapScreen extends Screen {
         }
 
         if (button == 0 && isInsideMap(mouseX, mouseY)) {
-            BlockPos world = snapToExistingNode(screenToWorld((int) mouseX, (int) mouseY));
+            BlockPos raw = screenToWorld((int) mouseX, (int) mouseY);
+            // A hold line marks a place ALONG a taxiway, not a place the
+            // taxiway bends. Snapping it to nodes meant it could only ever
+            // sit where the route happened to have a point, so getting one
+            // where it belonged meant adding a node there and distorting the
+            // route to suit the marking. It snaps to the nearest point ON a
+            // segment instead, which keeps it exactly on the pavement while
+            // letting it sit anywhere along it.
+            BlockPos world = mode == EditMode.HOLD_SHORT
+                    ? snapToTaxiwaySegment(raw)
+                    : snapToExistingNode(raw);
 
             // In Taxiway mode, a click on the BODY of an existing segment
             // changes its direction instead of placing a point.
@@ -766,6 +776,71 @@ public class AirportMapScreen extends Screen {
         return super.mouseReleased(mouseX, mouseY, button);
     }
 
+
+
+    /** How far off a taxiway a hold line may sit and still count as on it.
+     *  A block or so of slack, so a click that lands beside the line rather
+     *  than exactly on it still works. */
+    private static final double HOLD_LINE_ON_TAXIWAY_TOLERANCE = 1.5;
+
+    /** Is this point on a taxiway segment, as opposed to on one of the
+     *  points the taxiway was drawn from? */
+    private boolean isOnTaxiwaySegment(BlockPos p) {
+        List<Waypoint> taxi = layout.waypoints(Waypoint.Type.TAXIWAY);
+        for (int i = 0; i + 1 < taxi.size(); i += 2) {
+            BlockPos onSegment = closestPointOnSegment(taxi.get(i).pos(), taxi.get(i + 1).pos(), p);
+            if (horizontalDistance(onSegment, p) <= HOLD_LINE_ON_TAXIWAY_TOLERANCE) return true;
+        }
+        return false;
+    }
+    /**
+     * The closest point on a taxiway segment, rather than the closest drawn
+     * node.
+     *
+     * Hold lines are the one thing placed along a route rather than at a
+     * corner of it, so this is what they snap to. Everything else still
+     * snaps to nodes, because everything else is describing where the route
+     * goes and wants to join up exactly.
+     *
+     * Falls through to the raw position if nothing is near, so the
+     * validation below can explain the problem rather than the click
+     * silently landing somewhere surprising.
+     */
+    private BlockPos snapToTaxiwaySegment(BlockPos candidate) {
+        List<Waypoint> taxi = layout.waypoints(Waypoint.Type.TAXIWAY);
+        BlockPos best = null;
+        double bestDist = Double.MAX_VALUE;
+
+        // Taxiway points are read in pairs - each pair is one segment.
+        for (int i = 0; i + 1 < taxi.size(); i += 2) {
+            BlockPos onSegment = closestPointOnSegment(
+                    taxi.get(i).pos(), taxi.get(i + 1).pos(), candidate);
+            double d = horizontalDistance(onSegment, candidate);
+            if (d < bestDist) {
+                bestDist = d;
+                best = onSegment;
+            }
+        }
+        double radius = (double) NODE_SNAP_PIXELS * blocksPerPixel();
+        return best != null && bestDist <= radius ? best : candidate;
+    }
+
+    /** Where a point projects onto a line segment, clamped to its ends.
+     *  Flat: taxiways are drawn on a map and the height comes from the
+     *  ground, not from where the line was drawn. */
+    private static BlockPos closestPointOnSegment(BlockPos from, BlockPos to, BlockPos point) {
+        double dx = to.getX() - from.getX();
+        double dz = to.getZ() - from.getZ();
+        double lengthSq = dx * dx + dz * dz;
+        if (lengthSq < 1.0e-6) return from;
+
+        double t = ((point.getX() - from.getX()) * dx + (point.getZ() - from.getZ()) * dz) / lengthSq;
+        t = Math.max(0, Math.min(1, t));
+        return new BlockPos(
+                (int) Math.round(from.getX() + dx * t),
+                from.getY(),
+                (int) Math.round(from.getZ() + dz * t));
+    }
     private BlockPos snapToExistingNode(BlockPos candidate) {
         BlockPos best = null;
         double bestDist = Double.MAX_VALUE;
@@ -930,8 +1005,11 @@ public class AirportMapScreen extends Screen {
             case HOLD_SHORT -> {
                 if (!hasRunway) yield "Draw the runway first.";
                 if (taxiway.isEmpty()) yield "Draw a taxiway first.";
-                if (!touches(nodesOf(Waypoint.Type.TAXIWAY), p)) {
-                    yield "Put the hold point on a taxiway point.";
+                // On the taxiway, not on one of its corners. A hold line
+                // marks a place along the route, and requiring a node there
+                // meant bending the route to suit the marking.
+                if (!isOnTaxiwaySegment(p)) {
+                    yield "Put the hold line on a taxiway.";
                 }
                 yield null;
             }
@@ -1196,7 +1274,7 @@ public class AirportMapScreen extends Screen {
             case HOLDING_PATTERN -> "the airborne racetrack - click a loop of 3+ points";
             case FINAL_LEG -> "2 points: from holding pattern, to runway";
             case GATE -> "click the end of a runway or taxiway line";
-            case HOLD_SHORT -> "pairs; a line across the taxiway, one per runway";
+            case HOLD_SHORT -> "pairs; a line across the taxiway anywhere along it, one per runway";
             case HELIPAD -> "click anywhere - helicopters and blimps land here";
         };
     }

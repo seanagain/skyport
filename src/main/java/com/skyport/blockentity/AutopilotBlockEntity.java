@@ -291,6 +291,14 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** How far back from the hold line to wait, so the junction stays clear
      *  for anything that needs to pass. */
     private static final int HOLD_LINE_STANDOFF_BLOCKS = 8;
+    /** Fallback reach when the craft's own bounds are not available - about
+     *  a small aircraft's half-length. */
+    private static final double DEFAULT_CRAFT_REACH = 6.0;
+
+    /** A little further than the tail before the taxiway is handed back, so
+     *  "clear" means clear rather than exactly level with the line. */
+    private static final double HOLD_LINE_CLEARED_MARGIN = 2.0;
+
     /** How the route is sampled for terrain, and how much air to insist on
      *  above the highest ground found. */
     /** Tighter than it was: a one-block-wide line sampled every 32 blocks
@@ -926,9 +934,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                             currentWaypointIndex = 0;
                             // The route past the line is a different one.
                             invalidatePath();
-                            // Off the taxiway and onto the runway - the next
-                            // aircraft can start taxiing out behind us.
-                            releaseTaxiway(serverLevel, origin);
+                            // The taxiway is NOT released here. Being cleared
+                            // to line up is the moment the aircraft starts
+                            // crossing, not the moment it has crossed - it is
+                            // at its longest across the junction right now.
+                            // Held until the tail is over the line; see
+                            // crossingHoldLine.
+                            crossingHoldLine = holdTarget;
                             note("Cleared to line up.");
                         } else if (tickCounter % 100 == 0) {
                             note("Holding short - runway in use.");
@@ -936,6 +948,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                     });
                     break;
                 }
+
+                releaseTaxiwayOnceClear(serverLevel, origin);
 
                 final AirportLayout departureAirport = origin;
                 followWaypoints(path(() -> {
@@ -1347,6 +1361,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         this.parkingAimFor = null;
         // Whatever way the aircraft is facing as pushback begins is the way
         // it should still be facing when pushback ends.
+        if (newState != FlightState.TAXI_OUT) crossingHoldLine = null;
         if (newState == FlightState.PUSHBACK) {
             capturePushbackHeading();
         } else {
@@ -2245,6 +2260,56 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * Returns null when the gate connects straight to the runway - there's
      * nothing to back out of, so the plane just turns and goes.
      */
+    /**
+     * The hold line the aircraft is currently straddling, or null.
+     *
+     * Set when it is cleared to line up and held until the tail is across.
+     * Not persisted: an aircraft reloaded mid-crossing is one whose lease has
+     * lapsed anyway, and re-acquiring beats inheriting a half-crossing.
+     */
+    @org.jetbrains.annotations.Nullable
+    private transient BlockPos crossingHoldLine;
+
+
+    /**
+     * How far the aircraft reaches from its centre, horizontally.
+     *
+     * Taken from the craft's own bounding box rather than assumed, because
+     * the whole point of the hold line is that it is sized to the aircraft
+     * using it - a fixed standoff that suits a light single leaves an
+     * airliner's tail across the junction. The box is world-axis-aligned, so
+     * it changes shape as the craft turns; the largest extent from the
+     * centre is used, which errs toward holding further back. That is the
+     * right way to be wrong about a runway crossing.
+     */
+    private double craftReach() {
+        if (activeSubLevel == null || simulatedPosition == null) return DEFAULT_CRAFT_REACH;
+        var box = activeSubLevel.boundingBox();
+        double reach = Math.max(
+                Math.max(box.maxX() - simulatedPosition.x, simulatedPosition.x - box.minX()),
+                Math.max(box.maxZ() - simulatedPosition.z, simulatedPosition.z - box.minZ()));
+        return reach <= 0 ? DEFAULT_CRAFT_REACH : reach;
+    }
+
+    /**
+     * Give the taxiway back once the aircraft is genuinely off it.
+     *
+     * The lease used to be released the instant the runway was granted,
+     * which is the moment the aircraft BEGINS to cross - it is lying across
+     * the junction at its full length right then, and the next departure was
+     * being told the taxiway was free while there was still an aeroplane
+     * across it. Now it is held until the trailing edge is past the line.
+     */
+    private void releaseTaxiwayOnceClear(ServerLevel serverLevel, @org.jetbrains.annotations.Nullable AirportLayout origin) {
+        if (crossingHoldLine == null || origin == null || simulatedPosition == null) return;
+        double past = horizontalDistance(crossingHoldLine, BlockPos.containing(simulatedPosition));
+        if (past < craftReach() + HOLD_LINE_CLEARED_MARGIN) return;
+
+        releaseTaxiway(serverLevel, origin);
+        crossingHoldLine = null;
+        note("Runway vacated - taxiway clear behind.");
+    }
+
     @org.jetbrains.annotations.Nullable
     /**
      * A waiting spot short of the hold line, backed off along the route the
@@ -2268,10 +2333,15 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         double length = Math.sqrt(dx * dx + dz * dz);
         if (length < 1.0) return holdShort;
 
+        // Backed off by the aircraft's own reach as well as the fixed
+        // clearance, so what waits behind the line is the whole aeroplane
+        // rather than the point the autopilot steers. A fixed standoff sized
+        // for a light aircraft leaves an airliner's nose over the junction.
+        double standoff = HOLD_LINE_STANDOFF_BLOCKS + craftReach();
         return new BlockPos(
-                (int) Math.round(holdShort.getX() + dx / length * HOLD_LINE_STANDOFF_BLOCKS),
+                (int) Math.round(holdShort.getX() + dx / length * standoff),
                 holdShort.getY(),
-                (int) Math.round(holdShort.getZ() + dz / length * HOLD_LINE_STANDOFF_BLOCKS));
+                (int) Math.round(holdShort.getZ() + dz / length * standoff));
     }
 
 
