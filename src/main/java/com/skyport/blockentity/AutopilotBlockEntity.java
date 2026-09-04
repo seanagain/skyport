@@ -1971,13 +1971,28 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // ringing, and if the step length is jumping around then the loop is
         // being asked at a rate it cannot damp.
         if (onGround && SkyportConfig.telemetry && tickCounter % 20 == 0) {
+            // noseYaw and targetYaw are logged separately, not just their
+            // difference, because the difference is what is behaving
+            // impossibly: the craft rotates steadily and the error does not
+            // move. That can only happen if the controller's picture of the
+            // craft rotates with it, and these two say which half is at
+            // fault. A noseYaw that does not change while spin is 0.8 rad/s
+            // means the orientation being read is stale - the aircraft is
+            // turning and the autopilot cannot see it. A noseYaw that tracks
+            // while targetYaw follows it round means the aim point is moving
+            // with the craft, and the reference position is the problem.
+            double noseYawLog = Math.atan2(nose.x, nose.z);
+            double targetYawLog = Math.atan2(target.x, target.z);
             Skyport.LOGGER.info(
-                    "[turn] {} state={} yawErr={} pitchErr={} rollErr={} spin=({}, {}, {}) step={}s",
+                    "[turn] {} state={} yawErr={} noseYaw={} targetYaw={} spin=({}, {}, {}) pos=({}, {}) step={}s",
                     callsign(), state,
-                    String.format("%.3f", yawError), String.format("%.3f", pitchError),
-                    String.format("%.3f", rollError),
+                    String.format("%.3f", yawError),
+                    String.format("%.3f", noseYawLog),
+                    String.format("%.3f", targetYawLog),
                     String.format("%.3f", current.x()), String.format("%.3f", current.y()),
                     String.format("%.3f", current.z()),
+                    String.format("%.1f", simulatedPosition == null ? 0 : simulatedPosition.x),
+                    String.format("%.1f", simulatedPosition == null ? 0 : simulatedPosition.z),
                     String.format("%.4f", physicsStepSeconds));
         }
 
