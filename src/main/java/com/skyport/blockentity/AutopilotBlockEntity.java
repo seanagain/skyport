@@ -1680,6 +1680,22 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         double gain = Math.min(1.0, CRAFT_STEER_GAIN * physicsStepSeconds / NOMINAL_STEP_SECONDS);
         Vec3 correction = desired.subtract(new Vec3(v.x(), v.y(), v.z())).scale(gain);
 
+        // On the ground, do not touch the vertical axis at all.
+        //
+        // The heading has its vertical component zeroed for ground states,
+        // which was meant to mean "taxiing is a 2D problem". What it actually
+        // meant was a DESIRED vertical velocity of zero - and a velocity
+        // controller asked for zero vertical velocity cancels gravity. The
+        // craft was being held at whatever height it happened to arrive at.
+        //
+        // That is the aeroplane hovering two blocks over its own runway and
+        // taxiing on nothing until something interrupted the correction and
+        // it dropped. It is very likely the spinning as well: held clear of
+        // the ground there are no wheels on anything, so a yaw command turns
+        // the craft freely with nothing to resist it, and the aircraft spins
+        // where it should have been pivoting against friction.
+        if (onGround) correction = correction.multiply(1, 0, 1);
+
         // Unpowered: steer, but don't drive. Attitude control below still
         // runs - an aircraft losing its engine keeps its wings level - but
         // nothing accelerates the craft or holds it up, so it coasts and
