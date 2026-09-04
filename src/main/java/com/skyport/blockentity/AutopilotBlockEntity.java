@@ -169,6 +169,17 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** Slows the craft as it closes on a waypoint so it settles rather than
      *  overshooting - speed is capped at distance * this. */
     private static final double CRAFT_APPROACH_GAIN = 0.6;
+    /** How sharply a taxiing aircraft sheds speed on the way onto a stand.
+     *  Gentler than the airborne figure, and measured against the distance
+     *  still to go rather than to the node, so the run-down finishes as it
+     *  arrives instead of being cut off by the parking brake. */
+    private static final double GROUND_PARKING_GAIN = 0.35;
+
+    /** The last of it: a slow walk over the final couple of blocks. Without
+     *  a floor the run-down approaches the stand asymptotically and takes
+     *  forever to close the last stretch. */
+    private static final double PARKING_CREEP_SPEED = 0.5;
+
     /** Planes are big; "arrived" has to be looser than for a point. */
     private static final double CRAFT_ARRIVAL_RADIUS = 6.0;
 
@@ -1721,9 +1732,28 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // arrive, and then turn sharply - a plane passing a turn point should
         // carry its speed through the corner.
         double topSpeed = currentTopSpeed();
-        double speed = steeringToLastWaypoint
-                ? Math.min(topSpeed, distance * CRAFT_APPROACH_GAIN)
-                : topSpeed;
+        double speed;
+        if (!steeringToLastWaypoint) {
+            speed = topSpeed;
+        } else if (isGroundState()) {
+            // Roll onto a stand rather than driving at it and stopping dead.
+            //
+            // The airborne profile eases off toward zero speed at zero
+            // distance - but an aircraft does not park at zero distance, it
+            // parks when it reaches the arrival radius, and it was still
+            // doing about a block and a half a second when it got there. The
+            // parking brake then took that out in one go, which is the lurch
+            // at the end of a taxi.
+            //
+            // Measuring the run-down against the distance still to GO, rather
+            // than to the gate node itself, means the speed is genuinely
+            // trailing off as it arrives. The creep term is what stops it
+            // asymptotically never quite getting there.
+            double toGo = Math.max(0.0, arrivalDistance - arrivalRadius());
+            speed = Math.min(topSpeed, toGo * GROUND_PARKING_GAIN + PARKING_CREEP_SPEED);
+        } else {
+            speed = Math.min(topSpeed, distance * CRAFT_APPROACH_GAIN);
+        }
         speed *= alignmentFactor(heading);
         Vec3 desired = heading.scale(speed);
 
