@@ -1557,7 +1557,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             parkingAimFor = target;
             Vec3 blockPosition = activeSubLevel.logicalPose()
                     .transformPosition(getBlockPos().getCenter());
-            parkingAimOffset = simulatedPosition.subtract(blockPosition);
+            // Horizontal only. A gate is a spot on the ground, and the
+            // Autopilot block is generally mounted above the craft's centre
+            // of mass - so a 3D offset put the aim point below the gate node
+            // by that height, somewhere the craft can never get to. It then
+            // never arrived, never stopped, and sat on its stand chasing a
+            // bearing that at nearly zero horizontal range is pure noise.
+            parkingAimOffset = simulatedPosition.subtract(blockPosition).multiply(1, 0, 1);
         }
         return parkingAimOffset == null ? waypoint : waypoint.add(parkingAimOffset);
     }
@@ -1636,7 +1642,18 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 : arrivalRadius() * 2.5;
         boolean passed = distance > lastWaypointDistance
                 && lastWaypointDistance <= passedWithin;
-        if ((distance <= arrivalRadius() || passed) && touchedDown(delta)) {
+
+        // Arriving is a 2D question on the ground, the same way steering
+        // already is. A taxiing aircraft's height above a waypoint drawn at
+        // the station's level is not something it can do anything about -
+        // it is on its wheels - so counting that gap toward the arrival
+        // radius means it can be permanently short of a waypoint it is
+        // sitting on top of. That is worst at the stand, which has the
+        // tightest radius of all.
+        double arrivalDistance = isGroundState()
+                ? Math.sqrt(delta.x * delta.x + delta.z * delta.z)
+                : distance;
+        if ((arrivalDistance <= arrivalRadius() || passed) && touchedDown(delta)) {
             pitchDegrees = 0;
             lastWaypointTarget = null;
             lastWaypointDistance = Double.MAX_VALUE;
