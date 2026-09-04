@@ -3041,6 +3041,20 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         Vec3 desired = direction.scale(speed);
         Vector3dc v = activeBody.getLinearVelocity();
         Vec3 correction = desired.subtract(new Vec3(v.x(), v.y(), v.z())).scale(CRAFT_STEER_GAIN);
+
+        // The second copy of the vertical trap, and the one that mattered on
+        // the runway. Airborne, driving vertical velocity toward the desired
+        // value is exactly right - it is how the aircraft holds an altitude.
+        // On the ground it cancels gravity and lifts the craft off its
+        // wheels, and this method is what lines a departure up: it is called
+        // with a speed of zero to hold position and turn onto the runway
+        // heading. Held clear of the ground with nothing to turn against, the
+        // aircraft does not pivot, it spins.
+        //
+        // steerCraftTowards had the same fault and was fixed; this is a
+        // separate copy of the same three lines, so it did not get the fix.
+        if (isGroundState()) correction = correction.multiply(1, 0, 1);
+
         activeBody.addLinearAndAngularVelocity(
                 new Vector3d(correction.x, correction.y, correction.z),
                 angularCorrectionTowards(direction));
