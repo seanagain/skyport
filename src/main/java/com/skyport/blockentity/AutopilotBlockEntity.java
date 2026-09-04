@@ -1323,6 +1323,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         this.currentWaypointIndex = 0;
         this.stateEnteredTick = tickCounter;
         this.parkingAimFor = null;
+        // Whatever way the aircraft is facing as pushback begins is the way
+        // it should still be facing when pushback ends.
+        if (newState == FlightState.PUSHBACK) {
+            capturePushbackHeading();
+        } else {
+            pushbackHeading = null;
+        }
         invalidatePath();
         // Each ground phase starts on the near side of the hold point again:
         // taxiing out hasn't been cleared onto the runway yet, and taxiing in
@@ -1725,10 +1732,15 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             correction = new Vec3(correction.x * sideways, correction.y, correction.z * sideways);
         }
 
-        // Pushing back: keep the nose where it is and roll backwards. Steering
-        // toward the heading would have the plane pirouette on the stand.
+        // Pushing back: hold the heading it started with and roll backwards.
+        // Steering toward the direction of travel would have the aircraft
+        // pirouette on the stand - but steering nothing at all, which is what
+        // this did before, let it spin freely off its ground contacts. It
+        // holds a heading now rather than merely declining to chase one.
         Vector3d spin = state == FlightState.PUSHBACK
-                ? levelOnlyCorrection()
+                ? (pushbackHeading != null
+                        ? angularCorrectionTowards(pushbackHeading)
+                        : levelOnlyCorrection())
                 : angularCorrectionTowards(heading);
         activeBody.addLinearAndAngularVelocity(
                 new Vector3d(correction.x, correction.y, correction.z), spin);
@@ -1781,16 +1793,58 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      *  spinning - used while reversing off a stand. */
     private Vector3d levelOnlyCorrection() {
         if (activeSubLevel == null || activeBody == null) return new Vector3d();
+        Vector3d nose = noseVector();
         Quaterniondc orientation = activeSubLevel.logicalPose().orientation();
-        Direction facing = getBlockState().hasProperty(AutopilotBlock.FACING)
-                ? getBlockState().getValue(AutopilotBlock.FACING)
-                : Direction.NORTH;
-        Vector3d nose = orientation.transform(
-                new Vector3d(facing.getStepX(), facing.getStepY(), facing.getStepZ()));
         Vector3d up = orientation.transform(new Vector3d(0, 1, 0));
         // Target heading == current heading, so only the roll/pitch levelling
         // terms do anything.
         return attitudeCorrection(nose, up, new Vector3d(nose), true);
+    }
+
+    /** The craft's nose in world space, from the Autopilot block's facing
+     *  turned by the craft's own orientation. */
+    private Vector3d noseVector() {
+        Quaterniondc orientation = activeSubLevel.logicalPose().orientation();
+        Direction facing = getBlockState().hasProperty(AutopilotBlock.FACING)
+                ? getBlockState().getValue(AutopilotBlock.FACING)
+                : Direction.NORTH;
+        return orientation.transform(
+                new Vector3d(facing.getStepX(), facing.getStepY(), facing.getStepZ()));
+    }
+
+    /**
+     * The heading to hold while reversing off a stand.
+     *
+     * Pushback used to steer no heading at all: the attitude call passed the
+     * craft's own nose as the target, so the error was exactly zero by
+     * construction and the yaw term could never ask for anything. Telemetry
+     * showed what that costs - every pushback reading had yawErr=0.000 while
+     * the craft rotated at up to 2.3 radians a second. Dragging a
+     * contraption backwards over its ground contacts generates yaw torque,
+     * and nothing was holding it straight.
+     *
+     * It then left pushback pointing over a hundred degrees off and handed
+     * TAXI_OUT a recovery to fly, which is the spinning that got reported -
+     * and why chasing it in the taxi controller never worked. That
+     * controller was fine. The readings right after show it closing a 127
+     * degree error smoothly, every tick.
+     *
+     * Holding the heading pushback began with keeps the original intent -
+     * the nose does not swing round to face the direction of travel, the
+     * aircraft still tracks backwards - while giving the yaw axis something
+     * to defend. Which is what a tug does.
+     */
+    @org.jetbrains.annotations.Nullable
+    private transient Vec3 pushbackHeading;
+
+    private void capturePushbackHeading() {
+        if (activeSubLevel == null) {
+            pushbackHeading = null;
+            return;
+        }
+        Vector3d nose = noseVector();
+        double flat = Math.sqrt(nose.x * nose.x + nose.z * nose.z);
+        pushbackHeading = flat < 1.0e-4 ? null : new Vec3(nose.x / flat, 0, nose.z / flat);
     }
 
     /** Straight up, straight down, or holding station - the manoeuvres where
