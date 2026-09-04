@@ -1855,6 +1855,58 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return attitudeCorrection(nose, up, target, onGround);
     }
 
+
+    /** Heading error above which the way round stops being obvious and gets
+     *  committed to - 150 degrees. */
+    private static final double TURN_COMMIT_ENTER = Math.toRadians(150);
+
+    /** ...and below which the commitment is released, 60 degrees. Well clear
+     *  of the ambiguous region, so releasing cannot immediately re-trigger. */
+    private static final double TURN_COMMIT_EXIT = Math.toRadians(60);
+
+    /** Which way round a large turn was committed to: +1, -1, or 0 for not
+     *  currently committed. Not persisted - a turn does not survive a
+     *  reload, and starting fresh is the safe answer. */
+    private transient int turnCommit = 0;
+
+    /**
+     * Pick a way round a large turn and stick to it.
+     *
+     * Near 180 degrees the shortest way round is genuinely ambiguous, and
+     * the maths makes that worse rather than better: the error is computed
+     * as a signed shortest arc, so at the antipode an immeasurably small
+     * change in heading flips its SIGN while the magnitude stays at maximum.
+     * The controller then commands hard left, overshoots through the
+     * antipode, commands hard right, and the aircraft stands there slamming
+     * back and forth instead of turning round.
+     *
+     * That is what a playtest log showed: of 365 readings taxiing out, 169
+     * sat between 115 and 180 degrees of error, with the commanded spin
+     * reversing sign between consecutive readings. No gain fixes that - the
+     * problem is not how hard it turns but that the direction keeps
+     * changing.
+     *
+     * So once the error is large enough to be ambiguous, the direction is
+     * chosen once and held until the turn is well past the ambiguity. The
+     * craft's existing rotation wins the choice where there is one, because
+     * turning with the momentum it already has beats fighting it.
+     */
+    private double committedYaw(double yawError) {
+        double magnitude = Math.abs(yawError);
+
+        if (turnCommit == 0) {
+            if (magnitude < TURN_COMMIT_ENTER) return yawError;
+            // Already swinging one way? Go that way.
+            double spin = activeBody == null ? 0 : activeBody.getAngularVelocity().y();
+            turnCommit = Math.abs(spin) > 0.05
+                    ? (spin > 0 ? 1 : -1)
+                    : (yawError >= 0 ? 1 : -1);
+        } else if (magnitude < TURN_COMMIT_EXIT) {
+            turnCommit = 0;
+            return yawError;
+        }
+        return magnitude * turnCommit;
+    }
     /**
      * Drives the craft's attitude by controlling yaw, pitch and roll
      * separately, rather than by the shortest rotation from its nose to the
@@ -1892,6 +1944,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             double noseYaw = Math.atan2(nose.x / flatLen, nose.z / flatLen);
             double targetYaw = Math.atan2(target.x, target.z);
             yawError = Math.atan2(Math.sin(targetYaw - noseYaw), Math.cos(targetYaw - noseYaw));
+            yawError = committedYaw(yawError);
         }
 
         // --- pitch: about the craft's wing axis. Level on the ground.
