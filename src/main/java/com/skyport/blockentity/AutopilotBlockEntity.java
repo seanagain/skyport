@@ -204,6 +204,17 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * small sphere is something it settles into instead of overshooting.
      */
     private static final double GROUND_PARKING_RADIUS = 2.5;
+
+    /**
+     * How close to the stand the parking offset stops being recomputed.
+     *
+     * Comfortably further out than any plausible offset between the
+     * Autopilot block and the craft's centre, so the live version is still
+     * stable when it is frozen - but close enough in that the aircraft is
+     * nearly straight on the stand by then, so the heading it freezes at is
+     * the heading it parks on.
+     */
+    private static final double PARKING_FREEZE_DISTANCE = 12.0;
     /** How hard the craft turns toward its heading, and the ceiling on how
      *  fast it may rotate (radians/second) - a contraption spinning to face a
      *  new waypoint instantly looks wrong. */
@@ -1544,28 +1555,49 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         }
         if (activeSubLevel == null) return waypoint;
 
-        // Measured ONCE, when the final approach to this stand begins, and
-        // then held. The offset is a world vector, so recomputing it every
-        // tick makes the aim point orbit the gate as the aircraft yaws - the
-        // craft steers at it, which rotates it, which moves the aim point
-        // again. That is the same feedback loop that steering from the
-        // Autopilot block created in the first place, reintroduced at the one
-        // place still measuring from the block. Freezing it costs only the
-        // small error from whatever the craft rotates through on the last
-        // couple of blocks, and buys a target that holds still.
+        // The offset is a world vector: it turns with the aircraft, so it is
+        // only valid for the heading it was measured at.
+        //
+        // Horizontal only. A gate is a spot on the ground, and the Autopilot
+        // block generally sits above the craft's centre of mass - a 3D offset
+        // put the aim point below the gate node, somewhere an aircraft on its
+        // wheels can never reach.
+        Vec3 blockPosition = activeSubLevel.logicalPose()
+                .transformPosition(getBlockPos().getCenter());
+        Vec3 liveOffset = simulatedPosition.subtract(blockPosition).multiply(1, 0, 1);
+
         if (!target.equals(parkingAimFor)) {
             parkingAimFor = target;
-            Vec3 blockPosition = activeSubLevel.logicalPose()
-                    .transformPosition(getBlockPos().getCenter());
-            // Horizontal only. A gate is a spot on the ground, and the
-            // Autopilot block is generally mounted above the craft's centre
-            // of mass - so a 3D offset put the aim point below the gate node
-            // by that height, somewhere the craft can never get to. It then
-            // never arrived, never stopped, and sat on its stand chasing a
-            // bearing that at nearly zero horizontal range is pure noise.
-            parkingAimOffset = simulatedPosition.subtract(blockPosition).multiply(1, 0, 1);
+            parkingAimOffset = null;
         }
-        return parkingAimOffset == null ? waypoint : waypoint.add(parkingAimOffset);
+
+        // Live while there is still distance to run, frozen once close.
+        //
+        // Both halves are necessary and they fail in opposite directions.
+        // Recomputing every tick makes the aim point orbit the gate as the
+        // craft yaws - it steers at the point, which rotates it, which moves
+        // the point. That feedback only runs away when the offset is large
+        // compared to the distance left, which is to say near the stand.
+        //
+        // Freezing avoids the orbit, but a frozen offset is stale the moment
+        // the aircraft turns. Freezing at the START of the final leg - which
+        // is what this did - meant a stand approached round a corner had its
+        // offset measured on the old heading, and the aircraft parked a full
+        // offset-width to one side. Four or five blocks, into whatever was
+        // parked next to it.
+        //
+        // So: freeze late. Far out the live offset is small next to the
+        // distance and perfectly stable; by the time it is frozen the
+        // aircraft is nearly straight on the stand and the heading it will
+        // park on is the heading it already has.
+        if (parkingAimOffset == null) {
+            double toGate = Math.sqrt(
+                    Math.pow(waypoint.x - simulatedPosition.x, 2)
+                            + Math.pow(waypoint.z - simulatedPosition.z, 2));
+            if (toGate > PARKING_FREEZE_DISTANCE) return waypoint.add(liveOffset);
+            parkingAimOffset = liveOffset;
+        }
+        return waypoint.add(parkingAimOffset);
     }
 
     /** How close to runway height counts as landed. */
