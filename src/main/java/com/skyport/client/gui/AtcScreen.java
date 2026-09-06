@@ -524,17 +524,17 @@ public class AtcScreen extends Screen {
             int y = worldToScreenY(pad.getZ());
             drawBorder(guiGraphics, x - 3, y - 3, 7, 7, COLOR_HELIPAD);
         }
-        // Hold lines are pairs, and there can be several - one guarding each
-        // runway. Drawn as the lines they are rather than as loose dots.
-        List<Waypoint> holdLines = airport.waypoints(Waypoint.Type.HOLD_SHORT);
-        for (int i = 0; i < holdLines.size(); i += 2) {
-            if (i + 1 < holdLines.size()) {
-                line(guiGraphics, holdLines.get(i).pos(), holdLines.get(i + 1).pos(), COLOR_HOLD_SHORT);
-            } else {
-                int x = worldToScreenX(holdLines.get(i).pos().getX());
-                int y = worldToScreenY(holdLines.get(i).pos().getZ());
-                drawBorder(guiGraphics, x - 2, y - 2, 5, 5, COLOR_HOLD_SHORT);
-            }
+        // One mark per hold point. They used to be read in pairs and drawn as
+        // a line between them, on the idea that a hold line is a line painted
+        // across the taxiway - but the two ends were two independent clicks,
+        // so once they could be placed anywhere along a segment the pairing
+        // joined up points on completely different taxiways and drew
+        // diagonals across the airport. A hold point is a place on a route,
+        // and the route already says which way it runs.
+        for (Waypoint hold : airport.waypoints(Waypoint.Type.HOLD_SHORT)) {
+            int x = worldToScreenX(hold.pos().getX());
+            int y = worldToScreenY(hold.pos().getZ());
+            drawBorder(guiGraphics, x - 2, y - 2, 5, 5, COLOR_HOLD_SHORT);
         }
 
         drawAirportLabel(guiGraphics, airport);

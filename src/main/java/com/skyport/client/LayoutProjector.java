@@ -90,9 +90,10 @@ public final class LayoutProjector {
         trace(level, player, showing.waypoints(Waypoint.Type.HOLDING_PATTERN), PATTERN, true);
         markers(level, player, showing.gates(), GATE);
         markers(level, player, showing.helipads(), PAD);
-        // Hold lines are pairs too - draw the line across the taxiway, and
-        // a pillar at each end so it is findable from the ground.
-        traceSegmentPairs(level, player, showing.waypoints(Waypoint.Type.HOLD_SHORT), HOLD);
+        // A hold point is a single place on the taxiway, marked with a pillar
+        // so it can be found from the ground. It used to be drawn as a line
+        // between consecutive points, which paired up unrelated ones and drew
+        // lines across the airfield between them.
         for (Waypoint hold : showing.waypoints(Waypoint.Type.HOLD_SHORT)) {
             pillar(level, player, hold.pos(), HOLD);
         }

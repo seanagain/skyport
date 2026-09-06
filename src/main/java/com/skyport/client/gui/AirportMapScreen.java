@@ -201,28 +201,6 @@ public class AirportMapScreen extends Screen {
                 .bounds(mapX + mapW - runwayToggleW, row1Y, runwayToggleW, rowH)
                 .build());
 
-        // Gate rename and reorder, shown only while a stand is selected in
-        // Gate mode. Laid out over the top of row 1 rather than in a row of
-        // its own: it is the only mode with per-item editing, and a
-        // permanently reserved row would be empty for every other one.
-        int reorderW = 24;
-        int nameW = dropdownW - reorderW * 2 - 4;
-        gateNameBox = addRenderableWidget(new net.minecraft.client.gui.components.EditBox(
-                font, mapX, row1Y, nameW, rowH, Component.literal("Gate name")));
-        gateNameBox.setMaxLength(32);
-        gateNameBox.setResponder(this::renameSelectedGate);
-        gateNameBox.visible = false;
-
-        gateUpButton = addRenderableWidget(Button.builder(Component.literal("▲"),
-                        b -> moveSelectedGate(-1))
-                .bounds(mapX + nameW + 2, row1Y, reorderW, rowH).build());
-        gateUpButton.visible = false;
-
-        gateDownButton = addRenderableWidget(Button.builder(Component.literal("▼"),
-                        b -> moveSelectedGate(1))
-                .bounds(mapX + nameW + reorderW + 4, row1Y, reorderW, rowH).build());
-        gateDownButton.visible = false;
-
         // --- row 2: undo + holding-pattern height/direction ---
         int undoW = Math.max(52, mapW / 5);
         int stepW = 20;
@@ -235,7 +213,7 @@ public class AirportMapScreen extends Screen {
                 .build());
         btnX += undoW + 2;
 
-        addRenderableWidget(Button.builder(Component.literal("-"), b -> adjustHoldingHeight(-5))
+        heightMinusButton =         addRenderableWidget(Button.builder(Component.literal("-"), b -> adjustHoldingHeight(-5))
                 .bounds(btnX, row2Y, stepW, rowH)
                 .build());
         btnX += stepW + 2;
@@ -246,7 +224,7 @@ public class AirportMapScreen extends Screen {
         heightValueButton.active = false;
         btnX += heightW + 2;
 
-        addRenderableWidget(Button.builder(Component.literal("+"), b -> adjustHoldingHeight(5))
+        heightPlusButton =         addRenderableWidget(Button.builder(Component.literal("+"), b -> adjustHoldingHeight(5))
                 .bounds(btnX, row2Y, stepW, rowH)
                 .build());
         btnX += stepW + 2;
@@ -254,6 +232,33 @@ public class AirportMapScreen extends Screen {
         directionButton = addRenderableWidget(Button.builder(directionLabel(), b -> toggleDirection())
                 .bounds(btnX, row2Y, dirW, rowH)
                 .build());
+
+        // Gate editing takes over row 2 in Gate mode.
+        //
+        // It shares the row with the holding-pattern height and direction,
+        // which have nothing to do with gates - so rather than reserving a
+        // row that sits empty in every other mode, or hiding the controls
+        // over the top of the mode dropdown where they could not be found,
+        // the row simply becomes the gate row when gates are what you are
+        // editing. Undo stays put, because undo means the same thing in
+        // every mode.
+        int gateNameX = mapX + undoW + 2;
+        int reorderW = 22;
+        int gateNameW = Math.max(60, mapW - undoW - reorderW * 2 - 6);
+        gateNameBox = addRenderableWidget(new net.minecraft.client.gui.components.EditBox(
+                font, gateNameX, row2Y, gateNameW, rowH, Component.literal("Gate name")));
+        gateNameBox.setMaxLength(32);
+        gateNameBox.setResponder(this::renameSelectedGate);
+        gateNameBox.setHint(Component.literal("click a gate to rename"));
+
+        gateUpButton = addRenderableWidget(Button.builder(Component.literal("^"),
+                        b -> moveSelectedGate(-1))
+                .bounds(gateNameX + gateNameW + 2, row2Y, reorderW, rowH).build());
+        gateDownButton = addRenderableWidget(Button.builder(Component.literal("v"),
+                        b -> moveSelectedGate(1))
+                .bounds(gateNameX + gateNameW + reorderW + 4, row2Y, reorderW, rowH).build());
+
+        refreshGateControls();
 
         // --- footer: clear, zoom, and done ---
         int footerY = mapY + mapH + 12;
@@ -316,6 +321,8 @@ public class AirportMapScreen extends Screen {
     private net.minecraft.client.gui.components.EditBox gateNameBox;
     private Button gateUpButton;
     private Button gateDownButton;
+    private Button heightMinusButton;
+    private Button heightPlusButton;
 
     /** Which gate, if any, is at this position. Uses the same slack as node
      *  snapping so clicking the marker works at any zoom. */
@@ -343,11 +350,35 @@ public class AirportMapScreen extends Screen {
 
     private boolean loadingGateName;
 
+    /**
+     * Row 2 shows either the holding-pattern controls or the gate controls,
+     * depending on what is being edited. Never both, and never neither.
+     *
+     * The name box is present throughout Gate mode rather than appearing
+     * only once a stand is picked - an empty box with a hint in it says
+     * renaming is possible, whereas a control that materialises on selection
+     * is one nobody finds, which is exactly what happened.
+     */
     private void refreshGateControls() {
-        boolean show = mode == EditMode.GATE && selectedGate != null;
-        if (gateNameBox != null) gateNameBox.visible = show;
-        if (gateUpButton != null) gateUpButton.visible = show;
-        if (gateDownButton != null) gateDownButton.visible = show;
+        boolean gateMode = mode == EditMode.GATE;
+        if (gateNameBox != null) {
+            gateNameBox.visible = gateMode;
+            gateNameBox.setEditable(selectedGate != null);
+        }
+        if (gateUpButton != null) {
+            gateUpButton.visible = gateMode;
+            gateUpButton.active = selectedGate != null;
+        }
+        if (gateDownButton != null) {
+            gateDownButton.visible = gateMode;
+            gateDownButton.active = selectedGate != null;
+        }
+
+        // ...and the holding-pattern controls step aside for them.
+        if (heightMinusButton != null) heightMinusButton.visible = !gateMode;
+        if (heightPlusButton != null) heightPlusButton.visible = !gateMode;
+        if (heightValueButton != null) heightValueButton.visible = !gateMode;
+        if (directionButton != null) directionButton.visible = !gateMode;
     }
 
     /** Rename as it is typed. Rejected names - blank, or one already in use -
@@ -463,6 +494,7 @@ public class AirportMapScreen extends Screen {
                 mode = candidate;
                 dropdownOpen = false;
                 selectGate(null);
+                refreshGateControls();
                 runwayEndBeingDrawn = 0;
                 rejection = null;
                 return true;
@@ -1381,7 +1413,7 @@ public class AirportMapScreen extends Screen {
             case HOLDING_PATTERN -> "the airborne racetrack - click a loop of 3+ points";
             case FINAL_LEG -> "2 points: from holding pattern, to runway";
             case GATE -> "click the end of a runway or taxiway line";
-            case HOLD_SHORT -> "pairs; a line across the taxiway anywhere along it, one per runway";
+            case HOLD_SHORT -> "one point anywhere on a taxiway, one per runway";
             case HELIPAD -> "click anywhere - helicopters and blimps land here";
         };
     }

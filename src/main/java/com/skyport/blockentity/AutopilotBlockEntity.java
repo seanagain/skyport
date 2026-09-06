@@ -2860,14 +2860,19 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         BlockPos reference = runway.isEmpty() ? null : runway.get(0);
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
-        for (int i = 0; i < points.size(); i += 2) {
-            BlockPos middle = i + 1 < points.size() ? midpoint(points.get(i), points.get(i + 1))
-                    : points.get(i); // a lone point: a hold line from before they were lines
-            if (reference == null) return middle;
-            double distance = horizontalDistance(middle, reference);
+        // Every point is its own hold point. They were read in pairs and
+        // averaged, which only made sense while a hold line was two ends of a
+        // line painted across the taxiway - and once they could be placed
+        // anywhere along a segment, pairing joined up points on unrelated
+        // taxiways and put the hold point midway between them, out in the
+        // grass. A hold point is a place on a route; the route says which way
+        // it runs.
+        for (BlockPos point : points) {
+            if (reference == null) return point;
+            double distance = horizontalDistance(point, reference);
             if (distance < bestDistance) {
                 bestDistance = distance;
-                best = middle;
+                best = point;
             }
         }
         return best;
