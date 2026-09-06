@@ -223,6 +223,64 @@ public class AirportLayout {
         gates.putAll(newGates);
     }
 
+    /**
+     * Rename a gate, keeping it where it sits in the order.
+     *
+     * The obvious implementation - remove and put - moves the gate to the
+     * end, because this is a LinkedHashMap and that is what insertion order
+     * means. Renaming Gate A would silently reshuffle the board. So the map
+     * is rebuilt in place instead.
+     *
+     * Returns false and changes nothing if the new name is blank or already
+     * taken; the caller reports that rather than this quietly merging two
+     * stands into one.
+     *
+     * Schedules refer to gates BY NAME, so a rename orphans any stop
+     * pointing at the old one. Nothing here can reach those - they live on
+     * aircraft anywhere in the world - which is why the autopilot now says
+     * so plainly when it cannot find its gate rather than behaving as though
+     * it had arrived.
+     */
+    public boolean renameGate(String from, String to) {
+        if (to == null || to.isBlank() || !gates.containsKey(from)) return false;
+        String trimmed = to.strip();
+        if (trimmed.equals(from)) return true;
+        if (gates.containsKey(trimmed)) return false;
+
+        Map<String, BlockPos> rebuilt = new LinkedHashMap<>();
+        for (Map.Entry<String, BlockPos> entry : gates.entrySet()) {
+            if (entry.getKey().equals(from)) rebuilt.put(trimmed, entry.getValue());
+            else rebuilt.put(entry.getKey(), entry.getValue());
+        }
+        gates.clear();
+        gates.putAll(rebuilt);
+        return true;
+    }
+
+    /**
+     * Move a gate up or down the list.
+     *
+     * The order is what the Autopilot's gate picker cycles through, so it is
+     * worth being able to put the stands in the order they actually run down
+     * the apron rather than the order they were clicked.
+     */
+    public boolean moveGate(String name, int delta) {
+        List<String> order = new ArrayList<>(gates.keySet());
+        int from = order.indexOf(name);
+        if (from < 0) return false;
+        int to = from + delta;
+        if (to < 0 || to >= order.size()) return false;
+
+        order.remove(from);
+        order.add(to, name);
+
+        Map<String, BlockPos> rebuilt = new LinkedHashMap<>();
+        for (String key : order) rebuilt.put(key, gates.get(key));
+        gates.clear();
+        gates.putAll(rebuilt);
+        return true;
+    }
+
     /** "Gate A", "Gate B", ... "Gate Z", then "Gate AA" if you really place that many. */
     public String nextGateName() {
         int index = gates.size();

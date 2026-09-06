@@ -533,6 +533,22 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return entry == null ? null : entry.gateName();
     }
 
+    /**
+     * Point this stop at a different gate, permanently.
+     *
+     * Written back into the schedule rather than just used for this landing,
+     * so a renamed gate is corrected once instead of being rediscovered
+     * every time the aircraft comes round the loop - and so the Autopilot
+     * screen shows where it is actually going.
+     */
+    private void retargetGate(String gateName) {
+        ScheduleEntry entry = currentEntry();
+        if (entry == null) return;
+        schedule.entries().set(scheduleIndex, new ScheduleEntry(
+                entry.airportId(), gateName, entry.condition(), entry.waitSeconds()));
+        setChanged();
+    }
+
     /** Store a route without flying it - see SaveSchedulePayload. */
     public void setSchedule(FlightSchedule newSchedule) {
         this.schedule = newSchedule;
@@ -3288,7 +3304,27 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (arriving) {
             from = gateEnd;
             BlockPos gate = layout.gates().get(destinationGateName());
-            if (gate == null) return List.of();
+            if (gate == null) {
+                // The stand this flight was booked onto is gone - renamed,
+                // or deleted out of the layout. An empty route here used to
+                // mean the waypoint follower had nothing to do and reported
+                // the flight arrived, so the aircraft "parked" wherever it
+                // happened to be standing, silently and usually across a
+                // taxiway. Send it to the first gate that does exist and say
+                // what happened; a stand it was not booked onto beats a
+                // taxiway it is blocking.
+                String replacement = layout.gates().keySet().stream().findFirst().orElse(null);
+                if (replacement == null) {
+                    if (tickCounter % MISSING_FACILITY_REPEAT_TICKS == 0) {
+                        message(layout.displayName() + " has no gates - nowhere to park.");
+                    }
+                    return List.of();
+                }
+                message("Gate " + destinationGateName() + " no longer exists at "
+                        + layout.displayName() + " - parking at " + replacement + " instead.");
+                retargetGate(replacement);
+                gate = layout.gates().get(replacement);
+            }
             to = gate;
         } else {
             from = joinPoint != null ? joinPoint : BlockPos.containing(simulatedPosition);

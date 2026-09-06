@@ -18,6 +18,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The airport layout editor, opened from {@link AirportStationScreen}.
@@ -200,6 +201,28 @@ public class AirportMapScreen extends Screen {
                 .bounds(mapX + mapW - runwayToggleW, row1Y, runwayToggleW, rowH)
                 .build());
 
+        // Gate rename and reorder, shown only while a stand is selected in
+        // Gate mode. Laid out over the top of row 1 rather than in a row of
+        // its own: it is the only mode with per-item editing, and a
+        // permanently reserved row would be empty for every other one.
+        int reorderW = 24;
+        int nameW = dropdownW - reorderW * 2 - 4;
+        gateNameBox = addRenderableWidget(new net.minecraft.client.gui.components.EditBox(
+                font, mapX, row1Y, nameW, rowH, Component.literal("Gate name")));
+        gateNameBox.setMaxLength(32);
+        gateNameBox.setResponder(this::renameSelectedGate);
+        gateNameBox.visible = false;
+
+        gateUpButton = addRenderableWidget(Button.builder(Component.literal("▲"),
+                        b -> moveSelectedGate(-1))
+                .bounds(mapX + nameW + 2, row1Y, reorderW, rowH).build());
+        gateUpButton.visible = false;
+
+        gateDownButton = addRenderableWidget(Button.builder(Component.literal("▼"),
+                        b -> moveSelectedGate(1))
+                .bounds(mapX + nameW + reorderW + 4, row1Y, reorderW, rowH).build());
+        gateDownButton.visible = false;
+
         // --- row 2: undo + holding-pattern height/direction ---
         int undoW = Math.max(52, mapW / 5);
         int stepW = 20;
@@ -285,6 +308,64 @@ public class AirportMapScreen extends Screen {
         return Component.literal(layout.runwayCount() >= 2 ? "2 runways" : "1 runway");
     }
 
+
+    /** The stand currently picked out for renaming or reordering, or null. */
+    @org.jetbrains.annotations.Nullable
+    private String selectedGate;
+
+    private net.minecraft.client.gui.components.EditBox gateNameBox;
+    private Button gateUpButton;
+    private Button gateDownButton;
+
+    /** Which gate, if any, is at this position. Uses the same slack as node
+     *  snapping so clicking the marker works at any zoom. */
+    @org.jetbrains.annotations.Nullable
+    private String gateAt(BlockPos world) {
+        double radius = (double) NODE_SNAP_PIXELS * blocksPerPixel();
+        for (Map.Entry<String, BlockPos> gate : layout.gates().entrySet()) {
+            if (horizontalDistance(gate.getValue(), world) <= radius) return gate.getKey();
+        }
+        return null;
+    }
+
+    private void selectGate(@org.jetbrains.annotations.Nullable String name) {
+        selectedGate = name;
+        if (gateNameBox != null) {
+            // setValue fires the responder, which would rename the gate to
+            // whatever was previously in the box the moment a different one
+            // is selected. Suppressed while the box is being loaded.
+            loadingGateName = true;
+            gateNameBox.setValue(name == null ? "" : name);
+            loadingGateName = false;
+        }
+        refreshGateControls();
+    }
+
+    private boolean loadingGateName;
+
+    private void refreshGateControls() {
+        boolean show = mode == EditMode.GATE && selectedGate != null;
+        if (gateNameBox != null) gateNameBox.visible = show;
+        if (gateUpButton != null) gateUpButton.visible = show;
+        if (gateDownButton != null) gateDownButton.visible = show;
+    }
+
+    /** Rename as it is typed. Rejected names - blank, or one already in use -
+     *  simply do not take, and the box shows what the player typed until they
+     *  make it valid, rather than fighting them mid-word. */
+    private void renameSelectedGate(String typed) {
+        if (loadingGateName || selectedGate == null) return;
+        if (layout.renameGate(selectedGate, typed)) {
+            selectedGate = typed.strip();
+            rejection = null;
+        } else {
+            rejection = "That gate name is already taken.";
+        }
+    }
+
+    private void moveSelectedGate(int delta) {
+        if (selectedGate != null) layout.moveGate(selectedGate, delta);
+    }
     /**
      * Flip between one runway and two.
      *
@@ -381,6 +462,7 @@ public class AirportMapScreen extends Screen {
                     && mouseY >= y && mouseY < y + dropdownH) {
                 mode = candidate;
                 dropdownOpen = false;
+                selectGate(null);
                 runwayEndBeingDrawn = 0;
                 rejection = null;
                 return true;
@@ -570,7 +652,20 @@ public class AirportMapScreen extends Screen {
             rejection = null;
 
             if (mode == EditMode.GATE) {
-                layout.gates().put(layout.nextGateName(), world);
+                // Clicking an existing stand selects it for renaming or
+                // reordering; clicking empty ground places a new one. One
+                // mode, because "place gates" and "tidy up the gates you
+                // placed" are the same job and splitting them into two modes
+                // would mean choosing between them before you knew which you
+                // wanted.
+                String existing = gateAt(world);
+                if (existing != null) {
+                    selectGate(existing);
+                } else {
+                    String created = layout.nextGateName();
+                    layout.gates().put(created, world);
+                    selectGate(created);
+                }
             } else if (mode == EditMode.HELIPAD) {
                 layout.helipads().put(layout.nextHelipadName(), world);
             } else {
@@ -1177,10 +1272,22 @@ public class AirportMapScreen extends Screen {
         drawPath(guiGraphics, layout.waypoints(Waypoint.Type.FINAL_LEG), COLOR_FINAL_LEG);
         drawLoop(guiGraphics, layout.waypoints(Waypoint.Type.HOLDING_PATTERN), COLOR_HOLDING);
 
-        for (BlockPos gate : layout.gates().values()) {
-            int gx = worldToScreenX(gate);
-            int gy = worldToScreenY(gate);
+        // Numbered in list order, because that order is now something the
+        // player sets rather than just the order they happened to click - and
+        // it is what the Autopilot's gate picker runs through. A name shown
+        // only on the selected one keeps a busy apron readable.
+        int gateIndex = 1;
+        for (Map.Entry<String, BlockPos> gate : layout.gates().entrySet()) {
+            BlockPos at = gate.getValue();
+            int gx = worldToScreenX(at);
+            int gy = worldToScreenY(at);
+            boolean picked = gate.getKey().equals(selectedGate);
             guiGraphics.fill(gx - 2, gy - 2, gx + 2, gy + 2, COLOR_GATE);
+            if (picked) drawBorder(guiGraphics, gx - 4, gy - 4, 9, 9, 0xFFFFFFFF);
+            guiGraphics.drawString(font, String.valueOf(gateIndex), gx + 4, gy - 4,
+                    picked ? 0xFFFFFFFF : COLOR_GATE, false);
+            if (picked) guiGraphics.drawString(font, gate.getKey(), gx + 4, gy + 5, 0xFFFFFFFF, false);
+            gateIndex++;
         }
 
         // Pads: a square with a dot, distinct from a gate's solid marker.
