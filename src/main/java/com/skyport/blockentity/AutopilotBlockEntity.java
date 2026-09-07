@@ -1139,7 +1139,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             });
             // Final leg (holding pattern -> runway far end, descending), then
             // roll down the runway to the gate end, ready to taxi in.
-            case APPROACH -> followWaypoints(path(() -> approachPath(destination)), () -> setState(FlightState.TAXI_IN));
+            case APPROACH -> followWaypoints(path(() -> approachPath(serverLevel, destination)), () -> setState(FlightState.TAXI_IN));
             // Once back past the hold point the plane is clear of the runway,
             // so release then rather than at the gate - that's the whole
             // reason the hold point exists. Without one, hold the clearance
@@ -1644,6 +1644,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
     /** How close to runway height counts as landed. */
     private static final double TOUCHDOWN_TOLERANCE = 1.5;
+    /** How far below the aircraft's underside to look for ground. Half a
+     *  block: close enough that it means "on it" rather than "over it". */
+    private static final double TOUCHDOWN_GROUND_PROBE = 0.5;
+
 
     /**
      * Has the aircraft actually got down onto the runway?
@@ -1669,9 +1673,30 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         double above = -delta.y;
         if (above <= TOUCHDOWN_TOLERANCE) return true;
-        return activeBody != null
-                && Math.abs(activeBody.getLinearVelocity().y()) < 0.05
-                && above <= TOUCHDOWN_TOLERANCE * 3;
+
+        // Otherwise: is there actually ground under the wheels?
+        //
+        // This used to ask whether the craft had stopped descending, which
+        // cannot tell an aircraft resting on a runway from one hanging
+        // motionless in the air - and a rigid body that has been put to
+        // sleep reports exactly zero vertical velocity while doing the
+        // latter. So a landing completed two blocks up, the aircraft taxied
+        // on nothing, and it dropped whenever something disturbed the body
+        // again.
+        //
+        // The escape hatch is still needed: a runway waypoint carries
+        // whatever Y it was drawn at, which can sit below the surface
+        // actually built, and then the craft comes to rest on the real
+        // runway with its target still underneath it. Asking the world what
+        // is beneath the aircraft answers that without caring where the map
+        // says the runway is, or what the physics engine is doing.
+        if (activeSubLevel == null || simulatedPosition == null) return false;
+        if (!(activeSubLevel.getLevel() instanceof ServerLevel parent)) return false;
+
+        double underside = activeSubLevel.boundingBox().minY();
+        BlockPos beneath = BlockPos.containing(
+                simulatedPosition.x, underside - TOUCHDOWN_GROUND_PROBE, simulatedPosition.z);
+        return !parent.getBlockState(beneath).isAir();
     }
     /**
      * Flies the real craft toward a waypoint by nudging its velocity, rather
@@ -3423,6 +3448,29 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return GroundNetwork.route(layout, from, to);
     }
 
+
+    /**
+     * The height to actually land at: the surface that is built, not the
+     * height the runway was drawn at.
+     *
+     * A runway waypoint carries whatever Y the map editor recorded when it
+     * was placed, and that need not match the strip the player then built -
+     * a couple of blocks out is easy and invisible on a top-down map. The
+     * approach flew to the drawn height perfectly correctly, which for a
+     * runway drawn high means levelling off in mid-air, "landing" there, and
+     * dropping the moment ground steering stopped holding the altitude. It
+     * looked like a physics fault and was a data one, which is why it
+     * happened at one runway and not the others.
+     *
+     * Falls back to the drawn height when the surface cannot be read.
+     * Level#getHeight answers with the minimum build height for a chunk that
+     * is not loaded, and taking that literally would fly the approach into
+     * the void - the same trap the terrain avoidance hit.
+     */
+    private static int touchdownHeight(ServerLevel level, BlockPos threshold) {
+        int surface = level.getHeight(Heightmap.Types.WORLD_SURFACE, threshold.getX(), threshold.getZ());
+        return surface > level.getMinBuildHeight() ? surface : threshold.getY();
+    }
     /**
      * The descent: join the final leg at pattern altitude, then fly down it
      * so the plane is at runway height by the time it reaches the threshold -
@@ -3432,7 +3480,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * are supplied here: start at the holding pattern's height, finish at the
      * runway's. After touchdown it rolls out to the runway's gate end.
      */
-    private static List<BlockPos> approachPath(AirportLayout destination) {
+    private static List<BlockPos> approachPath(ServerLevel level, AirportLayout destination) {
         List<BlockPos> leg = positionsOf(destination, Waypoint.Type.FINAL_LEG);
         // Always the arrival runway - the final leg is drawn to it, and a
         // departure runway has no approach path of its own by design.
@@ -3440,7 +3488,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         List<BlockPos> path = new ArrayList<>();
 
         if (leg.size() == 2) {
-            int runwayY = runway.isEmpty() ? leg.get(1).getY() : runway.get(1).getY();
+            int runwayY = touchdownHeight(level, runway.isEmpty() ? leg.get(1) : runway.get(1));
             int topY = destination.holdingPatternHeight();
             BlockPos from = leg.get(0);
             BlockPos to = leg.get(1);
