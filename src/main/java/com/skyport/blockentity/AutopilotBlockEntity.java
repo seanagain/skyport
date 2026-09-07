@@ -1797,6 +1797,21 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         double gain = Math.min(1.0, CRAFT_STEER_GAIN * physicsStepSeconds / NOMINAL_STEP_SECONDS);
         Vec3 correction = desired.subtract(new Vec3(v.x(), v.y(), v.z())).scale(gain);
 
+        // On the ground, leave the vertical axis alone entirely.
+        //
+        // The heading has its vertical component zeroed for ground states,
+        // meant as "taxiing is a 2D problem, height is for gravity and the
+        // wheels". In a velocity controller it means a DESIRED vertical
+        // velocity of zero - and asking for zero vertical velocity is asking
+        // to cancel gravity. The aircraft is then held at whatever height it
+        // arrived at: touching down two blocks up and taxiing along on
+        // nothing until something interrupts the correction and it drops.
+        //
+        // The unpowered branch immediately below already does exactly this,
+        // with the same multiply, for the same reason - the correct handling
+        // was eight lines further down the method the whole time.
+        if (onGround) correction = correction.multiply(1, 0, 1);
+
         // Unpowered: steer, but don't drive. Attitude control below still
         // runs - an aircraft losing its engine keeps its wings level - but
         // nothing accelerates the craft or holds it up, so it coasts and
@@ -3264,6 +3279,16 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         Vec3 desired = direction.scale(speed);
         Vector3dc v = activeBody.getLinearVelocity();
         Vec3 correction = desired.subtract(new Vec3(v.x(), v.y(), v.z())).scale(CRAFT_STEER_GAIN);
+
+        // The second copy of the same three lines, and it needs the same
+        // treatment. Airborne, driving vertical velocity toward the desired
+        // value is how an aircraft holds an altitude and must stay. On the
+        // ground it lifts the craft off its wheels - and this method is what
+        // holds a departure still while it lines up on the runway, called
+        // with a speed of zero, which makes the desired vertical velocity
+        // zero too.
+        if (isGroundState()) correction = correction.multiply(1, 0, 1);
+
         activeBody.addLinearAndAngularVelocity(
                 new Vector3d(correction.x, correction.y, correction.z),
                 angularCorrectionTowards(direction));
