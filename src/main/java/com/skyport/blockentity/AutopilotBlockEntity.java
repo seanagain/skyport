@@ -2341,7 +2341,35 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         note("Runway vacated - taxiway clear behind.");
     }
 
+
+    /**
+     * Which way an aircraft is travelling as it passes a point on its route.
+     *
+     * Found by asking which SEGMENT the point lies nearest to, rather than
+     * which node it equals. A hold point can sit anywhere along a taxiway
+     * now, so it usually equals no node at all - and equality matching
+     * silently returned the wrong end of the route rather than failing.
+     */
     @org.jetbrains.annotations.Nullable
+    private static Vec3 travelDirectionAt(List<BlockPos> route, BlockPos point) {
+        Vec3 best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (int i = 0; i + 1 < route.size(); i++) {
+            BlockPos from = route.get(i);
+            BlockPos to = route.get(i + 1);
+            double dx = to.getX() - from.getX();
+            double dz = to.getZ() - from.getZ();
+            double length = Math.sqrt(dx * dx + dz * dz);
+            if (length < 1.0e-6) continue;
+
+            double distance = horizontalDistance(closestPointOnSegment(from, to, point), point);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = new Vec3(dx / length, 0, dz / length);
+            }
+        }
+        return best;
+    }
     /**
      * A waiting spot short of the hold line, backed off along the route the
      * aircraft arrived on.
@@ -2350,19 +2378,26 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * direction from - being on the line beats not knowing where to stop.
      */
     private BlockPos standoffBefore(AirportLayout origin, BlockPos holdShort) {
+        // Backed off along the route, against the direction of travel where
+        // the hold point sits.
+        //
+        // This used to find that direction by matching the hold point
+        // against a route NODE, which worked only while hold points had to
+        // be placed on nodes. They can now sit anywhere along a segment, so
+        // the match never succeeded: the loop ran to the end of the route
+        // and took the LAST node - the runway - as the thing to back off
+        // toward. The standoff pointed the wrong way down the taxiway and
+        // put the aircraft past the line instead of behind it.
+        //
+        // Asking which segment the point lies on works either way, and does
+        // not care whether it happens to coincide with a node.
         List<BlockPos> route = groundTaxiPath(origin, false);
-        BlockPos previous = null;
-        for (BlockPos node : route) {
-            if (node.equals(holdShort)) break;
-            previous = node;
-        }
-        if (previous == null) previous = joinPoint;
-        if (previous == null) return holdShort;
+        Vec3 travel = travelDirectionAt(route, holdShort);
+        if (travel == null) return holdShort;
 
-        double dx = previous.getX() - holdShort.getX();
-        double dz = previous.getZ() - holdShort.getZ();
-        double length = Math.sqrt(dx * dx + dz * dz);
-        if (length < 1.0) return holdShort;
+        double dx = -travel.x;
+        double dz = -travel.z;
+        double length = 1.0;
 
         // Backed off by the aircraft's own reach as well as the fixed
         // clearance, so what waits behind the line is the whole aeroplane
