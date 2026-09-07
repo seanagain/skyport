@@ -1698,6 +1698,70 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 simulatedPosition.x, underside - TOUCHDOWN_GROUND_PROBE, simulatedPosition.z);
         return !parent.getBlockState(beneath).isAir();
     }
+
+    /** How far ahead to look for something to run into, on top of the
+     *  aircraft's own reach. */
+    private static final double PROXIMITY_STOP_BLOCKS = 6.0;
+
+    /** How often a held aircraft says why, in ticks. */
+    private static final int PROXIMITY_REPORT_TICKS = 60;
+
+    /** How far off dead-ahead still counts as being in the way - about 60
+     *  degrees either side. Wide, because a contraption is wide: something
+     *  beside the nose is still something the wing will reach. */
+    private static final double PROXIMITY_AHEAD_COS = 0.5;
+
+    /** Aircraft further apart than this vertically are not in each other's
+     *  way, whatever the plan view says - one is flying over the other. */
+    private static final double PROXIMITY_HEIGHT_BLOCKS = 8.0;
+
+    /**
+     * Is there another aircraft in the way?
+     *
+     * The clearance system reserves ROUTES - one aircraft on the taxiway,
+     * one on the runway - and that is genuinely strict: two aircraft cannot
+     * be taxiing at the same airport at once. What it does not reserve is
+     * SPACE. An aircraft parked at a gate has given back every lease it
+     * held, because it is not going anywhere, so nothing marks the ground it
+     * is standing on as occupied. A taxi route that passes an occupied stand
+     * therefore drives straight through it, and no amount of hold-line
+     * drawing prevents that - the collision is with something the booking
+     * system does not consider traffic at all.
+     *
+     * So this looks at where aircraft actually are rather than at what they
+     * have booked. It catches parked aircraft, aircraft under someone else's
+     * control, and anything else on the roster, and it does not care how the
+     * airport was drawn.
+     *
+     * Deliberately only a stop. Steering around an obstacle needs somewhere
+     * to steer to, and on a taxiway there generally is not one; stopping and
+     * waiting is both what a real aircraft does and the option that cannot
+     * make things worse.
+     */
+    private boolean blockedAhead(ServerLevel level, Vec3 heading) {
+        if (simulatedPosition == null || planeId == null) return false;
+
+        String dimension = level.dimension().location().toString();
+        double range = craftReach() + PROXIMITY_STOP_BLOCKS;
+
+        for (AirportRegistry.KnownAircraft other : AirportRegistry.get(level).known()) {
+            if (other.planeId().equals(planeId)) continue;
+            if (!other.dimension().equals(dimension)) continue;
+
+            BlockPos at = other.position();
+            if (Math.abs(at.getY() - simulatedPosition.y) > PROXIMITY_HEIGHT_BLOCKS) continue;
+
+            double dx = at.getX() - simulatedPosition.x;
+            double dz = at.getZ() - simulatedPosition.z;
+            double distance = Math.sqrt(dx * dx + dz * dz);
+            if (distance > range || distance < 1.0e-6) continue;
+
+            // Only what is in front. Something already behind has been
+            // passed, and stopping for it would strand the aircraft.
+            if ((dx * heading.x + dz * heading.z) / distance >= PROXIMITY_AHEAD_COS) return true;
+        }
+        return false;
+    }
     /**
      * Flies the real craft toward a waypoint by nudging its velocity, rather
      * than by setting its position.
@@ -1811,6 +1875,22 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             speed = Math.min(topSpeed, distance * CRAFT_APPROACH_GAIN);
         }
         speed *= alignmentFactor(heading);
+
+        // Whatever the booking system says, do not drive into anything.
+        //
+        // Applied last so it overrides every other reason to be moving. The
+        // aircraft still steers and still holds its attitude - it is stopping,
+        // not shutting down - and it starts again on its own the moment the
+        // way is clear.
+        if (onGround && activeSubLevel != null
+                && activeSubLevel.getLevel() instanceof ServerLevel parent
+                && blockedAhead(parent, heading)) {
+            speed = 0;
+            if (tickCounter % PROXIMITY_REPORT_TICKS == 0) {
+                note("Holding - aircraft ahead.");
+            }
+        }
+
         Vec3 desired = heading.scale(speed);
 
         Vector3dc v = activeBody.getLinearVelocity();
