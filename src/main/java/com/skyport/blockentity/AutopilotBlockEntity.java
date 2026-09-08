@@ -884,6 +884,24 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             case PUSHBACK -> {
                 AirportLayout origin = originLayout(serverLevel);
                 BlockPos back = origin == null ? null : pushbackTarget(origin);
+                // Line the aircraft up with the spur it is reversing along,
+                // rather than with wherever it happened to be parked.
+                //
+                // Holding the heading it started with kept it straight, but
+                // straight along its OWN axis - and an aircraft parked a few
+                // degrees off the stand's centreline then tracks a few
+                // degrees off the taxiway, which reads as reversing sideways.
+                // Aiming the nose directly away from the point it is backing
+                // toward makes it follow the spur instead, which is what a
+                // tug does: the aircraft comes round onto the taxiway as it
+                // goes, rather than arriving on it crooked.
+                if (back != null && pushbackHeading == null) {
+                    aimPushbackAwayFrom(back);
+                    // Too close to the junction to tell which way that is -
+                    // hold the heading it has rather than none at all, which
+                    // is what let it spin freely off its ground contacts.
+                    if (pushbackHeading == null) capturePushbackHeading();
+                }
                 if (back == null) {
                     setState(FlightState.TAXI_OUT);
                 } else if (applyMotionTowards(back)) {
@@ -1380,14 +1398,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         this.currentWaypointIndex = 0;
         this.stateEnteredTick = tickCounter;
         this.parkingAimFor = null;
-        // Whatever way the aircraft is facing as pushback begins is the way
-        // it should still be facing when pushback ends.
         if (newState != FlightState.TAXI_OUT) crossingHoldLine = null;
-        if (newState == FlightState.PUSHBACK) {
-            capturePushbackHeading();
-        } else {
-            pushbackHeading = null;
-        }
+        // Cleared rather than captured. The heading to hold during pushback
+        // is the one that lines the aircraft up with the spur it is reversing
+        // along, and that needs the spur - which is not known here. The
+        // pushback branch works it out on its first tick, and this makes sure
+        // it is asked to.
+        pushbackHeading = null;
         invalidatePath();
         // Each ground phase starts on the near side of the hold point again:
         // taxiing out hasn't been cleared onto the runway yet, and taxiing in
@@ -2121,6 +2138,24 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     @org.jetbrains.annotations.Nullable
     private transient Vec3 pushbackHeading;
 
+
+    /**
+     * Point the nose directly away from the spot the aircraft is reversing
+     * toward, so it backs along the spur rather than along its own axis.
+     *
+     * Computed once per pushback and then held, for the same reason the
+     * parking offset is: recomputing a heading that the aircraft's own
+     * rotation feeds into is how a controller ends up chasing itself. Once
+     * is enough here anyway - the spur does not move.
+     */
+    private void aimPushbackAwayFrom(BlockPos back) {
+        if (simulatedPosition == null) return;
+        double dx = simulatedPosition.x - (back.getX() + 0.5);
+        double dz = simulatedPosition.z - (back.getZ() + 0.5);
+        double length = Math.sqrt(dx * dx + dz * dz);
+        if (length < 1.0) return;   // too close to say which way that is
+        pushbackHeading = new Vec3(dx / length, 0, dz / length);
+    }
     private void capturePushbackHeading() {
         if (activeSubLevel == null) {
             pushbackHeading = null;
@@ -3601,9 +3636,31 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * is not loaded, and taking that literally would fly the approach into
      * the void - the same trap the terrain avoidance hit.
      */
-    private static int touchdownHeight(ServerLevel level, BlockPos threshold) {
+    private int touchdownHeight(ServerLevel level, BlockPos threshold) {
         int surface = level.getHeight(Heightmap.Types.WORLD_SURFACE, threshold.getX(), threshold.getZ());
-        return surface > level.getMinBuildHeight() ? surface : threshold.getY();
+        int ground = surface > level.getMinBuildHeight() ? surface : threshold.getY();
+
+        // Plus the craft's own half-height, because what is being steered is
+        // the centre of mass and what has to end up on the runway is the
+        // wheels. Aiming the centre AT ground level buries the bottom half of
+        // the aircraft in the strip; the physics engine then resolves that by
+        // shoving it upward, and it settles again the moment steering stops -
+        // which is an aeroplane that lands, rises a couple of blocks, and
+        // drops back down.
+        return ground + (int) Math.round(centreAboveUnderside());
+    }
+
+    /**
+     * How far the craft's centre sits above its own underside.
+     *
+     * Sanity-bounded: a nonsense answer here would aim a landing well above
+     * or below the runway, and falling back to zero merely reproduces the
+     * old behaviour rather than inventing a new failure.
+     */
+    private double centreAboveUnderside() {
+        if (activeSubLevel == null || simulatedPosition == null) return 0;
+        double lift = simulatedPosition.y - activeSubLevel.boundingBox().minY();
+        return lift > 0 && lift < CRAFT_CENTRE_SANITY_BLOCKS ? lift : 0;
     }
     /**
      * The descent: join the final leg at pattern altitude, then fly down it
@@ -3614,7 +3671,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * are supplied here: start at the holding pattern's height, finish at the
      * runway's. After touchdown it rolls out to the runway's gate end.
      */
-    private static List<BlockPos> approachPath(ServerLevel level, AirportLayout destination) {
+    private List<BlockPos> approachPath(ServerLevel level, AirportLayout destination) {
         List<BlockPos> leg = positionsOf(destination, Waypoint.Type.FINAL_LEG);
         // Always the arrival runway - the final leg is drawn to it, and a
         // departure runway has no approach path of its own by design.
