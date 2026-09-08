@@ -1706,6 +1706,14 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** How often a held aircraft says why, in ticks. */
     private static final int PROXIMITY_REPORT_TICKS = 60;
 
+    /** How long to wait for something in the way before going anyway - eight
+     *  seconds. Long enough to let a taxiing aircraft clear, short enough
+     *  that a stale roster entry does not close the airport. */
+    private static final int PROXIMITY_MAX_WAIT_TICKS = 160;
+
+    /** When the current hold began, or -1 when not held. */
+    private transient int blockedSinceTick = -1;
+
     /** How far off dead-ahead still counts as being in the way - about 60
      *  degrees either side. Wide, because a contraption is wide: something
      *  beside the nose is still something the wing will reach. */
@@ -1743,10 +1751,15 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         String dimension = level.dimension().location().toString();
         double range = craftReach() + PROXIMITY_STOP_BLOCKS;
+        AirportRegistry registry = AirportRegistry.get(level);
+        long now = level.getGameTime();
 
-        for (AirportRegistry.KnownAircraft other : AirportRegistry.get(level).known()) {
+        for (AirportRegistry.KnownAircraft other : registry.known()) {
             if (other.planeId().equals(planeId)) continue;
             if (!other.dimension().equals(dimension)) continue;
+
+            // Everything on the roster counts, reporting or not - see
+            // blockedTooLong for why this cannot simply skip the quiet ones.
 
             BlockPos at = other.position();
             if (Math.abs(at.getY() - simulatedPosition.y) > PROXIMITY_HEIGHT_BLOCKS) continue;
@@ -1885,10 +1898,39 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (onGround && activeSubLevel != null
                 && activeSubLevel.getLevel() instanceof ServerLevel parent
                 && blockedAhead(parent, heading)) {
-            speed = 0;
-            if (tickCounter % PROXIMITY_REPORT_TICKS == 0) {
-                note("Holding - aircraft ahead.");
+            if (blockedSinceTick < 0) blockedSinceTick = tickCounter;
+
+            // Give way, but never for good.
+            //
+            // The roster is written down and survives the world, so an
+            // aircraft that left without its Autopilot block being broken
+            // properly - disassembled, WorldEdited away - leaves an entry
+            // behind at its last position forever. Treating the roster as
+            // physical turns that ghost into a permanent roadblock, which is
+            // exactly what it did: traffic queued behind an aeroplane that
+            // was not there.
+            //
+            // Skipping aircraft that are not reporting looks like the fix and
+            // is not safe. A genuinely parked craft may not be physics-ticked
+            // at all, and the report comes from that tick - so "quiet" covers
+            // both the ghost and a real aircraft sitting on the taxiway, and
+            // guessing wrong the other way is a collision. Nothing available
+            // here separates them reliably.
+            //
+            // A timeout does not have to. Wait, because it is probably real;
+            // then go, because it might not be. A ghost clears itself after a
+            // few seconds, and a real aircraft genuinely parked in the way is
+            // a layout problem that no amount of waiting was going to fix -
+            // so say so rather than queue behind it until the world ends.
+            if (tickCounter - blockedSinceTick < PROXIMITY_MAX_WAIT_TICKS) {
+                speed = 0;
+                if (tickCounter % PROXIMITY_REPORT_TICKS == 0) note("Holding - aircraft ahead.");
+            } else if (tickCounter % PROXIMITY_REPORT_TICKS == 0) {
+                message("Something is parked in the way and has not moved - going around it. "
+                        + "If nothing is there, the tower is showing an aircraft that has gone.");
             }
+        } else {
+            blockedSinceTick = -1;
         }
 
         Vec3 desired = heading.scale(speed);
