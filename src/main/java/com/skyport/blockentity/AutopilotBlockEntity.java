@@ -1053,7 +1053,12 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 BlockPos pad = destinationPad(destination);
                 if (pad == null) {
                     holdForMissingPad(destination);
-                } else if (applyMotionTowards(pad)) {
+                    // Onto the pad that is built, not the height it was drawn
+                    // at - a helipad waypoint carries whatever Y the editor
+                    // recorded, the same as a runway, and descending to that
+                    // rather than to the surface leaves a rotorcraft hovering
+                    // over its own pad.
+                } else if (applyMotionTowards(withY(pad, touchdownHeight(serverLevel, pad)))) {
                     arrive();
                 }
             }
@@ -1669,7 +1674,14 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * map says.
      */
     private boolean touchedDown(Vec3 delta) {
-        if (state != FlightState.APPROACH || !steeringToLastWaypoint) return true;
+        // Both ways of arriving on the ground, not just the aeroplane one.
+        // A rotorcraft descends straight onto its pad without going through
+        // followWaypoints at all, so it never had steeringToLastWaypoint set
+        // and this check passed it straight through - which is why the
+        // helicopter kept finishing its landing a few blocks up.
+        boolean landing = (state == FlightState.APPROACH && steeringToLastWaypoint)
+                || state == FlightState.VERTICAL_DESCENT;
+        if (!landing) return true;
 
         double above = -delta.y;
         if (above <= TOUCHDOWN_TOLERANCE) return true;

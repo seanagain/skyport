@@ -68,8 +68,6 @@ public class AirportMapScreen extends Screen {
      * some of the time.
      */
     private enum EditMode {
-        MOVE("Move nodes"),
-        INSERT("Add node on a line"),
         RUNWAY("Runway"),
         ARRIVAL_RUNWAY("Arrival runway"),
         DEPARTURE_RUNWAY("Departure runway"),
@@ -178,9 +176,14 @@ public class AirportMapScreen extends Screen {
         int topBand = titleH + gap + rowH + gap + rowH + gap;   // title + 2 toolbar rows
         int bottomBand = 12 + rowH + gap;                        // coord readout + footer row
 
-        mapW = Math.min(320, width - 20);
+        // The tool strip lives to the left of the map, so its width has to
+        // come out of the layout rather than out of the margin - on a narrow
+        // window the margin is a few pixels and the strip would sit off the
+        // edge of the screen.
+        int toolStripW = TOOL_BUTTON_WIDTH + gap;
+        mapW = Math.min(320, width - 20 - toolStripW);
         mapH = Math.max(60, height - topBand - bottomBand - gap);
-        mapX = (width - mapW) / 2;
+        mapX = (width - mapW + toolStripW) / 2;
         mapY = topBand;
 
         int row1Y = titleH + gap;
@@ -200,6 +203,25 @@ public class AirportMapScreen extends Screen {
         addRenderableWidget(Button.builder(runwayToggleLabel(), b -> toggleRunwayCount())
                 .bounds(mapX + mapW - runwayToggleW, row1Y, runwayToggleW, rowH)
                 .build());
+
+        // --- tool strip, down the left of the map ---
+        //
+        // Beside the map rather than in the dropdown, because these are verbs
+        // and the dropdown is a list of nouns. Picking "Move" out of that list
+        // meant losing your place among the things you were drawing, and there
+        // was nowhere in it to put Delete that did not make it worse. A strip
+        // of four also shows which one is live, which a dropdown cannot do
+        // without being opened.
+        int toolY = mapY;
+        for (Tool candidate : Tool.values()) {
+            Button button = addRenderableWidget(Button.builder(
+                            Component.literal(candidate.label), b -> selectTool(candidate))
+                    .bounds(mapX - TOOL_BUTTON_WIDTH - 4, toolY, TOOL_BUTTON_WIDTH, rowH)
+                    .build());
+            toolButtons.put(candidate, button);
+            toolY += rowH + 2;
+        }
+        selectTool(Tool.DRAW);
 
         // --- row 2: undo + holding-pattern height/direction ---
         int undoW = Math.max(52, mapW / 5);
@@ -397,6 +419,100 @@ public class AirportMapScreen extends Screen {
     private void moveSelectedGate(int delta) {
         if (selectedGate != null) layout.moveGate(selectedGate, delta);
     }
+
+    /**
+     * What a click on the map does, as opposed to what it draws.
+     *
+     * Separate from EditMode on purpose. The dropdown answers "which part of
+     * the airport" - runway, taxiway, gate - and these answer "and do what to
+     * it". Move and Add-node used to sit in that same dropdown, which put a
+     * verb in a list of nouns: choosing "Move nodes" meant losing your place
+     * in the list of things you were drawing, and there was nowhere in it for
+     * Delete to go that did not make the confusion worse.
+     */
+    private enum Tool {
+        DRAW("Draw"),
+        MOVE("Move"),
+        INSERT("Add node"),
+        DELETE("Delete");
+
+        final String label;
+        Tool(String label) { this.label = label; }
+    }
+
+    /** Width of a tool button, reserved out of the layout - see init. */
+    private static final int TOOL_BUTTON_WIDTH = 58;
+
+    private Tool tool = Tool.DRAW;
+    private final java.util.EnumMap<Tool, Button> toolButtons = new java.util.EnumMap<>(Tool.class);
+
+    private void selectTool(Tool picked) {
+        tool = picked;
+        rejection = null;
+        // The active tool is shown by being the one you cannot press.
+        toolButtons.forEach((t, button) -> button.active = t != picked);
+    }
+
+    /**
+     * Delete whatever is under the cursor.
+     *
+     * Types drawn in pairs go in pairs. A taxiway segment is two points, and
+     * deleting one end would leave the other as a stray point that draws
+     * nothing and routes nowhere - so a click on either end takes the whole
+     * segment. Gates, pads and hold points are single things and go on their
+     * own.
+     */
+    private void deleteAt(double mouseX, double mouseY) {
+        BlockPos world = screenToWorld((int) mouseX, (int) mouseY);
+        double radius = (double) NODE_SNAP_PIXELS * blocksPerPixel();
+
+        // Gates and pads first - they sit on top of the lines they attach to,
+        // so a click there almost certainly meant the marker.
+        for (Map.Entry<String, BlockPos> gate : Map.copyOf(layout.gates()).entrySet()) {
+            if (horizontalDistance(gate.getValue(), world) <= radius) {
+                layout.gates().remove(gate.getKey());
+                if (gate.getKey().equals(selectedGate)) selectGate(null);
+                return;
+            }
+        }
+        for (Map.Entry<String, BlockPos> pad : Map.copyOf(layout.helipads()).entrySet()) {
+            if (horizontalDistance(pad.getValue(), world) <= radius) {
+                layout.helipads().remove(pad.getKey());
+                return;
+            }
+        }
+
+        for (Waypoint.Type type : Waypoint.Type.values()) {
+            List<Waypoint> points = layout.waypoints(type);
+            for (int i = 0; i < points.size(); i++) {
+                if (horizontalDistance(points.get(i).pos(), world) > radius) continue;
+
+                if (isDrawnInPairs(type)) {
+                    // Take the whole segment: the partner is the other half of
+                    // this pair, which is i-1 or i+1 depending on which end was
+                    // clicked. Higher index first so the lower one stays valid.
+                    int partner = (i % 2 == 0) ? i + 1 : i - 1;
+                    int first = Math.min(i, partner);
+                    int second = Math.max(i, partner);
+                    if (second < points.size()) points.remove(second);
+                    points.remove(first);
+                } else {
+                    points.remove(i);
+                }
+                return;
+            }
+        }
+        rejection = "Nothing to delete here.";
+        rejectionShownAtMs = System.currentTimeMillis();
+    }
+
+    /** Which element types are drawn as pairs of points, so deleting one end
+     *  has to take the other with it. */
+    private static boolean isDrawnInPairs(Waypoint.Type type) {
+        return type == Waypoint.Type.RUNWAY
+                || type == Waypoint.Type.TAXIWAY
+                || type == Waypoint.Type.FINAL_LEG;
+    }
     /**
      * Flip between one runway and two.
      *
@@ -562,7 +678,7 @@ public class AirportMapScreen extends Screen {
     private void undoLastPoint() {
         // Nothing to undo in Move or Insert mode - they edit existing lines
         // rather than appending, and toWaypointType has no answer for them.
-        if (mode == EditMode.MOVE || mode == EditMode.INSERT) return;
+        if (tool != Tool.DRAW) return;
         if (mode == EditMode.GATE) {
             List<String> names = new ArrayList<>(layout.gates().keySet());
             if (!names.isEmpty()) layout.gates().remove(names.get(names.size() - 1));
@@ -584,7 +700,7 @@ public class AirportMapScreen extends Screen {
     }
 
     private void clearCurrent() {
-        if (mode == EditMode.MOVE || mode == EditMode.INSERT) return;
+        if (tool != Tool.DRAW) return;
         if (mode == EditMode.GATE) {
             layout.gates().clear();
         } else if (mode == EditMode.HELIPAD) {
@@ -619,7 +735,7 @@ public class AirportMapScreen extends Screen {
             case HOLDING_PATTERN -> Waypoint.Type.HOLDING_PATTERN;
             case FINAL_LEG -> Waypoint.Type.FINAL_LEG;
             case HOLD_SHORT -> Waypoint.Type.HOLD_SHORT;
-            case GATE, HELIPAD, MOVE, INSERT -> throw new IllegalArgumentException(mode + " is not a Waypoint.Type");
+            case GATE, HELIPAD -> throw new IllegalArgumentException(mode + " is not a Waypoint.Type");
         };
     }
 
@@ -628,12 +744,17 @@ public class AirportMapScreen extends Screen {
         // The dropdown overlaps the map, so it gets first refusal on clicks.
         if (button == 0 && dropdownClicked(mouseX, mouseY)) return true;
 
-        if (button == 0 && mode == EditMode.INSERT && isInsideMap(mouseX, mouseY)) {
+        if (button == 0 && tool == Tool.DELETE && isInsideMap(mouseX, mouseY)) {
+            deleteAt(mouseX, mouseY);
+            return true;
+        }
+
+        if (button == 0 && tool == Tool.INSERT && isInsideMap(mouseX, mouseY)) {
             insertNodeAt(screenToWorld((int) mouseX, (int) mouseY));
             return true;
         }
 
-        if (button == 0 && mode == EditMode.MOVE && isInsideMap(mouseX, mouseY)) {
+        if (button == 0 && tool == Tool.MOVE && isInsideMap(mouseX, mouseY)) {
             dragging = nodeAt(mouseX, mouseY);
             if (dragging == null) {
                 rejection = "Nothing to move here - click a node.";
@@ -642,7 +763,7 @@ public class AirportMapScreen extends Screen {
             return true;
         }
 
-        if (button == 0 && isInsideMap(mouseX, mouseY)) {
+        if (button == 0 && tool == Tool.DRAW && isInsideMap(mouseX, mouseY)) {
             BlockPos raw = screenToWorld((int) mouseX, (int) mouseY);
             // A hold line marks a place ALONG a taxiway, not a place the
             // taxiway bends. Snapping it to nodes meant it could only ever
@@ -1100,7 +1221,7 @@ public class AirportMapScreen extends Screen {
             // The runway is the spine everything else hangs off, so it goes
             // down first and needs no connection of its own. Moving nodes
             // places nothing at all.
-            case RUNWAY, ARRIVAL_RUNWAY, DEPARTURE_RUNWAY, MOVE, INSERT -> null;
+            case RUNWAY, ARRIVAL_RUNWAY, DEPARTURE_RUNWAY -> null;
 
             case TAXIWAY -> {
                 if (!hasRunway) yield "Draw the runway first.";
@@ -1405,8 +1526,6 @@ public class AirportMapScreen extends Screen {
 
     private String hint() {
         return switch (mode) {
-            case MOVE -> "drag any node to move it - joined lines follow";
-            case INSERT -> "click a taxiway or pattern line to put a node on it";
             case RUNWAY, ARRIVAL_RUNWAY -> runwayHint();
             case DEPARTURE_RUNWAY -> "2 clicks: gate end, then far end - departures only";
             case TAXIWAY -> "pairs; click a drawn segment to flip its direction";
