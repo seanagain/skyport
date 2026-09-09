@@ -139,19 +139,36 @@ public final class FleetWake {
     }
 
     /**
-     * Whether an aircraft has an open wake window - someone asked for it and
-     * the promised stretch of running time has not run out.
+     * Which wake each aircraft has already been credited for, identified by
+     * its deadline.
      *
-     * The unattended allowance asks this, because pressing Wake is a player
-     * attending an aircraft as surely as standing next to it is. Without it
-     * the two mechanisms cancel out: the ticket forces the chunks open, the
-     * aircraft starts ticking with an allowance of zero, and the first thing
-     * it does with its restored life is decide it has no business being awake
-     * and drop the chunks again.
+     * A wake hands the aircraft one full unattended allowance and no more.
+     * Topping it back up for as long as the window stayed open meant the
+     * window's minutes and the allowance's minutes added together - ten and
+     * fifteen making twenty-five - which is not what either number says.
+     * Pressing Wake again sets a later deadline, and that is a new wake and
+     * a new grant, so asking twice still helps an aircraft that needs longer.
      */
-    public static boolean hasOpenWindow(MinecraftServer server, UUID planeId) {
+    private static final java.util.Map<UUID, Long> GRANTED = new java.util.HashMap<>();
+
+    /**
+     * Claim the unattended allowance an open wake window owes this aircraft,
+     * once.
+     *
+     * Pressing Wake is a player attending an aircraft as surely as standing
+     * next to it is, and without this the two mechanisms cancel out: the
+     * ticket forces the chunks open, the aircraft starts ticking with an
+     * allowance of zero, and the first thing it does with its restored life
+     * is decide it has no business being awake and drop the chunks again.
+     *
+     * @return true exactly once per wake, for the caller to fill its allowance
+     */
+    public static boolean claimWake(MinecraftServer server, UUID planeId) {
         Long until = WOKEN_UNTIL.get(planeId);
-        return until != null && server.overworld().getGameTime() < until;
+        if (until == null || server.overworld().getGameTime() >= until) return false;
+        if (until.equals(GRANTED.get(planeId))) return false;
+        GRANTED.put(planeId, until);
+        return true;
     }
 
     /**
@@ -287,6 +304,7 @@ public final class FleetWake {
 
         runPendingChecks(server, now);
         WOKEN_UNTIL.values().removeIf(until -> now >= until);
+        GRANTED.keySet().removeIf(planeId -> !WOKEN_UNTIL.containsKey(planeId));
         if (ACTIVE.isEmpty()) return;
 
         ACTIVE.removeIf(waking -> {

@@ -1248,6 +1248,12 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 // the block entity stops ticking, and it resumes from there
                 // when someone finds it.
                 releaseChunks();
+                // And hand back the wake ticket, if a wake is what got us out
+                // here. Otherwise fleetWakeMinutes could outlast the allowance
+                // - it goes up to 30 - and an aircraft would keep flying on
+                // chunks the tower was still holding open, well past the limit
+                // this setting is supposed to be. The allowance is the ceiling.
+                FleetWake.release(serverLevel.getServer(), planeId());
                 if (tickCounter % UNATTENDED_REPORT_TICKS == 0) {
                     note("Out of unattended time - will stop once this area unloads.");
                 }
@@ -1259,7 +1265,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 // leaving it to time out keeps a second patch of world open
                 // at the airport this aircraft has already left. The wake
                 // WINDOW outlives the ticket on purpose - see
-                // FleetWake.hasOpenWindow - so this does not put the aircraft
+                // FleetWake.claimWake - so this does not put the aircraft
                 // straight back to being unattended.
                 FleetWake.release(serverLevel.getServer(), planeId());
             }
@@ -1472,15 +1478,16 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (unattendedTicksLeft > budget) unattendedTicksLeft = budget;
 
         // Someone asked for this aircraft from the tower. That is attention
-        // too, and the wake ticket has already forced its chunks open - so
-        // treat it exactly like a player standing here, or the two mechanisms
-        // cancel out and Wake does nothing.
-        if (FleetWake.hasOpenWindow(serverLevel.getServer(), planeId())) {
-            if (unattendedTicksLeft != budget) {
-                unattendedTicksLeft = budget;
-                setChanged();
-            }
-            return;
+        // too, and the wake ticket has already forced its chunks open - so it
+        // gets a full allowance, or the two mechanisms cancel out and Wake
+        // does nothing.
+        //
+        // Once per wake, and then it counts down like any other. Refilling for
+        // as long as the window stayed open added the window's minutes to the
+        // allowance's, which is more than either setting claims.
+        if (FleetWake.claimWake(serverLevel.getServer(), planeId())) {
+            unattendedTicksLeft = budget;
+            setChanged();
         }
 
         if (simulatedPosition != null && serverLevel.getNearestPlayer(
