@@ -671,6 +671,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // Turn onto the line before following it, so parking anywhere
             // within the buffer alongside a taxiway is good enough.
             this.joinPoint = nearestPointOnGroundPath(origin, reference);
+            // Engaging is attending it, so it starts with a full allowance.
+            unattendedTicksLeft = schedule.unattendedMinutes() * 60 * 20;
             setState(FlightState.PUSHBACK);
             message(player, "Autopilot engaged - pushing back.");
         } else {
@@ -804,6 +806,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // Before the state switch, so the answering note lands whatever the
         // aircraft went on to do - including a final arrival, which leaves
         // the state machine idle and would otherwise swallow it.
+        tickUnattendedAllowance(serverLevel);
         tickArrivalChime(serverLevel);
 
         if (state == FlightState.WAITING) {
@@ -822,10 +825,17 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // even with these chunks unloaded.
             rememberSelf(serverLevel);
 
-            if (SkyportConfig.keepParkedLoaded) {
-                // Server has opted into schedules that run unattended: hold a
-                // small area rather than sleeping, so the gate wait keeps
-                // counting down with nobody around.
+            if (SkyportConfig.keepParkedLoaded || unattendedTicksLeft > 0) {
+                // Server has opted into schedules that run unattended, or this
+                // aircraft still has allowance of its own: hold a small area
+                // rather than sleeping, so the gate wait keeps counting down
+                // with nobody around and it carries on to the next stop.
+                //
+                // This is the whole point of the allowance. Sleeping at the
+                // gate is what stopped a route mid-way through: an aircraft
+                // that had flown three legs unattended would park, release its
+                // chunks, and sit there until someone came looking - so a loop
+                // never actually looped unless a player followed it round.
                 FlightChunkLoader.follow(serverLevel, planeId(),
                         new ChunkPos(BlockPos.containing(simulatedPosition)), heldChunks,
                         SkyportConfig.parkedChunkRadius);
@@ -1221,6 +1231,18 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // Drag the loaded-chunk bubble along with the plane, so it doesn't
         // fly into unloaded world and freeze - see FlightChunkLoader.
         if (tickCounter % CHUNK_FOLLOW_INTERVAL_TICKS == 0) {
+            // Only while the aircraft still has allowance to be out here on
+            // its own. Spent, it stops dragging the world along with it and
+            // goes quiet wherever it has got to - which is the aircraft's
+            // side of the bargain: unattended flight is not free, and this is
+            // what limits how much of it one route can ask for.
+            if (unattendedTicksLeft <= 0 && !SkyportConfig.keepParkedLoaded) {
+                releaseChunks();
+                if (tickCounter % UNATTENDED_REPORT_TICKS == 0) {
+                    note("Out of unattended time - holding position until someone comes by.");
+                }
+                return;
+            }
             FlightChunkLoader.follow(serverLevel, planeId(),
                     new ChunkPos(BlockPos.containing(simulatedPosition)), heldChunks);
             // Moving under our own bubble now, so hand back any wake ticket
@@ -1397,6 +1419,48 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return CargoSensor.countItems(level, cargoContainers);
     }
 
+
+    /** How near a player has to be to count as attending an aircraft. Roughly
+     *  the distance at which they are loading its chunks anyway, so "someone
+     *  is here" and "the world around it is loaded regardless" line up. */
+    private static final double UNATTENDED_PLAYER_RADIUS = 128.0;
+
+    /** How often an aircraft that has run out of time says so. */
+    private static final int UNATTENDED_REPORT_TICKS = 200;
+
+    /** Ticks of unattended running left. Persisted, because the whole point
+     *  is a budget that survives the aircraft going quiet and being found
+     *  again later. */
+    private int unattendedTicksLeft = 0;
+
+    /**
+     * Spend, or refill, this aircraft's allowance for running unattended.
+     *
+     * Refilled rather than paused when a player is near. Pausing would mean
+     * an aircraft that had spent its budget stayed spent, so the first
+     * unattended stretch would be the only one it ever got - and a route
+     * flown past a player every lap would still grind to a halt. Someone
+     * turning up means the aircraft is attended again, and it starts the next
+     * lonely stretch with a full tank.
+     */
+    private void tickUnattendedAllowance(ServerLevel serverLevel) {
+        int budget = schedule.unattendedMinutes() * 60 * 20;
+        if (budget <= 0) {
+            unattendedTicksLeft = 0;
+            return;
+        }
+
+        if (simulatedPosition != null && serverLevel.getNearestPlayer(
+                simulatedPosition.x, simulatedPosition.y, simulatedPosition.z,
+                UNATTENDED_PLAYER_RADIUS, false) != null) {
+            if (unattendedTicksLeft != budget) {
+                unattendedTicksLeft = budget;
+                setChanged();
+            }
+            return;
+        }
+        if (unattendedTicksLeft > 0) unattendedTicksLeft--;
+    }
     private boolean isPlayerNearby(ServerLevel serverLevel) {
         if (simulatedPosition == null) return false;
         return serverLevel.getNearestPlayer(
@@ -4044,6 +4108,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // while this block entity is unloaded instead of draining away in a
         // world clock the aircraft was not flying in.
         if (fuelReserve > 0) tag.putDouble("fuelReserve", fuelReserve);
+        tag.putInt("unattendedTicksLeft", unattendedTicksLeft);
         // originAirportId, holdingEntryIndex, waitUntilGameTime and
         // simulatedPosition are intentionally NOT persisted - transient
         // stand-ins for real contraption movement, not worth preserving
@@ -4061,6 +4126,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (tag.contains("state")) state = FlightState.valueOf(tag.getString("state"));
         currentWaypointIndex = tag.getInt("currentWaypointIndex");
         fuelReserve = tag.getDouble("fuelReserve");
+        unattendedTicksLeft = tag.getInt("unattendedTicksLeft");
         if (state != FlightState.IDLE) simulatedPosition = getBlockPos().getCenter();
     }
 }

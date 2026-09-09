@@ -54,6 +54,7 @@ public class AutopilotScreen extends Screen {
     private Button craftButton;
     private Button altitudeButton;
     private Button speedButton;
+    private Button unattendedButton;
     private Button engageButton;
     private Button removeButton;
     private EditBox nameBox;
@@ -111,11 +112,17 @@ public class AutopilotScreen extends Screen {
                 .bounds(left, top + 72, third, 20).build());
         loopButton = addRenderableWidget(Button.builder(loopLabel(), b -> toggleLoop())
                 .bounds(left + third + 4, top + 72, third, 20).build());
-        addRenderableWidget(Button.builder(Component.translatable("gui.skyport.autopilot.disengage"),
-                        b -> {
-                            PacketDistributor.sendToServer(new DisengageAutopilotPayload(autopilotPos));
-                            onClose();
-                        })
+
+        // How long this aircraft may keep going with nobody near it.
+        //
+        // A cycling button rather than a stepper, and in this row rather than
+        // a new one, because the panel was already within a row of clipping
+        // off the bottom at a large GUI scale - adding one would have pushed
+        // Engage off the screen for anyone playing at scale 4. Click-to-cycle
+        // is what every other field here does anyway, so it costs no height
+        // and no new idiom. Disengage moves in beside Engage, which is where
+        // it belonged.
+        unattendedButton = addRenderableWidget(Button.builder(unattendedLabel(), b -> cycleUnattended())
                 .bounds(left + (third + 4) * 2, top + 72, panelW - (third + 4) * 2, 20).build());
 
         // Cruise altitude and speed: the settings that describe the flight
@@ -140,10 +147,17 @@ public class AutopilotScreen extends Screen {
         // Shares the row with Engage rather than adding one below it, so the
         // panel does not grow a line taller and start clipping off the
         // bottom of a small window.
-        int lockW = 80;
+        int lockW = 62;
+        int offW = 62;
         engageButton = addRenderableWidget(Button.builder(Component.translatable("gui.skyport.autopilot.engage"),
                         b -> engage())
-                .bounds(left, top + 120, panelW - lockW - 4, 20).build());
+                .bounds(left, top + 120, panelW - lockW - offW - 8, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("gui.skyport.autopilot.disengage"),
+                        b -> {
+                            PacketDistributor.sendToServer(new DisengageAutopilotPayload(autopilotPos));
+                            onClose();
+                        })
+                .bounds(left + panelW - lockW - offW - 4, top + 120, offW, 20).build());
         addRenderableWidget(Button.builder(Component.translatable("gui.skyport.passcode.button"),
                         b -> net.neoforged.neoforge.network.PacketDistributor.sendToServer(
                                 new com.skyport.network.LockRequestPayload(autopilotPos)))
@@ -314,6 +328,28 @@ public class AutopilotScreen extends Screen {
         return Component.literal("Spd " + schedule.cruiseSpeed());
     }
 
+
+    /** The presets, in minutes. 0 is the old behaviour - sleep on arrival and
+     *  wait to be woken - and is offered first so it stays reachable. */
+    private static final int[] UNATTENDED_PRESETS = { 0, 5, 10, 20, 30, 45, 60 };
+
+    private Component unattendedLabel() {
+        int minutes = schedule.unattendedMinutes();
+        return Component.literal(minutes == 0 ? "Alone: sleeps" : "Alone: " + minutes + "m");
+    }
+
+    private void cycleUnattended() {
+        int current = schedule.unattendedMinutes();
+        int next = UNATTENDED_PRESETS[0];
+        for (int i = 0; i < UNATTENDED_PRESETS.length; i++) {
+            if (UNATTENDED_PRESETS[i] == current) {
+                next = UNATTENDED_PRESETS[(i + 1) % UNATTENDED_PRESETS.length];
+                break;
+            }
+        }
+        schedule.setUnattendedMinutes(next);
+        refresh();
+    }
     private void adjustCruiseAltitude(int delta) {
         schedule.setCruiseAltitude(Math.max(0, Math.min(400, schedule.cruiseAltitude() + delta)));
         refresh();
@@ -334,6 +370,7 @@ public class AutopilotScreen extends Screen {
         loopButton.setMessage(loopLabel());
         craftButton.setMessage(craftLabel());
         altitudeButton.setMessage(altitudeLabel());
+        if (unattendedButton != null) unattendedButton.setMessage(unattendedLabel());
         speedButton.setMessage(speedLabel());
 
         airportButton.active = sel && airports.size() > 1;

@@ -48,10 +48,15 @@ because they differ.
 | **Holding pattern** | 3+, forming the loop aircraft circle in |
 | **Final leg** | 2: pattern side first, then the runway threshold |
 | **Gate** | 1 each, auto-named Gate A, Gate B … |
-| **Hold line** | In pairs — a line across the taxiway |
+| | Click an existing gate to rename it or move it up/down the list |
+| **Hold line** | 1 each, anywhere along a taxiway |
 | **Helipad** | 1 each; rotorcraft need no runway |
-| **Move nodes** | Drag a node. Joined lines follow it |
-| **Add node on a line** | Click a line to split it, creating a junction |
+
+**Tools.** The strip down the left of the map is what a click does, as opposed
+to what it draws: **Draw** places points, **Move** drags a node (joined lines
+follow it), **Add node** splits a line to make a junction, and **Delete**
+removes what you click — a gate, a pad, a hold point, or a whole taxiway
+segment, since deleting one end of a segment would leave the other stranded.
 
 Right-drag pans, scroll zooms, and **Center** returns to the station.
 
@@ -116,6 +121,28 @@ The tower lists sleeping aircraft, and clicking one wakes it for ten minutes —
 enough to finish a gate wait and get moving. Everything about this is
 configurable, including off; `performance.chunkRadius` is the single biggest
 cost this mod imposes on a server.
+
+## Unattended flight
+
+Each aircraft has its own allowance for running with nobody near it, set on
+the Autopilot screen - "Alone: 10m" by default, cycling through off, 5, 10,
+20, 30, 45 and 60 minutes.
+
+While no player is within about 128 blocks, the aircraft spends that
+allowance to keep its own chunks loaded. It matters most at the gate: with
+time left it finishes its wait and carries on to the next stop, so a loop
+actually loops. Without it, a parked aircraft releases its chunks and sleeps
+until something wakes it - which meant a route only ever advanced as far as
+its first gate unless a player followed it round.
+
+The allowance refills whenever a player comes near, and on engage. Set it to
+"sleeps" for the old behaviour. It is per-aircraft on purpose: a shuttle
+between two fields nobody visits wants a long one, a sightseeing hop that
+only matters when someone is watching wants none.
+
+This is the aircraft asking to keep chunks open, so it is the same cost as
+`performance.chunkRadius` - see Chunk loading above - for as long as the
+allowance lasts.
 
 ## Locks
 
