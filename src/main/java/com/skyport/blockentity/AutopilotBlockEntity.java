@@ -1237,19 +1237,32 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // side of the bargain: unattended flight is not free, and this is
             // what limits how much of it one route can ask for.
             if (unattendedTicksLeft <= 0 && !SkyportConfig.keepParkedLoaded) {
+                // Out of time: stop dragging the world along behind us.
+                //
+                // Deliberately not a return. Refusing to run the flight logic
+                // froze an aircraft in mid-air for as long as anything else
+                // kept its chunks loaded, and an aircraft a player can see
+                // hanging motionless is a bug however well justified. Letting
+                // it fly on means it goes quiet the honest way: these chunks
+                // unload a moment later because nothing holds them any more,
+                // the block entity stops ticking, and it resumes from there
+                // when someone finds it.
                 releaseChunks();
                 if (tickCounter % UNATTENDED_REPORT_TICKS == 0) {
-                    note("Out of unattended time - holding position until someone comes by.");
+                    note("Out of unattended time - will stop once this area unloads.");
                 }
-                return;
+            } else {
+                FlightChunkLoader.follow(serverLevel, planeId(),
+                        new ChunkPos(BlockPos.containing(simulatedPosition)), heldChunks);
+                // Moving under our own bubble now, so hand back any wake
+                // ticket that got us started. It has done its job, and
+                // leaving it to time out keeps a second patch of world open
+                // at the airport this aircraft has already left. The wake
+                // WINDOW outlives the ticket on purpose - see
+                // FleetWake.hasOpenWindow - so this does not put the aircraft
+                // straight back to being unattended.
+                FleetWake.release(serverLevel.getServer(), planeId());
             }
-            FlightChunkLoader.follow(serverLevel, planeId(),
-                    new ChunkPos(BlockPos.containing(simulatedPosition)), heldChunks);
-            // Moving under our own bubble now, so hand back any wake ticket
-            // that got us started. It has done its job, and leaving it to
-            // time out keeps a second patch of world open at the airport this
-            // aircraft has already left.
-            FleetWake.release(serverLevel.getServer(), planeId());
         }
 
         // Power, once a second of world time. Both the cadence and the fuel
@@ -1457,6 +1470,18 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // An operator who lowers the setting means it, including for aircraft
         // already carrying more time than the new value allows.
         if (unattendedTicksLeft > budget) unattendedTicksLeft = budget;
+
+        // Someone asked for this aircraft from the tower. That is attention
+        // too, and the wake ticket has already forced its chunks open - so
+        // treat it exactly like a player standing here, or the two mechanisms
+        // cancel out and Wake does nothing.
+        if (FleetWake.hasOpenWindow(serverLevel.getServer(), planeId())) {
+            if (unattendedTicksLeft != budget) {
+                unattendedTicksLeft = budget;
+                setChanged();
+            }
+            return;
+        }
 
         if (simulatedPosition != null && serverLevel.getNearestPlayer(
                 simulatedPosition.x, simulatedPosition.y, simulatedPosition.z,
@@ -4135,7 +4160,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (tag.contains("state")) state = FlightState.valueOf(tag.getString("state"));
         currentWaypointIndex = tag.getInt("currentWaypointIndex");
         fuelReserve = tag.getDouble("fuelReserve");
-        unattendedTicksLeft = tag.getInt("unattendedTicksLeft");
+        // An absent tag is an aircraft saved before this setting existed.
+        // Born with a full allowance rather than none: zero would mean every
+        // aircraft already in a world woke up out of time, which is exactly
+        // the state that made Wake look broken.
+        unattendedTicksLeft = tag.contains("unattendedTicksLeft")
+                ? tag.getInt("unattendedTicksLeft")
+                : SkyportConfig.unattendedMinutes * 60 * 20;
         if (state != FlightState.IDLE) simulatedPosition = getBlockPos().getCenter();
     }
 }

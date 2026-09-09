@@ -139,6 +139,22 @@ public final class FleetWake {
     }
 
     /**
+     * Whether an aircraft has an open wake window - someone asked for it and
+     * the promised stretch of running time has not run out.
+     *
+     * The unattended allowance asks this, because pressing Wake is a player
+     * attending an aircraft as surely as standing next to it is. Without it
+     * the two mechanisms cancel out: the ticket forces the chunks open, the
+     * aircraft starts ticking with an allowance of zero, and the first thing
+     * it does with its restored life is decide it has no business being awake
+     * and drop the chunks again.
+     */
+    public static boolean hasOpenWindow(MinecraftServer server, UUID planeId) {
+        Long until = WOKEN_UNTIL.get(planeId);
+        return until != null && server.overworld().getGameTime() < until;
+    }
+
+    /**
      * Drop an aircraft's wake tickets early.
      *
      * Called the moment it starts holding its own flying bubble: at that

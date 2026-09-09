@@ -309,12 +309,12 @@ public class AtcScreen extends Screen {
         if (mouseX >= listX && mouseX < listX + listW) {
             for (int[] row : rowHitboxes) {
                 if (mouseY < row[1] || mouseY >= row[1] + 20) continue;
+                // Selects only. Waking is a separate press of the Wake
+                // button: clicking a row is how you read an aircraft's
+                // details, and having that also spend chunk-loading time on
+                // whichever row you happened to click means you cannot look
+                // without acting.
                 selected = row[0];
-                // Clicking a resting aircraft asks for it directly. Waking is
-                // bounded and expires on its own, so there is nothing to
-                // regret about an accidental one, and reaching for a button
-                // to act on the row you just clicked is a step nobody wants.
-                if (selectedIsAsleep()) wakeSelected();
                 return true;
             }
         }
