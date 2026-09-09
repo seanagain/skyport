@@ -1416,6 +1416,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // pushback branch works it out on its first tick, and this makes sure
         // it is asked to.
         pushbackHeading = null;
+        // A rotorcraft going straight up or down holds the heading it had
+        // on the way in - see verticalHeading.
+        verticalHeading = (newState == FlightState.VERTICAL_CLIMB
+                || newState == FlightState.VERTICAL_DESCENT
+                || newState == FlightState.HOVERING)
+                ? currentNoseFlat()
+                : null;
         invalidatePath();
         // Each ground phase starts on the near side of the hold point again:
         // taxiing out hasn't been cleared onto the runway yet, and taxiing in
@@ -2049,11 +2056,18 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // pirouette on the stand - but steering nothing at all, which is what
         // this did before, let it spin freely off its ground contacts. It
         // holds a heading now rather than merely declining to chase one.
-        Vector3d spin = state == FlightState.PUSHBACK
-                ? (pushbackHeading != null
-                        ? angularCorrectionTowards(pushbackHeading)
-                        : levelOnlyCorrection())
-                : angularCorrectionTowards(heading);
+        Vector3d spin;
+        if (state == FlightState.PUSHBACK) {
+            spin = pushbackHeading != null
+                    ? angularCorrectionTowards(pushbackHeading)
+                    : levelOnlyCorrection();
+        } else if (isVerticalManoeuvre() && verticalHeading != null) {
+            // Going straight down, the direction to the target has no
+            // horizontal component worth reading - see verticalHeading.
+            spin = angularCorrectionTowards(verticalHeading);
+        } else {
+            spin = angularCorrectionTowards(heading);
+        }
         activeBody.addLinearAndAngularVelocity(
                 new Vector3d(correction.x, correction.y, correction.z), spin);
 
@@ -2168,14 +2182,42 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         pushbackHeading = new Vec3(dx / length, 0, dz / length);
     }
     private void capturePushbackHeading() {
-        if (activeSubLevel == null) {
-            pushbackHeading = null;
-            return;
-        }
+        pushbackHeading = currentNoseFlat();
+    }
+
+    /** The craft's nose, flattened and normalised, or null if it is pointing
+     *  straight up or down and has no heading worth the name. */
+    @org.jetbrains.annotations.Nullable
+    private Vec3 currentNoseFlat() {
+        if (activeSubLevel == null) return null;
         Vector3d nose = noseVector();
         double flat = Math.sqrt(nose.x * nose.x + nose.z * nose.z);
-        pushbackHeading = flat < 1.0e-4 ? null : new Vec3(nose.x / flat, 0, nose.z / flat);
+        return flat < 1.0e-4 ? null : new Vec3(nose.x / flat, 0, nose.z / flat);
     }
+
+    /**
+     * The heading to hold while going straight up or down.
+     *
+     * A rotorcraft descending onto a pad is travelling almost entirely
+     * vertically, so the horizontal part of "the direction to the target" is
+     * a fraction of a block of drift - which is to say noise. Deriving a
+     * heading from it has the aircraft chase a bearing that swings at random,
+     * and it spins over its own pad instead of settling on it.
+     *
+     * The existing guard anticipated this and only catches an exactly zero
+     * horizontal component, which never happens; a tenth of a block sails
+     * past it. But widening the guard is not the answer either, because
+     * falling into it means a yaw error of zero, and a yaw error of zero
+     * means no authority to hold the heading with - which is how pushback
+     * came to spin freely off its ground contacts.
+     *
+     * So the same answer as pushback: capture a heading on the way in and
+     * defend that instead. A helicopter coming down on a pad keeps the
+     * heading it approached with, which is both stable and what a real one
+     * does.
+     */
+    @org.jetbrains.annotations.Nullable
+    private transient Vec3 verticalHeading;
 
     /** Straight up, straight down, or holding station - the manoeuvres where
      *  the craft has no forward flight to speak of. */
