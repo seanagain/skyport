@@ -33,7 +33,7 @@ build a schedule of stops. Engage from its screen or with a redstone signal.
 
 **Air Traffic Control** — one live map of every airport and every aircraft,
 with a traffic strip listing what each one is doing. Aircraft that have gone
-to sleep are listed separately and can be woken by clicking their name.
+to sleep are listed separately; select one and press Wake.
 
 ## Drawing an airport
 
@@ -117,10 +117,10 @@ A flying aircraft holds a small bubble of loaded chunks so it doesn't fly into
 unloaded world and freeze. Parked aircraft release theirs and sleep, which is
 how the rest of Minecraft treats unattended corners of the world.
 
-The tower lists sleeping aircraft, and clicking one wakes it for ten minutes —
-enough to finish a gate wait and get moving. Everything about this is
-configurable, including off; `performance.chunkRadius` is the single biggest
-cost this mod imposes on a server.
+The tower lists sleeping aircraft; select one and press Wake to keep it loaded
+for ten minutes — enough to finish a gate wait and get moving. Everything about
+this is configurable, including off; `performance.chunkRadius` is the single
+biggest cost this mod imposes on a server.
 
 ## Unattended flight
 

@@ -132,8 +132,8 @@ Start it from its screen or with redstone.
 
 **Air Traffic Control** — every airport and every aircraft on one live map,
 with a strip down the side saying what each one is doing. Sleeping aircraft are
-listed separately and wake with a click. Point a Create Display Link at it for
-a departures board.
+listed separately; select one and press Wake. Point a Create Display Link at it
+for a departures board.
 
 ### They stay out of each other's way
 
@@ -145,6 +145,10 @@ When one runway is not enough, add a **second for departures only** so nobody
 queues behind a landing. When one taxiway is not enough, make segments
 **one-way** — an inbound half and an outbound half, and traffic flows past
 itself instead of nose to nose.
+
+And underneath all of that, an aircraft simply stops for another that is
+physically in its way, booked or not — so a badly drawn airport, or one whose
+hold lines you have not placed yet, jams rather than crashes.
 
 ### Make it cost something
 
@@ -164,6 +168,12 @@ open one, engage it, or break it — and breaking a station would take its airpo
 down with every flight routed there. Open one and press Passcode to let
 somebody else in. Operators always have access, and the whole thing switches
 off in the config for a server where everyone is trusted.
+
+Schedules keep running for a while with nobody watching —
+`performance.unattendedMinutes`, fifteen by default — so a route completes a
+lap instead of stopping at its first gate the moment you walk away. It holds
+chunks open to do it, which is why the server decides how long, not each
+aircraft.
 
 ### Requirements
 
@@ -241,9 +251,64 @@ that is largely how the order gets decided.
 
 ### Changelog for 1.0.0-beta.2
 
-> **Airports and aircraft now belong to whoever placed them.** Nobody else
-> can open, engage, or break your Airport Station or Autopilot — and breaking
-> a station would have taken its airport down with every flight routed there.
+> Mostly a flying build. The first release could draw an airport and fly a
+> schedule; this one is about aircraft that arrive where they were sent,
+> without spinning on the way.
+>
+> **Aircraft no longer spin at random.** Two causes, both real. The autopilot
+> steered from the Autopilot block rather than the craft's centre of mass, so
+> anything with the block mounted off-centre fought its own corrections. And
+> the level-flight correction was handed the craft's own nose as its target,
+> which made the yaw error exactly zero and left no authority to hold a
+> heading with. Turning on the ground is gentler, stops once on heading, and
+> is lag-neutral, so a stutter no longer becomes a pirouette.
+>
+> **Landing.** Aircraft touch down on the runway that is built rather than the
+> height it was drawn at, roll out at that same corrected height instead of
+> rising a couple of blocks and dropping, and are required to actually be down
+> before anything calls them landed. Rotorcraft land on the pad and hold their
+> heading through a vertical descent instead of chasing noise near the ground.
+> The glide slope is flown properly, the circuit sits at a height measured
+> from the ground below it, and the holding-pattern entry is flown at cruise
+> speed rather than slowing unnaturally on the way in.
+>
+> **Parking at a gate.** Aircraft park on the gate node instead of four or
+> five blocks to one side of it, which is what used to put them into each
+> other and into buildings. They roll onto the stand and slow down gradually
+> rather than driving at it and stopping dead, and they stop rocking once
+> parked. Taxiway nodes are loose enough to cut corners naturally; the stand
+> itself stays tight.
+>
+> **Hold lines are points, and they work.** Place one anywhere along a taxiway
+> rather than only on a node. The whole aircraft waits behind the line, not
+> its centre, and the segment behind is only released once the aircraft has
+> completely crossed it. Two clicks used to make a line, which joined
+> unrelated taxiways into diagonals across the airport.
+>
+> **A collision failsafe that does not need hold lines.** An aircraft stops
+> for another that is physically in its way, whether or not that one booked
+> the route. It gives way for at most eight seconds, so a stale or broken
+> aircraft slows traffic briefly instead of blocking an airport permanently —
+> which a "ghost" left behind by picking a craft up used to do.
+>
+> **Editor.** A tool strip beside the map: draw, move, add node, and delete,
+> so a single gate, pad, hold point or taxiway segment can be removed without
+> starting again. Gates can be renamed and reordered.
+>
+> **Unattended flight.** A parked aircraft released its chunks and slept, so a
+> route only ever advanced as far as its first stop unless you followed it
+> round — a loop never looped. `performance.unattendedMinutes` is how long an
+> aircraft may carry on with nobody near it: fifteen minutes by default, and
+> fifteen is the cap. Server config, because it is asking the server to hold
+> chunks open.
+>
+> **The tower.** The ATC block works while mounted on an aircraft, aircraft
+> markers move live on its map, and clicking a row in the traffic strip now
+> selects that aircraft instead of waking it — waking is the Wake button.
+>
+> **Airports and aircraft belong to whoever placed them.** Nobody else can
+> open, engage, or break your Airport Station or Autopilot — and breaking a
+> station would have taken its airport down with every flight routed there.
 > Open a block and press Passcode to let someone else in; operators always
 > have access, and it all switches off in the config.
 >
@@ -266,6 +331,16 @@ that is largely how the order gets decided.
 > side textures instead of wearing the same screen on every face. Fixes a
 > hole straight through to the sky when two of them sat side by side, which
 > came from all three claiming to be solid cubes when none of them is.
+>
+> **Also:** an engaged aircraft's physics body is kept awake, so it no longer
+> stalls mid-taxi; a pushback that cannot finish gives up and says so instead
+> of stalling silently; and the autopilot no longer holds taxiing aircraft
+> very slightly off the ground, which was a side effect of asking for zero
+> vertical velocity and thereby cancelling gravity.
+>
+> **Known:** if a runway's drawn waypoints were placed at the wrong height in
+> an existing save, redraw that runway — the landing fix reads the built
+> ground, but a stored waypoint height is still what it was saved as.
 
 ### Changelog for the first file
 
