@@ -1108,6 +1108,17 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 } else {
                     if (holdingEntryIndex < 0) holdingEntryIndex = nearestIndex(loop, simulatedPosition);
                     BlockPos entry = withY(loop.get(holdingEntryIndex), holdingAltitude(destination));
+                    // The pattern entry is flown THROUGH, not stopped at, so
+                    // do not ease off approaching it.
+                    //
+                    // This flag is only ever set inside followWaypoints, and
+                    // the cruise leg steers directly - so it arrived here
+                    // still holding whatever the climb-out left behind, which
+                    // is "this is the last point, slow down for it". At cruise
+                    // speed that ramp starts biting forty blocks out, and an
+                    // airliner visibly losing speed on the way to a holding
+                    // pattern is not something aircraft do.
+                    steeringToLastWaypoint = false;
                     applyMotionTowards(entry);
                     if (horizontalDistance(entry, BlockPos.containing(simulatedPosition)) <= HOLDING_ENTRY_LEAD_BLOCKS) {
                         // Straight in only from pattern altitude. Arriving
