@@ -13,7 +13,7 @@ import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
  * Client-only: Ponder is a tutorial UI and does not exist on a dedicated
  * server, so this must never be touched during common setup.
  *
- * <p><b>Parked for the beta.</b> The scenes work, but they teach a version of
+ * <p><b>Parked for 1.0.</b> The scenes work, but they teach a version of
  * the editor that no longer exists - they describe the hold line as a single
  * point, and say nothing about second runways, one-way taxiways, dragging
  * nodes, or the survival power modes. A tutorial that is confidently wrong is

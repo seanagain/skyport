@@ -180,25 +180,30 @@ aircraft.
 Minecraft 1.21.1 · NeoForge 21.1.0+ · Create 6.0.0+ · Create Aeronautics
 1.3.0+ · Sable — all required, none bundled.
 
-### It is a beta
+### What 1.0 means
 
-Two-runway airports, both survival modes and dedicated servers have been flown
-end to end, but hardly anyone outside the author has run this yet. One limit
-before you install: the Autopilot can be placed on any block rather than only
-on an aircraft.
+Everything described above works: two-runway airports, one-way taxiways,
+rotorcraft, both survival modes, and dedicated servers have all been flown end
+to end, aircraft complete their schedules unattended, and the traffic
+separation keeps them out of each other's way.
 
-No in-game Ponder guides this release — the old ones described an older editor,
-and a guide that is confidently wrong is worse than none. The README has
-everything.
+Two things it does not have. The Autopilot can be placed on any block rather
+than only on an assembled aircraft — it will happily fly a cube of iron, which
+is useful for testing and a cheat if you would rather it were not. And there
+are no in-game Ponder guides: the old ones described an earlier version of the
+editor, and a guide that is confidently wrong is worse than none. The README
+covers the editor properly.
 
-Bugs and suggestions welcome on the issue tracker.
+It is 1.0 because it does what it says and has been flown enough to trust with
+an airport you built. It is a first 1.0, so bugs and suggestions are very
+welcome on the issue tracker.
 
 ### Where it is going
 
 Nothing below is promised or dated. It is the order things are likely to
 happen in, so you can tell whether the mod is heading somewhere you want.
 
-**Finishing the beta**
+**Next**
 
 - Autopilot restricted to actual aircraft, instead of any block
 - Trusted access lists, so a group can share an airport without sharing a code
@@ -242,18 +247,19 @@ that is largely how the order gets decided.
 
 | Field | Value |
 | --- | --- |
-| File | `build/libs/skyport-1.0.0-beta.2.jar` |
-| Display name | Skyport 1.0.0-beta.2 |
-| Release type | **Beta** |
+| File | `build/libs/skyport-1.0.0.jar` |
+| Display name | Skyport 1.0.0 |
+| Release type | **Release** |
 | Game version | 1.21.1 |
 | Loader | NeoForge |
 | Java | 21 |
 
-### Changelog for 1.0.0-beta.2
+### Changelog for 1.0.0
 
-> Mostly a flying build. The first release could draw an airport and fly a
-> schedule; this one is about aircraft that arrive where they were sent,
-> without spinning on the way.
+> **1.0.** The first public build could draw an airport and fly a schedule.
+> This one is about aircraft that arrive where they were sent — without
+> spinning on the way, landing two blocks above the runway, or parking through
+> the terminal wall — on airports that belong to whoever built them.
 >
 > **Aircraft no longer spin at random.** Two causes, both real. The autopilot
 > steered from the Autopilot block rather than the craft's centre of mass, so
@@ -363,5 +369,5 @@ that is largely how the order gets decided.
 - [ ] Built from a clean tree (`./gradlew clean build`), tests green
 - [ ] The jar in `build/libs` is the one being uploaded, not a stale sibling
 - [ ] All four dependency relations added, all marked Required
-- [ ] Release type is Beta, not Release
+- [ ] Release type is Release, not Beta
 - [ ] Logo uploaded
