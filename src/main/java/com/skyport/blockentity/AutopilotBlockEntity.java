@@ -3659,8 +3659,24 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      */
     private double centreAboveUnderside() {
         if (activeSubLevel == null || simulatedPosition == null) return 0;
-        double lift = simulatedPosition.y - activeSubLevel.boundingBox().minY();
-        return lift > 0 && lift < CRAFT_CENTRE_SANITY_BLOCKS ? lift : 0;
+        var box = activeSubLevel.boundingBox();
+        double lift = simulatedPosition.y - box.minY();
+        boolean usable = lift > 0 && lift < CRAFT_CENTRE_SANITY_BLOCKS;
+
+        // Logged because this number has now been wrong twice and guessing at
+        // it a third time is not a plan. It rests on boundingBox() being the
+        // craft's own extent - if it is the sub-level's plot instead, minY
+        // sits well below the aircraft, the figure is rejected as nonsense,
+        // and the fallback quietly aims the landing at ground level again,
+        // which is the fault it was added to fix. One line says which.
+        if (SkyportConfig.telemetry && tickCounter % 20 == 0) {
+            Skyport.LOGGER.info("[land] {} centreY={} boxY={}..{} lift={} used={}",
+                    callsign(),
+                    String.format("%.2f", simulatedPosition.y),
+                    String.format("%.2f", box.minY()), String.format("%.2f", box.maxY()),
+                    String.format("%.2f", lift), usable);
+        }
+        return usable ? lift : 0;
     }
     /**
      * The descent: join the final leg at pattern altitude, then fly down it
@@ -3702,7 +3718,18 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         } else {
             path.addAll(leg);
         }
-        if (runway.size() == 2) path.add(runway.get(0));
+        // The roll-out, at the same corrected height as the touchdown.
+        //
+        // This used to be the runway node as drawn, which undid the whole
+        // point of correcting the touchdown height: the aircraft descended
+        // onto the real surface, then set off down the strip toward a
+        // waypoint two blocks above it. APPROACH is an airborne state, so the
+        // vertical correction is live and it duly climbed - and dropped again
+        // the moment TAXI_IN handed height back to gravity. An aeroplane that
+        // lands, lifts, and thumps down.
+        if (runway.size() == 2) {
+            path.add(withY(runway.get(0), touchdownHeight(level, runway.get(0))));
+        }
         return path;
     }
 
