@@ -124,25 +124,23 @@ cost this mod imposes on a server.
 
 ## Unattended flight
 
-Each aircraft has its own allowance for running with nobody near it, set on
-the Autopilot screen - "Alone: 10m" by default, cycling through off, 5, 10,
-20, 30, 45 and 60 minutes.
+A parked aircraft releases its chunks and sleeps, so a route only ever
+advanced as far as its first stop unless a player followed it round — a loop
+never looped. `performance.unattendedMinutes` is how long an aircraft may
+carry on regardless: fifteen minutes by default, and fifteen is also the cap.
 
-While no player is within about 128 blocks, the aircraft spends that
-allowance to keep its own chunks loaded. It matters most at the gate: with
-time left it finishes its wait and carries on to the next stop, so a loop
-actually loops. Without it, a parked aircraft releases its chunks and sleeps
-until something wakes it - which meant a route only ever advanced as far as
-its first gate unless a player followed it round.
+While no player is within about 128 blocks it spends that time keeping its own
+chunks loaded — finishing its gate wait, flying the next leg, and going again
+until the clock runs out. Then it goes quiet wherever it got to and waits to
+be found, which is what it always did. The clock refills whenever a player
+comes near, and on engage. Set it to 0 for the old behaviour.
 
-The allowance refills whenever a player comes near, and on engage. Set it to
-"sleeps" for the old behaviour. It is per-aircraft on purpose: a shuttle
-between two fields nobody visits wants a long one, a sightseeing hop that
-only matters when someone is watching wants none.
-
-This is the aircraft asking to keep chunks open, so it is the same cost as
-`performance.chunkRadius` - see Chunk loading above - for as long as the
-allowance lasts.
+Server config rather than per-aircraft on purpose. This is an aircraft asking
+the server to hold chunks open, so it costs the same as
+`performance.chunkRadius` — see Chunk loading above — for as long as it lasts;
+left to individual aircraft, any player could pin a patch of world for as long
+as they liked. If you want parked aircraft loaded indefinitely, that is
+`performance.keepParkedLoaded`, and it is the honest way to ask for it.
 
 ## Locks
 

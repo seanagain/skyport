@@ -117,6 +117,27 @@ public final class SkyportConfig {
                      "airborne aircraft are holding their own chunks. 0 disables waking.")
             .defineInRange("performance.fleetWakeMinutes", 10, 0, 30);
 
+    public static final ModConfigSpec.IntValue UNATTENDED_MINUTES = SERVER
+            .comment("How long an aircraft keeps flying with no player near it, in minutes.",
+                     "",
+                     "An aircraft parked at a gate normally releases its chunks and sleeps,",
+                     "so a route only ever advances as far as its first stop unless somebody",
+                     "follows it round - a loop never loops. This is how long it may carry on",
+                     "regardless: it finishes its gate wait, flies the next leg, and keeps",
+                     "doing so until the time runs out, holding its own chunks to do it.",
+                     "",
+                     "The clock refills whenever a player comes within about 128 blocks, and",
+                     "on engage. When it runs out the aircraft goes quiet wherever it has got",
+                     "to and waits to be found, which is what it did before this existed.",
+                     "",
+                     "0 disables it - aircraft sleep on arrival, as they always did.",
+                     "",
+                     "This pins chunks open for as long as it lasts, so it costs the same as",
+                     "performance.chunkRadius and for longer. It is a server setting rather",
+                     "than a per-aircraft one deliberately: left to individual aircraft, any",
+                     "player could hold a patch of world open for as long as they liked.")
+            .defineInRange("performance.unattendedMinutes", 15, 0, 15);
+
     /**
      * What an aircraft has to have aboard before the autopilot will fly it.
      *
@@ -241,6 +262,7 @@ public final class SkyportConfig {
     public static boolean wakeOnAtcOpen = false;
     public static int terrainMemoryLimit = 200_000;
     public static int fleetWakeMinutes = 10;
+    public static int unattendedMinutes = 15;
     public static PowerRequirement powerRequirement = PowerRequirement.NONE;
     public static int rotationMinimumRpm = 16;
     public static double fuelEfficiency = 1.0;
@@ -264,6 +286,7 @@ public final class SkyportConfig {
         parkedChunkRadius = PARKED_CHUNK_RADIUS.get();
         wakeOnAtcOpen = WAKE_ON_ATC_OPEN.get();
         fleetWakeMinutes = FLEET_WAKE_MINUTES.get();
+        unattendedMinutes = UNATTENDED_MINUTES.get();
         powerRequirement = POWER_REQUIREMENT.get();
         rotationMinimumRpm = ROTATION_MINIMUM_RPM.get();
         fuelEfficiency = FUEL_EFFICIENCY.get();

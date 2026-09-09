@@ -672,7 +672,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // within the buffer alongside a taxiway is good enough.
             this.joinPoint = nearestPointOnGroundPath(origin, reference);
             // Engaging is attending it, so it starts with a full allowance.
-            unattendedTicksLeft = schedule.unattendedMinutes() * 60 * 20;
+            unattendedTicksLeft = SkyportConfig.unattendedMinutes * 60 * 20;
             setState(FlightState.PUSHBACK);
             message(player, "Autopilot engaged - pushing back.");
         } else {
@@ -1434,7 +1434,12 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private int unattendedTicksLeft = 0;
 
     /**
-     * Spend, or refill, this aircraft's allowance for running unattended.
+     * Spend, or refill, the allowance for running unattended.
+     *
+     * The length of it is performance.unattendedMinutes, a server setting
+     * rather than a per-aircraft one: this asks the server to hold chunks
+     * open, so left to individual aircraft any player could pin a patch of
+     * world for as long as they cared to type into a screen.
      *
      * Refilled rather than paused when a player is near. Pausing would mean
      * an aircraft that had spent its budget stayed spent, so the first
@@ -1444,11 +1449,14 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * lonely stretch with a full tank.
      */
     private void tickUnattendedAllowance(ServerLevel serverLevel) {
-        int budget = schedule.unattendedMinutes() * 60 * 20;
+        int budget = SkyportConfig.unattendedMinutes * 60 * 20;
         if (budget <= 0) {
             unattendedTicksLeft = 0;
             return;
         }
+        // An operator who lowers the setting means it, including for aircraft
+        // already carrying more time than the new value allows.
+        if (unattendedTicksLeft > budget) unattendedTicksLeft = budget;
 
         if (simulatedPosition != null && serverLevel.getNearestPlayer(
                 simulatedPosition.x, simulatedPosition.y, simulatedPosition.z,
@@ -1461,6 +1469,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         }
         if (unattendedTicksLeft > 0) unattendedTicksLeft--;
     }
+
     private boolean isPlayerNearby(ServerLevel serverLevel) {
         if (simulatedPosition == null) return false;
         return serverLevel.getNearestPlayer(

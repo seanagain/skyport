@@ -28,23 +28,6 @@ public class FlightSchedule {
     /** Player-given name for this aircraft. Blank means fall back to the
      *  generated callsign - see AutopilotBlockEntity#callsign. */
     private String craftName = "";
-    /**
-     * How long this aircraft may keep running with no player near it, in
-     * minutes.
-     *
-     * Per-aircraft rather than a server setting, because it is a judgement
-     * about one route: a shuttle between two fields nobody visits wants a
-     * long budget, and a sightseeing hop that only matters when someone is
-     * watching wants none. The server-wide keepParkedLoaded and the tower's
-     * wake button both stay as they are - this is the aircraft's own
-     * allowance, spent while unattended and refilled whenever a player turns
-     * up.
-     *
-     * Zero means the old behaviour exactly: hold chunks while flying, sleep
-     * on arrival, wait to be woken.
-     */
-    private int unattendedMinutes = 10;
-
 
     public List<ScheduleEntry> entries() {
         return entries;
@@ -90,14 +73,6 @@ public class FlightSchedule {
         this.craftName = craftName;
     }
 
-    public int unattendedMinutes() {
-        return unattendedMinutes;
-    }
-
-    public void setUnattendedMinutes(int unattendedMinutes) {
-        this.unattendedMinutes = Math.max(0, Math.min(60, unattendedMinutes));
-    }
-
     public boolean isEmpty() {
         return entries.isEmpty();
     }
@@ -124,7 +99,6 @@ public class FlightSchedule {
         tag.putInt("cruiseSpeed", cruiseSpeed);
         tag.putString("craftType", craftType.name());
         tag.putString("craftName", craftName);
-        tag.putInt("unattendedMinutes", unattendedMinutes);
         return tag;
     }
 
@@ -139,7 +113,6 @@ public class FlightSchedule {
         if (tag.contains("cruiseSpeed")) schedule.cruiseSpeed = tag.getInt("cruiseSpeed");
         if (tag.contains("craftType")) schedule.craftType = CraftType.valueOf(tag.getString("craftType"));
         if (tag.contains("craftName")) schedule.craftName = tag.getString("craftName");
-        if (tag.contains("unattendedMinutes")) schedule.unattendedMinutes = tag.getInt("unattendedMinutes");
         return schedule;
     }
 
@@ -151,7 +124,6 @@ public class FlightSchedule {
         buf.writeVarInt(cruiseSpeed);
         buf.writeEnum(craftType);
         buf.writeUtf(craftName);
-        buf.writeVarInt(unattendedMinutes);
     }
 
     public static FlightSchedule read(FriendlyByteBuf buf) {
@@ -163,7 +135,6 @@ public class FlightSchedule {
         schedule.cruiseSpeed = buf.readVarInt();
         schedule.craftType = buf.readEnum(CraftType.class);
         schedule.craftName = buf.readUtf();
-        schedule.unattendedMinutes = buf.readVarInt();
         return schedule;
     }
 }
