@@ -342,7 +342,10 @@ that is largely how the order gets decided.
 > stalls mid-taxi; a pushback that cannot finish gives up and says so instead
 > of stalling silently; and the autopilot no longer holds taxiing aircraft
 > very slightly off the ground, which was a side effect of asking for zero
-> vertical velocity and thereby cancelling gravity.
+> vertical velocity and thereby cancelling gravity. And all three blocks now
+> drop themselves when mined with a pickaxe — they had no loot tables, and
+> required a correct tool without anything saying what that was, so a broken
+> block simply vanished.
 >
 > **Known:** if a runway's drawn waypoints were placed at the wrong height in
 > an existing save, redraw that runway — the landing fix reads the built
