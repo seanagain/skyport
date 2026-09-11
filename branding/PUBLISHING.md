@@ -247,12 +247,33 @@ that is largely how the order gets decided.
 
 | Field | Value |
 | --- | --- |
-| File | `build/libs/skyport-1.0.0.jar` |
-| Display name | Skyport 1.0.0 |
+| File | `build/libs/skyport-1.0.1.jar` |
+| Display name | Skyport 1.0.1 |
 | Release type | **Release** |
 | Game version | 1.21.1 |
 | Loader | NeoForge |
 | Java | 21 |
+
+### Changelog for 1.0.1
+
+> **VOR beacons.** A new block for routing aircraft over a point on the way
+> somewhere, instead of straight from airport to airport. Place one, right-click
+> it to name it, and on the Autopilot screen the destination button now cycles
+> through the airports and then the VORs. A VOR stop is flown over, not landed
+> at — no gate, no wait.
+>
+> Use one to take a route round a mountain, or to bring arrivals in from the
+> side that lines them up with the holding pattern: an aircraft picks its
+> pattern entry after its last VOR rather than back at the airport it left.
+> The terrain check at Engage follows the route through the VORs, so a route
+> built to avoid a mountain is not refused because of the mountain.
+>
+> VORs are crossed at the schedule's cruise altitude, show on the ATC map as
+> purple diamonds, and lock to whoever placed them. A broken VOR is skipped
+> rather than ending the flight, and existing schedules load unchanged.
+>
+> Crafted from a lightning rod over brass, an electron tube and brass, over
+> three andesite alloy. Mine it with a pickaxe to get it back.
 
 ### Changelog for 1.0.0
 
