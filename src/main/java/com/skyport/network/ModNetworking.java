@@ -92,6 +92,11 @@ public class ModNetworking {
                 LockRequestPayload.STREAM_CODEC,
                 ModNetworking::handleLockRequest);
 
+        registrar.playToServer(
+                RenameVorPayload.TYPE,
+                RenameVorPayload.STREAM_CODEC,
+                ModNetworking::handleRenameVor);
+
         registrar.playToClient(
                 AtcTrafficPayload.TYPE,
                 AtcTrafficPayload.STREAM_CODEC,
@@ -116,6 +121,11 @@ public class ModNetworking {
                 OpenPasscodePayload.TYPE,
                 OpenPasscodePayload.STREAM_CODEC,
                 ModNetworking::handleOpenPasscode);
+
+        registrar.playToClient(
+                OpenVorPayload.TYPE,
+                OpenVorPayload.STREAM_CODEC,
+                ModNetworking::handleOpenVor);
     }
 
     // ---- access ----
@@ -210,6 +220,7 @@ public class ModNetworking {
             BlockPos tower = com.skyport.blockentity.AtcBlockEntity.openTowerPosition(player);
             PacketDistributor.sendToPlayer(player, new AtcTrafficPayload(
                     List.copyOf(registry.all()),
+                    List.copyOf(registry.allVors()),
                     List.copyOf(registry.allTraffic(player.serverLevel().getGameTime())),
                     tower != null ? tower : player.blockPosition()));
         });
@@ -236,7 +247,8 @@ public class ModNetworking {
                         "[Skyport] Only " + lock.ownerName() + " can change this lock."));
                 return;
             }
-            String label = lockable instanceof AirportStationBlockEntity ? "Airport Station" : "Autopilot";
+            String label = lockable instanceof AirportStationBlockEntity ? "Airport Station"
+                    : lockable instanceof com.skyport.blockentity.VorBlockEntity ? "VOR Beacon" : "Autopilot";
             PacketDistributor.sendToPlayer(player,
                     new OpenPasscodePayload(payload.pos(), true, lock.hasPasscode(), label));
         });
@@ -336,6 +348,21 @@ public class ModNetworking {
         });
     }
 
+    /** Naming a VOR, guarded like every other handler that changes something:
+     *  a rename changes what every schedule routed over that VOR shows. */
+    private static void handleRenameVor(RenameVorPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            ServerPlayer player = (ServerPlayer) context.player();
+            com.skyport.blockentity.VorBlockEntity vor =
+                    authorised(player, payload.pos(), com.skyport.blockentity.VorBlockEntity.class);
+            if (vor == null) return;
+            com.skyport.data.VorBeacon renamed = vor.rename(payload.name());
+            if (renamed == null) return;
+            player.sendSystemMessage(Component.literal(String.format("[Skyport] Saved VOR '%s' at %d, %d.",
+                    renamed.name(), renamed.pos().getX(), renamed.pos().getZ())));
+        });
+    }
+
     // ---- S2C: server -> player ----
 
     private static void handleOpenAirportMap(OpenAirportMapPayload payload, IPayloadContext context) {
@@ -356,5 +383,10 @@ public class ModNetworking {
     private static void handleOpenPasscode(OpenPasscodePayload payload, IPayloadContext context) {
         if (!onClient()) return;
         ClientPayloadHandlers.openPasscode(payload, context);
+    }
+
+    private static void handleOpenVor(OpenVorPayload payload, IPayloadContext context) {
+        if (!onClient()) return;
+        ClientPayloadHandlers.openVor(payload, context);
     }
 }

@@ -35,6 +35,9 @@ build a schedule of stops. Engage from its screen or with a redstone signal.
 with a traffic strip listing what each one is doing. Aircraft that have gone
 to sleep are listed separately; select one and press Wake.
 
+**VOR Beacon** — a named point on the map. Place it, right-click it to give it
+a name, and any aircraft's schedule can be routed over it.
+
 ## Drawing an airport
 
 Open the station, hit **Edit Map**, and pick what to draw from the dropdown.
@@ -75,6 +78,36 @@ refuses a change that would leave a gate unreachable.
 same coordinates. That is why dragging a node moves everything sitting on it,
 and why a line that merely crosses another is not connected until you add a
 node where they meet.
+
+## Routing over VORs
+
+A VOR is a stop an aircraft flies over instead of landing at. On the Autopilot
+screen the destination button cycles through every airport and then every VOR;
+a VOR stop has no gate and no wait.
+
+`Home → VOR North → Harbour` takes off from Home, crosses VOR North, and lands
+at Harbour. Use one to route round terrain the straight line would hit, or to
+bring arrivals in from the side that lines them up with the holding pattern —
+the aircraft picks its pattern entry after its last VOR, not back at the
+airport it left.
+
+- **Crossed at cruise altitude.** Only the VOR's x and z matter. The block
+  stands on the ground; nothing flies at it.
+- **"Over" is loose on purpose:** within about 16 blocks, or near and moving
+  away again, or circling without getting any closer. A VOR is for routing by,
+  not a target to hit, and a wide-turning aircraft should not orbit one
+  forever.
+- **The terrain check follows the route.** Engage checks each leg through the
+  VORs, so a route placed to go round a mountain is not refused for the
+  mountain.
+- **A schedule needs an airport.** VORs after the last airport of a schedule
+  that does not loop lead nowhere and are not flown.
+- **A broken VOR is skipped**, with a note, rather than bringing the aircraft
+  down mid-route.
+
+VORs show on the ATC map as purple diamonds, and the traffic strip says which
+one an aircraft is heading for. They lock to whoever placed them, like
+stations and autopilots.
 
 ## Traffic separation
 

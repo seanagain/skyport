@@ -63,6 +63,17 @@ public class ModBlocks {
                     .requiresCorrectToolForDrops()
                     .noOcclusion()));
 
+    // A named point aircraft can be routed over - see VorBlock. The same
+    // console as the Airport Station, with a radio mast where its map is.
+    public static final DeferredBlock<com.skyport.block.VorBlock> VOR = REGISTER.register(
+            "vor",
+            () -> new com.skyport.block.VorBlock(BlockBehaviour.Properties.of()
+                    .mapColor(MapColor.METAL)
+                    .strength(3.5f)
+                    .sound(SoundType.METAL)
+                    .requiresCorrectToolForDrops()
+                    .noOcclusion()));
+
     public static final DeferredHolder<Item, BlockItem> AIRPORT_STATION_ITEM = ITEMS.register(
             "airport_station", () -> new BlockItem(AIRPORT_STATION.get(), new Item.Properties()));
 
@@ -71,6 +82,9 @@ public class ModBlocks {
 
     public static final DeferredHolder<Item, BlockItem> ATC_ITEM = ITEMS.register(
             "atc", () -> new BlockItem(ATC.get(), new Item.Properties()));
+
+    public static final DeferredHolder<Item, BlockItem> VOR_ITEM = ITEMS.register(
+            "vor", () -> new BlockItem(VOR.get(), new Item.Properties()));
 
     public static void register(net.neoforged.bus.api.IEventBus modEventBus) {
         REGISTER.register(modEventBus);

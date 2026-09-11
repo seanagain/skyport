@@ -138,6 +138,6 @@ public class AtcBlockEntity extends BlockEntity implements BlockEntitySubLevelAc
         List<AirportLayout> airports = List.copyOf(registry.all());
         List<TrafficReport> traffic = List.copyOf(registry.allTraffic(serverLevel.getGameTime()));
 
-        PacketDistributor.sendToPlayer(player, new OpenAtcPayload(worldPosition(), airports, traffic));
+        PacketDistributor.sendToPlayer(player, new OpenAtcPayload(worldPosition(), airports, List.copyOf(registry.allVors()), traffic));
     }
 }

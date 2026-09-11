@@ -89,6 +89,40 @@ public class FlightSchedule {
         return loop ? 0 : -1;
     }
 
+    /**
+     * The airport a leg starting at this stop is actually flying to.
+     *
+     * VORs are flown over on the way somewhere, so the destination is the
+     * first airport stop at or after the index - followed the way nextIndex
+     * follows the schedule, round to the start when it loops and not
+     * otherwise. Trailing VORs on a schedule that does not loop therefore
+     * lead nowhere, which is the honest answer: there is no airport after
+     * them to fly to.
+     *
+     * @return that stop's index, or -1 if nothing but VORs lies ahead
+     */
+    public int destinationIndexFrom(int index) {
+        if (index < 0 || index >= entries.size()) return -1;
+        int i = index;
+        // Bounded by the schedule's length, so a loop of nothing but VORs
+        // gives up rather than going round forever.
+        for (int step = 0; step < entries.size(); step++) {
+            if (!entries.get(i).isVor()) return i;
+            i = nextIndex(i);
+            if (i < 0) return -1;
+        }
+        return -1;
+    }
+
+    /** Whether there is anywhere on this schedule to land at all. A route of
+     *  nothing but VORs has no destination to fly toward. */
+    public boolean hasAirportStop() {
+        for (ScheduleEntry entry : entries) {
+            if (!entry.isVor()) return true;
+        }
+        return false;
+    }
+
     public CompoundTag save() {
         CompoundTag tag = new CompoundTag();
         ListTag list = new ListTag();

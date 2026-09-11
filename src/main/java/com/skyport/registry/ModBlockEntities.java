@@ -25,4 +25,8 @@ public class ModBlockEntities {
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<AtcBlockEntity>> ATC =
             REGISTER.register("atc", () -> BlockEntityType.Builder.of(
                     AtcBlockEntity::new, ModBlocks.ATC.get()).build(null));
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<com.skyport.blockentity.VorBlockEntity>> VOR =
+            REGISTER.register("vor", () -> BlockEntityType.Builder.of(
+                    com.skyport.blockentity.VorBlockEntity::new, ModBlocks.VOR.get()).build(null));
 }

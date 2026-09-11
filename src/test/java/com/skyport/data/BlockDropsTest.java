@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class BlockDropsTest {
 
-    private static final String[] BLOCKS = { "airport_station", "autopilot", "atc" };
+    private static final String[] BLOCKS = { "airport_station", "autopilot", "atc", "vor" };
 
     private static JsonObject read(String path) {
         InputStream in = BlockDropsTest.class.getResourceAsStream(path);

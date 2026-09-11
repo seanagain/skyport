@@ -44,6 +44,9 @@ public class AtcScreen extends Screen {
     private static final int COLOR_GATE = 0xFFE0812F;
     private static final int COLOR_HOLD_SHORT = 0xFFD64550;
     private static final int COLOR_HELIPAD = 0xFF63D66B;
+    /** VOR beacons. A colour no airport element uses, so a VOR sitting on top
+     *  of a runway still reads as something else. */
+    private static final int COLOR_VOR = 0xFFC792EA;
     private static final int COLOR_LABEL = 0xFF5AD7E0;
     private static final int COLOR_AIRCRAFT = 0xFFE0812F;
     /** Sleeping aircraft, dimmed - present in the list, but not live. */
@@ -65,6 +68,9 @@ public class AtcScreen extends Screen {
     /** Replaced on each refresh too - breaking a station deletes an airport,
      *  and the map should stop drawing it. */
     private List<AirportLayout> airports;
+    /** VOR beacons, replaced on each refresh with the airports - breaking one
+     *  should take it off the map too. */
+    private List<com.skyport.data.VorBeacon> vors;
     /** Replaced wholesale by each refresh, so aircraft move while you watch. */
     private List<TrafficReport> traffic;
     private long lastRefreshMs;
@@ -85,10 +91,12 @@ public class AtcScreen extends Screen {
      *  its row positions are not a simple multiple of anything. */
     private final java.util.List<int[]> rowHitboxes = new java.util.ArrayList<>();
 
-    public AtcScreen(BlockPos atcPos, List<AirportLayout> airports, List<TrafficReport> traffic) {
+    public AtcScreen(BlockPos atcPos, List<AirportLayout> airports, List<com.skyport.data.VorBeacon> vors,
+                     List<TrafficReport> traffic) {
         super(Component.translatable("gui.skyport.atc.title"));
         this.atcPos = atcPos;
         this.airports = airports;
+        this.vors = vors;
         this.traffic = traffic;
     }
 
@@ -147,11 +155,13 @@ public class AtcScreen extends Screen {
      * rebuilt each refresh and planes drop out of it when they park, so a
      * remembered index would quietly start describing a different aeroplane.
      */
-    public void refresh(List<AirportLayout> updatedAirports, List<TrafficReport> updated, BlockPos towerPos) {
+    public void refresh(List<AirportLayout> updatedAirports, List<com.skyport.data.VorBeacon> updatedVors,
+                        List<TrafficReport> updated, BlockPos towerPos) {
         // A tower on an aircraft moves, so the "you are here" marker has to
         // follow it rather than staying where the screen was opened.
         this.atcPos = towerPos;
         this.airports = updatedAirports;
+        this.vors = updatedVors;
         java.util.UUID selectedId = (selected >= 0 && selected < traffic.size())
                 ? traffic.get(selected).planeId() : null;
         this.traffic = updated;
@@ -266,6 +276,15 @@ public class AtcScreen extends Screen {
                 maxZ = Math.max(maxZ, p.getZ());
             }
         }
+        // VORs too - a routed leg can run well outside every airport, and a
+        // view fitted without them would cut off the very point an aircraft
+        // is flying toward.
+        for (com.skyport.data.VorBeacon vor : vors) {
+            minX = Math.min(minX, vor.pos().getX());
+            maxX = Math.max(maxX, vor.pos().getX());
+            minZ = Math.min(minZ, vor.pos().getZ());
+            maxZ = Math.max(maxZ, vor.pos().getZ());
+        }
         for (TrafficReport report : traffic) {
             minX = Math.min(minX, (int) report.position().x);
             maxX = Math.max(maxX, (int) report.position().x);
@@ -373,6 +392,7 @@ public class AtcScreen extends Screen {
         guiGraphics.drawCenteredString(font, title, width / 2, 10, 0xFFFFFF);
 
         for (AirportLayout airport : airports) drawAirport(guiGraphics, airport);
+        for (com.skyport.data.VorBeacon vor : vors) drawVor(guiGraphics, vor);
 
         // The tower itself, so the map has a "you are here".
         int ax = worldToScreenX(atcPos.getX());
@@ -538,6 +558,33 @@ public class AtcScreen extends Screen {
         }
 
         drawAirportLabel(guiGraphics, airport);
+    }
+
+    /**
+     * One VOR: a small diamond, and its name.
+     *
+     * A diamond because every other point on this map is square - a gate is
+     * a dot, a pad and a hold point are boxes - and the one thing a VOR must
+     * not be mistaken for is somewhere to land. Skipped when off the map,
+     * where its label would otherwise be drawn over the traffic strip.
+     */
+    private void drawVor(GuiGraphics guiGraphics, com.skyport.data.VorBeacon vor) {
+        int x = worldToScreenX(vor.pos().getX());
+        int y = worldToScreenY(vor.pos().getZ());
+        if (x < mapX || x >= mapX + mapW || y < mapY || y >= mapY + mapH) return;
+
+        for (int dy = -3; dy <= 3; dy++) {
+            int half = 3 - Math.abs(dy);
+            guiGraphics.fill(x - half, y + dy, x - half + 1, y + dy + 1, COLOR_VOR);
+            guiGraphics.fill(x + half, y + dy, x + half + 1, y + dy + 1, COLOR_VOR);
+        }
+        guiGraphics.fill(x, y, x + 1, y + 1, COLOR_VOR);
+
+        String name = vor.name();
+        int labelWidth = font.width(name);
+        int labelX = Math.min(x + 6, mapX + mapW - labelWidth - 2);
+        guiGraphics.fill(labelX - 1, y - 5, labelX + labelWidth + 1, y + 4, 0xB0000000);
+        guiGraphics.drawString(font, name, labelX, y - 4, COLOR_VOR);
     }
 
     /**

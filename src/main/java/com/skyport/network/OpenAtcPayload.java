@@ -2,6 +2,7 @@ package com.skyport.network;
 
 import com.skyport.data.AirportLayout;
 import com.skyport.data.TrafficReport;
+import com.skyport.data.VorBeacon;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -16,14 +17,15 @@ import java.util.List;
  *
  * Carries whole layouts, not summaries: the ATC map draws each airport's
  * runway and taxiways, so it needs the actual geometry rather than just a
- * name and a marker position.
+ * name and a marker position. VOR beacons ride along so the map can show
+ * the points routes are flown over.
  *
  * A snapshot rather than a subscription: the screen shows where everything
  * was when you opened it, and refreshes by asking again. Streaming live
  * positions to an open GUI would mean per-tick packets for something a player
  * glances at, which isn't worth the traffic.
  */
-public record OpenAtcPayload(BlockPos atcPos, List<AirportLayout> airports,
+public record OpenAtcPayload(BlockPos atcPos, List<AirportLayout> airports, List<VorBeacon> vors,
                              List<TrafficReport> traffic) implements CustomPacketPayload {
 
     public static final Type<OpenAtcPayload> TYPE =
@@ -34,6 +36,8 @@ public record OpenAtcPayload(BlockPos atcPos, List<AirportLayout> airports,
                 buf.writeBlockPos(payload.atcPos());
                 buf.writeVarInt(payload.airports().size());
                 for (AirportLayout airport : payload.airports()) airport.write(buf);
+                buf.writeVarInt(payload.vors().size());
+                for (VorBeacon vor : payload.vors()) vor.write(buf);
                 buf.writeVarInt(payload.traffic().size());
                 for (TrafficReport report : payload.traffic()) report.write(buf);
             },
@@ -42,10 +46,13 @@ public record OpenAtcPayload(BlockPos atcPos, List<AirportLayout> airports,
                 int airportCount = buf.readVarInt();
                 List<AirportLayout> airports = new ArrayList<>(airportCount);
                 for (int i = 0; i < airportCount; i++) airports.add(AirportLayout.read(buf));
+                int vorCount = buf.readVarInt();
+                List<VorBeacon> vors = new ArrayList<>(vorCount);
+                for (int i = 0; i < vorCount; i++) vors.add(VorBeacon.read(buf));
                 int trafficCount = buf.readVarInt();
                 List<TrafficReport> traffic = new ArrayList<>(trafficCount);
                 for (int i = 0; i < trafficCount; i++) traffic.add(TrafficReport.read(buf));
-                return new OpenAtcPayload(pos, airports, traffic);
+                return new OpenAtcPayload(pos, airports, vors, traffic);
             });
 
     @Override

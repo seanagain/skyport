@@ -3,6 +3,7 @@
   "values": [
     "skyport:airport_station",
     "skyport:autopilot",
-    "skyport:atc"
+    "skyport:atc",
+    "skyport:vor"
   ]
 }

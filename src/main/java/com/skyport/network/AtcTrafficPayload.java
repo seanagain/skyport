@@ -2,6 +2,7 @@ package com.skyport.network;
 
 import com.skyport.data.AirportLayout;
 import com.skyport.data.TrafficReport;
+import com.skyport.data.VorBeacon;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -14,17 +15,17 @@ import java.util.List;
  * Refresh pair for an open ATC screen.
  *
  * {@link Request} goes client -> server a few times a second while the
- * screen is open, and the reply carries the airports as well as the traffic.
- * Airports were left out originally on the grounds that they don't change
- * while you watch - but they do: breaking a station deletes one, and the map
- * went on showing a ghost until the screen was reopened.
+ * screen is open, and the reply carries the airports and VOR beacons as well
+ * as the traffic. Airports were left out originally on the grounds that they
+ * don't change while you watch - but they do: breaking a station deletes one,
+ * and the map went on showing a ghost until the screen was reopened. VORs
+ * are broken just as easily.
  *
  * Polling rather than a subscription
  * because it needs no server-side bookkeeping of who has a screen open, and
  * it stops the moment the screen closes - a plane that flies for an hour
  * with nobody watching costs nothing.
- */
-/**
+ *
  * @param towerPos where the ATC block itself is, resent every refresh
  *                 because a tower mounted on an aircraft moves. On the
  *                 ground this is the same value every time and costs a
@@ -33,6 +34,7 @@ import java.util.List;
  *                 the screen happened to be opened.
  */
 public record AtcTrafficPayload(List<AirportLayout> airports,
+                                List<VorBeacon> vors,
                                 List<TrafficReport> traffic,
                                 net.minecraft.core.BlockPos towerPos) implements CustomPacketPayload {
 
@@ -43,6 +45,8 @@ public record AtcTrafficPayload(List<AirportLayout> airports,
             (buf, payload) -> {
                 buf.writeVarInt(payload.airports().size());
                 for (AirportLayout airport : payload.airports()) airport.write(buf);
+                buf.writeVarInt(payload.vors().size());
+                for (VorBeacon vor : payload.vors()) vor.write(buf);
                 buf.writeVarInt(payload.traffic().size());
                 for (TrafficReport report : payload.traffic()) report.write(buf);
                 buf.writeBlockPos(payload.towerPos());
@@ -51,10 +55,13 @@ public record AtcTrafficPayload(List<AirportLayout> airports,
                 int airportCount = buf.readVarInt();
                 List<AirportLayout> airports = new ArrayList<>(airportCount);
                 for (int i = 0; i < airportCount; i++) airports.add(AirportLayout.read(buf));
+                int vorCount = buf.readVarInt();
+                List<VorBeacon> vors = new ArrayList<>(vorCount);
+                for (int i = 0; i < vorCount; i++) vors.add(VorBeacon.read(buf));
                 int count = buf.readVarInt();
                 List<TrafficReport> traffic = new ArrayList<>(count);
                 for (int i = 0; i < count; i++) traffic.add(TrafficReport.read(buf));
-                return new AtcTrafficPayload(airports, traffic, buf.readBlockPos());
+                return new AtcTrafficPayload(airports, vors, traffic, buf.readBlockPos());
             });
 
     @Override

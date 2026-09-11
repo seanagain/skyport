@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " R ",
+    "BEB",
+    "AAA"
+  ],
+  "key": {
+    "R": { "item": "minecraft:lightning_rod" },
+    "B": { "item": "create:brass_ingot" },
+    "E": { "item": "create:electron_tube" },
+    "A": { "item": "create:andesite_alloy" }
+  },
+  "result": { "id": "skyport:vor", "count": 1 }
+}

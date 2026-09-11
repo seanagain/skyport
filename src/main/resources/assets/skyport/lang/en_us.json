@@ -2,12 +2,17 @@
   "block.skyport.airport_station": "Airport Station",
   "block.skyport.autopilot": "Autopilot",
   "block.skyport.atc": "Air Traffic Control",
+  "block.skyport.vor": "VOR Beacon",
   "itemGroup.skyport": "Skyport",
 
   "gui.skyport.airport_station.title": "Airport Station",
   "gui.skyport.airport_station.name": "Airport Name",
   "gui.skyport.airport_station.save": "Save & Close",
   "gui.skyport.airport_station.edit_map": "Edit Map",
+
+  "gui.skyport.vor.title": "VOR Beacon",
+  "gui.skyport.vor.name": "VOR Name",
+  "gui.skyport.vor.save": "Save & Close",
 
   "gui.skyport.passcode.set_title": "Set Passcode",
   "gui.skyport.passcode.enter_title": "Locked",

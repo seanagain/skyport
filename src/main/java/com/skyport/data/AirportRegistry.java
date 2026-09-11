@@ -64,6 +64,33 @@ public class AirportRegistry extends SavedData {
     }
 
     /**
+     * Every VOR beacon, by id.
+     *
+     * Persisted, and kept here rather than in a registry of its own because a
+     * schedule names airports and VORs in the same list: both have to be
+     * found from anywhere, loaded or not, through the lookup the autopilot
+     * already makes.
+     */
+    private final Map<UUID, VorBeacon> vors = new HashMap<>();
+
+    public Optional<VorBeacon> vorById(@org.jetbrains.annotations.Nullable UUID id) {
+        return id == null ? Optional.empty() : Optional.ofNullable(vors.get(id));
+    }
+
+    public Collection<VorBeacon> allVors() {
+        return vors.values();
+    }
+
+    public void putVor(VorBeacon vor) {
+        vors.put(vor.id(), vor);
+        setDirty();
+    }
+
+    public void removeVor(UUID id) {
+        if (vors.remove(id) != null) setDirty();
+    }
+
+    /**
      * Which plane currently has the run of each runway - the smallest thing
      * that counts as air traffic control.
      *
@@ -407,6 +434,10 @@ public class AirportRegistry extends SavedData {
             parkedList.add(entry);
         }
         tag.put("parked", parkedList);
+
+        ListTag vorList = new ListTag();
+        for (VorBeacon vor : vors.values()) vorList.add(vor.save());
+        tag.put("vors", vorList);
         return tag;
     }
 
@@ -428,6 +459,14 @@ public class AirportRegistry extends SavedData {
                     new BlockPos(entry.getInt("x"), entry.getInt("y"), entry.getInt("z")),
                     entry.getString("callsign"), entry.getString("destination"),
                     entry.contains("state") ? entry.getString("state") : "WAITING"));
+        }
+
+        // Absent from a world saved before VORs existed, which simply reads as
+        // an empty list - no VORs, rather than no registry.
+        ListTag vorList = tag.getList("vors", 10);
+        for (int i = 0; i < vorList.size(); i++) {
+            VorBeacon vor = VorBeacon.load(vorList.getCompound(i));
+            registry.vors.put(vor.id(), vor);
         }
         return registry;
     }

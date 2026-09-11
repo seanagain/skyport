@@ -26,6 +26,7 @@ public class ModCreativeTabs {
                         output.accept(ModBlocks.AIRPORT_STATION_ITEM.get());
                         output.accept(ModBlocks.AUTOPILOT_ITEM.get());
                         output.accept(ModBlocks.ATC_ITEM.get());
+                        output.accept(ModBlocks.VOR_ITEM.get());
                     })
                     .build());
 

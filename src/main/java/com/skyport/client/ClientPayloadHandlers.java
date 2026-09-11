@@ -4,11 +4,13 @@ import com.skyport.client.gui.AirportStationScreen;
 import com.skyport.client.gui.AtcScreen;
 import com.skyport.client.gui.AutopilotScreen;
 import com.skyport.client.gui.PasscodeScreen;
+import com.skyport.client.gui.VorScreen;
 import com.skyport.network.AtcTrafficPayload;
 import com.skyport.network.OpenAirportMapPayload;
 import com.skyport.network.OpenAtcPayload;
 import com.skyport.network.OpenAutopilotPayload;
 import com.skyport.network.OpenPasscodePayload;
+import com.skyport.network.OpenVorPayload;
 import net.minecraft.client.Minecraft;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
@@ -39,7 +41,7 @@ public final class ClientPayloadHandlers {
     public static void atcTraffic(AtcTrafficPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             if (Minecraft.getInstance().screen instanceof AtcScreen atc) {
-                atc.refresh(payload.airports(), payload.traffic(), payload.towerPos());
+                atc.refresh(payload.airports(), payload.vors(), payload.traffic(), payload.towerPos());
             }
         });
     }
@@ -53,7 +55,7 @@ public final class ClientPayloadHandlers {
     public static void openAtc(OpenAtcPayload payload, IPayloadContext context) {
         context.enqueueWork(() ->
                 Minecraft.getInstance().setScreen(
-                        new AtcScreen(payload.atcPos(), payload.airports(), payload.traffic())));
+                        new AtcScreen(payload.atcPos(), payload.airports(), payload.vors(), payload.traffic())));
     }
 
     public static void openPasscode(OpenPasscodePayload payload, IPayloadContext context) {
@@ -65,6 +67,11 @@ public final class ClientPayloadHandlers {
     public static void openAutopilot(OpenAutopilotPayload payload, IPayloadContext context) {
         context.enqueueWork(() ->
                 Minecraft.getInstance().setScreen(new AutopilotScreen(
-                        payload.autopilotPos(), payload.airports(), payload.schedule())));
+                        payload.autopilotPos(), payload.airports(), payload.vors(), payload.schedule())));
+    }
+
+    public static void openVor(OpenVorPayload payload, IPayloadContext context) {
+        context.enqueueWork(() ->
+                Minecraft.getInstance().setScreen(new VorScreen(payload.pos(), payload.name())));
     }
 }

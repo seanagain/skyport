@@ -9,6 +9,7 @@ import com.skyport.data.AirportSummary;
 import com.skyport.data.FlightSchedule;
 import com.skyport.data.ScheduleEntry;
 import com.skyport.data.TrafficReport;
+import com.skyport.data.VorBeacon;
 import com.skyport.data.Waypoint;
 import com.skyport.network.OpenAutopilotPayload;
 import com.skyport.registry.ModBlockEntities;
@@ -499,7 +500,12 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         List<AirportSummary> airports = AirportRegistry.get(serverLevel).all().stream()
                 .map(AirportSummary::of)
                 .toList();
-        PacketDistributor.sendToPlayer(player, new OpenAutopilotPayload(getBlockPos(), airports, schedule));
+        // VORs by name, so the stop button cycles them in an order a player
+        // can predict rather than whatever order a HashMap happens to keep.
+        List<VorBeacon> vors = AirportRegistry.get(serverLevel).allVors().stream()
+                .sorted(java.util.Comparator.comparing(VorBeacon::name, String.CASE_INSENSITIVE_ORDER))
+                .toList();
+        PacketDistributor.sendToPlayer(player, new OpenAutopilotPayload(getBlockPos(), airports, vors, schedule));
     }
 
     /**
@@ -523,14 +529,128 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
     @org.jetbrains.annotations.Nullable
     private UUID destinationAirportId() {
-        ScheduleEntry entry = currentEntry();
+        ScheduleEntry entry = destinationEntry();
         return entry == null ? null : entry.airportId();
     }
 
     @org.jetbrains.annotations.Nullable
     private String destinationGateName() {
-        ScheduleEntry entry = currentEntry();
+        ScheduleEntry entry = destinationEntry();
         return entry == null ? null : entry.gateName();
+    }
+
+    /**
+     * The airport stop this leg is flying to.
+     *
+     * The same entry as currentEntry on an ordinary leg. On a leg routed over
+     * VORs, currentEntry is the VOR being flown toward and this is the airport
+     * past it - and nearly everything that asks about "the destination"
+     * (clearances, the approach, the pattern, where to taxi) means the
+     * airport, never the VOR, so that is what destinationAirportId answers.
+     */
+    @org.jetbrains.annotations.Nullable
+    private ScheduleEntry destinationEntry() {
+        int index = schedule.destinationIndexFrom(scheduleIndex);
+        return index < 0 ? null : schedule.entries().get(index);
+    }
+
+    /** How the pass over the VOR currently being flown toward is going.
+     *  Transient: after a reload the pass is simply measured again from
+     *  wherever the aircraft now is. */
+    private final com.skyport.logic.VorPassage vorPassage = new com.skyport.logic.VorPassage();
+
+    /** Which VOR vorPassage is measuring, so a change of target starts afresh. */
+    @org.jetbrains.annotations.Nullable
+    private UUID vorPassageFor;
+
+    /**
+     * Fly toward the VOR this leg is routed over, if it is routed over one.
+     *
+     * Aimed at the beacon's x and z at cruise altitude. A VOR is a point on
+     * the map to route by; its block stands on the ground, and flying to the
+     * block's own height would dive the aircraft at it.
+     *
+     * @return true if a VOR was flown toward this tick, in which case the rest
+     *         of the cruise - the pattern, the pad - waits until it is passed
+     */
+    private boolean flyOverPendingVor(ServerLevel serverLevel) {
+        ScheduleEntry entry = currentEntry();
+        if (entry == null || !entry.isVor()) return false;
+
+        VorBeacon vor = findVor(serverLevel, entry.vorId());
+        if (vor == null) {
+            // Broken, or in another dimension. Skipped rather than fatal: the
+            // airport past it is still there, and an aircraft falling out of
+            // its cruise because a waypoint vanished is far worse than one
+            // taking a straighter line.
+            note("A VOR on this route no longer exists - skipping it.");
+            passVor();
+            return true;
+        }
+
+        if (!entry.vorId().equals(vorPassageFor)) {
+            vorPassage.reset();
+            vorPassageFor = entry.vorId();
+        }
+
+        BlockPos overhead = new BlockPos(vor.pos().getX(), cruiseAltitude(), vor.pos().getZ());
+        // Flown through, not stopped at - the same reasoning as the pattern
+        // entry in the cruise.
+        steeringToLastWaypoint = false;
+        applyMotionTowards(overhead);
+
+        double distance = horizontalDistance(overhead, BlockPos.containing(simulatedPosition));
+        if (vorPassage.update(distance, serverLevel.getGameTime())) {
+            note("Passing " + vor.name() + ".");
+            passVor();
+        }
+        return true;
+    }
+
+    /**
+     * Move on past a VOR to whatever the schedule has next.
+     *
+     * The pattern entry is forgotten here, and that is most of the point. It
+     * is chosen lazily, as the pattern point nearest the aircraft when it is
+     * first needed - so left over from before, it was picked back at the
+     * departure airport, and a VOR placed to line arrivals up with the
+     * pattern would change nothing at all.
+     */
+    private void passVor() {
+        int next = schedule.nextIndex(scheduleIndex);
+        if (next >= 0) scheduleIndex = next;
+        vorPassage.reset();
+        vorPassageFor = null;
+        holdingEntryIndex = -1;
+        setChanged();
+    }
+
+    /** A VOR by id, if it still exists and is in this aircraft's dimension. */
+    @org.jetbrains.annotations.Nullable
+    private VorBeacon findVor(ServerLevel serverLevel, @org.jetbrains.annotations.Nullable UUID vorId) {
+        String dimension = serverLevel.dimension().location().toString();
+        return AirportRegistry.get(serverLevel).vorById(vorId)
+                .filter(vor -> vor.dimension().equals(dimension))
+                .orElse(null);
+    }
+
+    /**
+     * Where every VOR between here and this leg's airport is, in the order
+     * they will be flown - for checking a routed leg along the path it will
+     * actually take.
+     */
+    private List<BlockPos> vorPositionsAhead(ServerLevel serverLevel) {
+        List<BlockPos> positions = new ArrayList<>();
+        int destination = schedule.destinationIndexFrom(scheduleIndex);
+        int index = scheduleIndex;
+        for (int step = 0; destination >= 0 && index >= 0 && index != destination
+                && step < schedule.entries().size(); step++) {
+            ScheduleEntry stop = schedule.entries().get(index);
+            VorBeacon vor = stop.isVor() ? findVor(serverLevel, stop.vorId()) : null;
+            if (vor != null) positions.add(vor.pos());
+            index = schedule.nextIndex(index);
+        }
+        return positions;
     }
 
     /**
@@ -542,9 +662,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * screen shows where it is actually going.
      */
     private void retargetGate(String gateName) {
-        ScheduleEntry entry = currentEntry();
-        if (entry == null) return;
-        schedule.entries().set(scheduleIndex, new ScheduleEntry(
+        int index = schedule.destinationIndexFrom(scheduleIndex);
+        if (index < 0) return;
+        ScheduleEntry entry = schedule.entries().get(index);
+        schedule.entries().set(index, new ScheduleEntry(
                 entry.airportId(), gateName, entry.condition(), entry.waitSeconds()));
         setChanged();
     }
@@ -569,7 +690,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * a loose block with no craft falls back to its own coordinates.
      */
     public void engageFromRedstone(ServerLevel serverLevel) {
-        if (state != FlightState.IDLE || schedule.isEmpty()) return;
+        if (state != FlightState.IDLE || !schedule.hasAirportStop()) return;
         this.scheduleIndex = 0;
         this.controllingPlayerId = null;
         engageCurrentLeg(serverLevel, craftPositionOr(getBlockPos()), null);
@@ -578,6 +699,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     public void engage(FlightSchedule newSchedule, ServerPlayer player) {
         if (newSchedule.isEmpty()) {
             message(player, "Schedule is empty - add at least one stop first.");
+            return;
+        }
+        if (!newSchedule.hasAirportStop()) {
+            message(player, "Schedule has no airport to land at - VORs are flown over, not stopped at.");
             return;
         }
         this.schedule = newSchedule;
@@ -613,6 +738,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // toGlobalVector() to convert local -> world.
         this.currentWaypointIndex = 0;
         this.holdingEntryIndex = -1;
+        this.vorPassage.reset();
+        this.vorPassageFor = null;
         this.simulatedPosition = reference.getCenter();
 
         // Refuse a route that flies into the ground rather than discovering it
@@ -1030,7 +1157,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 // Locked at rotation, not recomputed: re-aiming at the
                 // destination every tick made the plane wander through the
                 // climb instead of flying the runway heading out.
-                if (climbHeadingLocked == null) climbHeadingLocked = climbHeading(destination);
+                if (climbHeadingLocked == null) climbHeadingLocked = climbHeading(serverLevel, destination);
                 Vec3 forward = climbHeadingLocked;
                 double climbY = Math.sin(Math.toRadians(CLIMB_PITCH_DEGREES));
                 double climbXZ = Math.cos(Math.toRadians(CLIMB_PITCH_DEGREES));
@@ -1091,6 +1218,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 }
             }
             case CRUISE -> {
+                // Over a VOR first, if this leg is routed over one - ahead of
+                // everything else in the cruise, rotorcraft included. The pad,
+                // the pattern and the approach all belong to the airport past
+                // the VOR, and none of them should start until it is passed.
+                if (flyOverPendingVor(serverLevel)) break;
                 // Rotorcraft don't hold or fly approaches: cross to the pad at
                 // altitude, then go straight down onto it.
                 if (craftType().isVertical()) {
@@ -1303,6 +1435,12 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     }
 
     private void arrive() {
+        // Arriving settles which stop this is. On a routed leg the index can
+        // still sit on a VOR if anything reached an arrival without the cruise
+        // flying over it, and waiting, departing and the message below all
+        // count from the airport - not from the VOR before it.
+        int arrivedAt = schedule.destinationIndexFrom(scheduleIndex);
+        if (arrivedAt >= 0) scheduleIndex = arrivedAt;
         ScheduleEntry entry = currentEntry();
         message("Arrived at " + (entry == null ? "gate" : entry.gateName()) + ".");
         playArrivalChime();
@@ -1402,15 +1540,19 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             return;
         }
 
+        // Departing needs an airport ahead, not merely another stop. A
+        // schedule that ends on VORs has flown its last leg here: those VORs
+        // lead nowhere, and taking off toward them would leave the aircraft
+        // without a destination the moment it passed the last one.
         int next = schedule.nextIndex(scheduleIndex);
-        if (next < 0) {
+        if (next < 0 || schedule.destinationIndexFrom(next) < 0) {
             message("Schedule complete.");
             disengage();
             return;
         }
 
         scheduleIndex = next;
-        ScheduleEntry nextEntry = schedule.entries().get(next);
+        ScheduleEntry nextEntry = schedule.entries().get(schedule.destinationIndexFrom(next));
         note("Departing for " + nextEntry.gateName() + ".");
         // Depart from where the plane actually is - it flew here itself, so
         // its own tracked position is right even if the player wandered off.
@@ -2801,15 +2943,21 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return state.replace('_', ' ').toLowerCase(java.util.Locale.ROOT);
     }
 
-    /** "Airport / Gate" for the ATC readout, or the gate alone if the airport
-     *  has since been deleted out from under us. */
+    /** "Airport / Gate" for the ATC readout - "via" the VOR being flown toward,
+     *  on a routed leg - or the gate alone if the airport has since been
+     *  deleted out from under us. */
     private String destinationLabel(AirportRegistry registry) {
-        ScheduleEntry entry = currentEntry();
+        ScheduleEntry entry = destinationEntry();
         if (entry == null) return "-";
         String gate = entry.gateName();
-        return registry.byId(entry.airportId())
+        String label = registry.byId(entry.airportId())
                 .map(layout -> layout.displayName() + " / " + gate)
                 .orElse(gate);
+        ScheduleEntry current = currentEntry();
+        if (current != null && current.isVor()) {
+            label += " via " + registry.vorById(current.vorId()).map(VorBeacon::name).orElse("a VOR");
+        }
+        return label;
     }
 
     /** Remove this aircraft from the persisted parked list, wherever we can
@@ -2856,11 +3004,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         // Drop every stop whose airport is gone - keeping them would just
         // strand the aircraft again at the next leg.
-        schedule.entries().removeIf(entry -> registry.byId(entry.airportId()).isEmpty());
+        schedule.entries().removeIf(entry -> !entry.isVor() && registry.byId(entry.airportId()).isEmpty());
 
-        if (!schedule.entries().isEmpty()) {
+        if (schedule.hasAirportStop()) {
             scheduleIndex = 0;
-            ScheduleEntry next = schedule.entries().get(0);
+            ScheduleEntry next = schedule.entries().get(schedule.destinationIndexFrom(0));
             message("Destination removed - continuing to " + next.gateName() + ".");
             replanFrom(serverLevel);
             return;
@@ -2876,6 +3024,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         }
 
         String stop = firstStopAt(alternate);
+        // Anything still in the schedule is a VOR from the old route, and a
+        // diversion does not fly somebody else's routing on the way.
+        schedule.entries().clear();
         schedule.entries().add(new ScheduleEntry(alternate.id(), stop,
                 ScheduleEntry.WaitCondition.TIMER, 10));
         schedule.setLoop(false); // a diversion is a one-off, not a new route
@@ -3029,8 +3180,14 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * you fly, conservative about what it advises.
      */
     private boolean routeIsFlyable(ServerLevel serverLevel, BlockPos from, AirportLayout destination) {
-        BlockPos to = AirportSummary.of(destination).position();
-        RouteScan scan = scanRoute(serverLevel, from, to, cruiseAltitude());
+        // Along the route as it will be flown, VORs included. Scanning the
+        // straight line to the airport would refuse exactly the route a VOR is
+        // most often placed to make: the one that goes round the mountain.
+        List<BlockPos> route = new ArrayList<>();
+        route.add(from);
+        route.addAll(vorPositionsAhead(serverLevel));
+        route.add(AirportSummary.of(destination).position());
+        RouteScan scan = scanLegs(serverLevel, route, cruiseAltitude());
         if (scan.clear()) {
             // Let it go, but don't pretend the route was checked end to end -
             // silently approving an unverified route is how a plane ends up
@@ -3048,6 +3205,30 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 + scan.blockedAtY() + " " + where
                 + " - set cruise altitude to at least Y " + scan.clearAbove() + ".");
         return false;
+    }
+
+    /**
+     * scanRoute along each leg of a route in turn, as one answer: clear only
+     * if every leg is, blocked where the first blocked leg is, and naming an
+     * altitude that clears all of them.
+     */
+    private RouteScan scanLegs(ServerLevel serverLevel, List<BlockPos> route, int altitude) {
+        boolean clear = true;
+        boolean partial = false;
+        int blockedAtY = 0;
+        BlockPos blockedNear = null;
+        int clearAbove = Integer.MIN_VALUE;
+        for (int i = 1; i < route.size(); i++) {
+            RouteScan leg = scanRoute(serverLevel, route.get(i - 1), route.get(i), altitude);
+            partial |= leg.partial();
+            clearAbove = Math.max(clearAbove, leg.clearAbove());
+            if (clear && !leg.clear()) {
+                clear = false;
+                blockedAtY = leg.blockedAtY();
+                blockedNear = leg.blockedNear();
+            }
+        }
+        return new RouteScan(clear, blockedAtY, blockedNear, clearAbove, partial);
     }
 
     /**
@@ -3649,6 +3830,23 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             if (len > 0.1) return new Vec3(v.x() / len, 0, v.z() / len);
         }
         return new Vec3(1, 0, 0);
+    }
+
+    /**
+     * The climb-out heading for this leg - out toward its first VOR, when it
+     * has one. Aiming at the destination's pattern instead points a routed
+     * departure away from the point it is about to turn round and fly to.
+     */
+    private Vec3 climbHeading(ServerLevel serverLevel, AirportLayout destination) {
+        ScheduleEntry entry = currentEntry();
+        VorBeacon vor = entry != null && entry.isVor() ? findVor(serverLevel, entry.vorId()) : null;
+        if (vor != null) {
+            double dx = vor.pos().getX() - simulatedPosition.x;
+            double dz = vor.pos().getZ() - simulatedPosition.z;
+            double len = Math.sqrt(dx * dx + dz * dz);
+            if (len > 1.0) return new Vec3(dx / len, 0, dz / len);
+        }
+        return climbHeading(destination);
     }
 
     /**
