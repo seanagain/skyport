@@ -123,6 +123,43 @@ public class FlightSchedule {
         return false;
     }
 
+    /**
+     * Move a stop one place earlier or later.
+     *
+     * The order of this list is the route, and for VORs it is the whole
+     * meaning: a VOR is flown over on the way to the airport that follows it,
+     * so a VOR in the wrong place is not flown at all. Reordering used to mean
+     * deleting a stop and adding it again at the end, which for a route of any
+     * length is worse than it sounds.
+     *
+     * @return where the stop ended up, so the caller can keep it selected
+     */
+    public int moveStop(int index, int delta) {
+        if (index < 0 || index >= entries.size()) return index;
+        int target = index + delta;
+        if (target < 0 || target >= entries.size()) return index;
+        java.util.Collections.swap(entries, index, target);
+        return target;
+    }
+
+    /**
+     * Whether this schedule ends with stops that will never be flown.
+     *
+     * VORs after the last airport lead nowhere on a schedule that does not
+     * loop: the last leg ends at that airport, the schedule is complete, and
+     * they are quietly skipped. Worth saying out loud in the editor, because
+     * the list looks perfectly reasonable and the fix - move them above the
+     * airport, or turn Loop on - is not obvious from looking at it.
+     */
+    public boolean hasUnflownTail() {
+        if (loop || entries.isEmpty()) return false;
+        int lastAirport = -1;
+        for (int i = 0; i < entries.size(); i++) {
+            if (!entries.get(i).isVor()) lastAirport = i;
+        }
+        return lastAirport >= 0 && lastAirport < entries.size() - 1;
+    }
+
     public CompoundTag save() {
         CompoundTag tag = new CompoundTag();
         ListTag list = new ListTag();

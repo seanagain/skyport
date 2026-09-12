@@ -272,6 +272,10 @@ that is largely how the order gets decided.
 > purple diamonds, and lock to whoever placed them. A broken VOR is skipped
 > rather than ending the flight, and existing schedules load unchanged.
 >
+> The Autopilot screen now picks a destination from a list rather than cycling
+> through it, and stops can be moved up and down the route. That order is the
+> route, and a VOR only counts when it sits above the airport it routes toward.
+>
 > Crafted from a lightning rod over brass, an electron tube and brass, over
 > three andesite alloy. Mine it with a pickaxe to get it back.
 

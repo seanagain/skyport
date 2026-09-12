@@ -635,22 +635,31 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     }
 
     /**
-     * Where every VOR between here and this leg's airport is, in the order
-     * they will be flown - for checking a routed leg along the path it will
-     * actually take.
+     * Every VOR between here and this leg's airport, in the order they will be
+     * flown over.
      */
-    private List<BlockPos> vorPositionsAhead(ServerLevel serverLevel) {
-        List<BlockPos> positions = new ArrayList<>();
+    private List<VorBeacon> vorsAhead(ServerLevel serverLevel) {
+        List<VorBeacon> ahead = new ArrayList<>();
         int destination = schedule.destinationIndexFrom(scheduleIndex);
         int index = scheduleIndex;
         for (int step = 0; destination >= 0 && index >= 0 && index != destination
                 && step < schedule.entries().size(); step++) {
             ScheduleEntry stop = schedule.entries().get(index);
             VorBeacon vor = stop.isVor() ? findVor(serverLevel, stop.vorId()) : null;
-            if (vor != null) positions.add(vor.pos());
+            if (vor != null) ahead.add(vor);
             index = schedule.nextIndex(index);
         }
-        return positions;
+        return ahead;
+    }
+
+    /** Where those VORs are - for checking a routed leg along the path it will
+     *  actually take. */
+    private List<BlockPos> vorPositionsAhead(ServerLevel serverLevel) {
+        return vorsAhead(serverLevel).stream().map(VorBeacon::pos).toList();
+    }
+
+    private static String vorNames(List<VorBeacon> vors) {
+        return vors.stream().map(VorBeacon::name).collect(java.util.stream.Collectors.joining(", "));
     }
 
     /**
@@ -766,6 +775,16 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             return;
         }
         hasPowerNow = true;
+
+        // Say what this leg actually routes over.
+        //
+        // A VOR that is not on this leg - one sitting after the destination in
+        // the list, or one on a leg already flown - is the easiest thing to get
+        // wrong about a routed schedule, and silence looks exactly like a VOR
+        // being ignored. Saying so at the moment of engaging is the cheapest
+        // way for someone to find out which they have.
+        List<VorBeacon> via = vorsAhead(serverLevel);
+        if (!via.isEmpty()) message(player, "Routing via " + vorNames(via) + ".");
 
         // Rotorcraft and airships have no ground route to join - they lift
         // off from wherever they are standing. No taxiway check, and nothing
@@ -1553,7 +1572,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         scheduleIndex = next;
         ScheduleEntry nextEntry = schedule.entries().get(schedule.destinationIndexFrom(next));
-        note("Departing for " + nextEntry.gateName() + ".");
+        List<VorBeacon> via = vorsAhead(serverLevel);
+        note("Departing for " + nextEntry.gateName()
+                + (via.isEmpty() ? "" : " via " + vorNames(via)) + ".");
         // Depart from where the plane actually is - it flew here itself, so
         // its own tracked position is right even if the player wandered off.
         ServerPlayer player = controllingPlayerId == null ? null

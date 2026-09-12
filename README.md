@@ -105,6 +105,11 @@ airport it left.
 - **A broken VOR is skipped**, with a note, rather than bringing the aircraft
   down mid-route.
 
+On the Autopilot screen the destination button opens a list of every airport
+and VOR, and the ^ and v buttons move a stop up or down the route. The order of
+the list is the route: a stop below the last airport is never flown, and the
+editor marks it in amber when that happens.
+
 VORs show on the ATC map as purple diamonds, and the traffic strip says which
 one an aircraft is heading for. They lock to whoever placed them, like
 stations and autopilots.
