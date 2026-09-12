@@ -1145,7 +1145,25 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 followWaypoints(path(() -> {
                     List<BlockPos> out = new ArrayList<>();
                     if (joinPoint != null && !clearedPastHoldShort) out.add(joinPoint);
-                    if (departureAirport != null) out.addAll(groundTaxiPath(departureAirport, false));
+                    if (departureAirport != null) {
+                        // Drop whatever the aircraft has already driven past.
+                        //
+                        // The route is snapped to the nearest node of the
+                        // network, and on a short spur the node nearest an
+                        // aircraft that has just reversed off a stand is still
+                        // the stand - as is the nearest node to one whose
+                        // pushback gave up half way along. Followed literally,
+                        // the aircraft drives forward onto the stand it just
+                        // left, turns, and comes back out past the junction it
+                        // was already sitting on. See GroundNetwork.dropPassed.
+                        //
+                        // Only here: pushbackTarget reads the untrimmed route,
+                        // where the stand IS the first node and the junction to
+                        // reverse to is the second.
+                        List<BlockPos> outbound = groundTaxiPath(departureAirport, false);
+                        out.addAll(simulatedPosition == null ? outbound
+                                : GroundNetwork.dropPassed(outbound, BlockPos.containing(simulatedPosition)));
+                    }
                     return out;
                 }), () -> setState(FlightState.TAKEOFF_ROLL));
             }

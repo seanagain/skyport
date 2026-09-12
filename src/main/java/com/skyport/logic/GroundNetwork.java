@@ -122,6 +122,35 @@ public final class GroundNetwork {
     }
 
     /**
+     * Drop the leading nodes an aircraft has already driven past.
+     *
+     * A route is snapped to the nearest node of the network, which is right
+     * for an aircraft parked beside a line and wrong for one that has just
+     * reversed off a stand: on a short spur the nearest node to the junction
+     * it is standing on is still the stand itself. Taken literally, the route
+     * then begins "drive to the stand", so the aircraft pulls forward onto
+     * the stand it just left, turns, and comes back out - which is precisely
+     * what a pushback exists to avoid.
+     *
+     * A node counts as passed when the aircraft is at least as close to the
+     * NEXT node as that node is. That is true of a node behind the aircraft
+     * and of one it is standing on, and false of one ahead - and unlike a
+     * heading, it means something for a craft that is stationary.
+     *
+     * The last node is never dropped: the end of the route is where the
+     * aircraft is going, however close it already is.
+     */
+    public static List<BlockPos> dropPassed(List<BlockPos> route, BlockPos at) {
+        int first = 0;
+        while (first + 1 < route.size()
+                && horizontalDistance(at, route.get(first + 1))
+                        <= horizontalDistance(route.get(first), route.get(first + 1))) {
+            first++;
+        }
+        return first == 0 ? route : List.copyOf(route.subList(first, route.size()));
+    }
+
+    /**
      * Gates that can no longer be both reached from and returned to the
      * runway, by name.
      *

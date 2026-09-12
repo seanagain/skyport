@@ -637,7 +637,7 @@ public class AutopilotScreen extends Screen {
         int y = pickerTop();
         int w = pickerWidth();
         int h = pickerHeight();
-        guiGraphics.fill(x, y, x + w, y + h, 0xF00E0E0E);
+        guiGraphics.fill(x, y, x + w, y + h, 0xFF0E0E0E);
         guiGraphics.renderOutline(x, y, w, h, 0xFF5A5A5A);
 
         int current = hasSelection() ? destinationIndexOf(entry()) : -1;
