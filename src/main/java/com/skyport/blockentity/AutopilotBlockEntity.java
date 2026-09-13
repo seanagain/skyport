@@ -38,13 +38,13 @@ import net.minecraft.world.phys.Vec3;
 
 import com.skyport.block.AutopilotBlock;
 import dev.ryanhcode.sable.api.block.BlockEntitySubLevelActor;
+import dev.ryanhcode.sable.api.physics.PhysicsPipeline;
 import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
 import dev.ryanhcode.sable.api.physics.mass.MassData;
+import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 import net.minecraft.core.Direction;
-import org.joml.AxisAngle4d;
-import org.joml.Quaterniond;
 import org.joml.Quaterniondc;
 import org.joml.Vector3d;
 import org.joml.Vector3dc;
@@ -935,12 +935,95 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         }
     }
 
+    /**
+     * Sable's other hook: called every server tick for every actor on every
+     * loaded sub-level, awake or asleep.
+     *
+     * This is not a second copy of the physics hook, it is the half that
+     * keeps running once a craft settles. SubLevelPhysicsSystem.tick walks
+     * every sub-level and calls this before it steps the pipeline at all, so
+     * it fires whether or not the rigid body is still being simulated -
+     * whereas sable$physicsTick stops dead the moment the body goes to sleep,
+     * which is exactly what a parked aircraft does.
+     *
+     * Without it a parked aircraft is not merely still, it is unreachable: no
+     * callback means its gate wait never counts down, it never departs, and
+     * nothing it is asked to do from the tower can reach it. That is what
+     * "planes not waking" was.
+     */
+    @Override
+    public void sable$tick(ServerSubLevel subLevel) {
+        if (state == FlightState.IDLE) return;
+        if (!(subLevel.getLevel() instanceof ServerLevel serverLevel)) return;
+
+        this.activeSubLevel = subLevel;
+        // Where the craft actually is. This block's own coordinates are
+        // plot-local (see craftReferencePosition), and taking them at face
+        // value is what put aircraft somewhere impossible after a reload.
+        this.simulatedPosition = craftReferencePosition(subLevel);
+
+        // Parked: run the schedule here rather than waking the physics engine
+        // for an aircraft that is not going anywhere. A gate wait needs a
+        // tick, not a simulation step, and this is the cheap one.
+        if (state == FlightState.WAITING) {
+            runFlightLogic(serverLevel);
+            if (state == FlightState.WAITING) return;
+        }
+
+        // Anything else means it should be moving, and a sleeping body is
+        // nobody's to steer: sable$physicsTick will not fire again until
+        // something wakes it. This is that something.
+        wakeCraft(serverLevel, subLevel);
+    }
+
+    /**
+     * Keep this craft's rigid body awake while the autopilot has something to
+     * do with it.
+     *
+     * Only ever called for a craft that is meant to be moving. A parked one is
+     * deliberately left to sleep, which is both cheaper and how it settles
+     * onto its wheels in the first place.
+     */
+    private void wakeCraft(ServerLevel serverLevel, ServerSubLevel subLevel) {
+        SubLevelPhysicsSystem physics = SubLevelPhysicsSystem.get(serverLevel);
+        if (physics == null) return;
+        PhysicsPipeline pipeline = physics.getPipeline();
+        if (pipeline != null) pipeline.wakeUp(subLevel);
+    }
+
+    /**
+     * Is this block part of an assembled craft?
+     *
+     * Sable keeps sub-levels as plots inside the same level, so a mounted
+     * block still has perfectly ordinary block coordinates - they simply
+     * describe a spot in the plot region rather than anywhere in the world.
+     * Asking the container is the difference between a position that means
+     * something and one that is out by however far the plot happens to be.
+     *
+     * Checked rather than inferred from activeSubLevel alone, because that is
+     * only set once a callback has arrived - and the first server tick after
+     * a reload can come first.
+     */
+    private boolean isMounted(ServerLevel serverLevel) {
+        if (activeSubLevel != null && !activeSubLevel.isRemoved()) return true;
+        SubLevelContainer container = SubLevelContainer.getContainer(serverLevel);
+        return container != null && container.getPlot(new ChunkPos(getBlockPos())) != null;
+    }
+
     /** Runs every server tick this block entity is loaded and ticking. */
     public void serverTick() {
         if (state == FlightState.IDLE || !(level instanceof ServerLevel serverLevel)) return;
-        if (simulatedPosition == null) return;
-        // When mounted on a craft, sable$physicsTick drives everything - don't
-        // also run the simulated path and fight it.
+        // Mounted on a craft: sable$tick and sable$physicsTick own it, and
+        // this block's own coordinates describe a spot in the sub-level's plot
+        // rather than anywhere in the world. Running the state machine off
+        // them sent aircraft somewhere impossible, which then read as "not on
+        // the ground" and departed them straight into a climb.
+        if (isMounted(serverLevel)) return;
+
+        // A loose block, simulating. Its own position is the honest one here,
+        // and it is set on the first tick rather than on load, so that a
+        // mounted craft never gets a plot-local position written into it.
+        if (simulatedPosition == null) simulatedPosition = getBlockPos().getCenter();
         if (serverLevel.getGameTime() - lastPhysicsTickGameTime < 5) return;
 
         runFlightLogic(serverLevel);
@@ -4411,6 +4494,19 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         unattendedTicksLeft = tag.contains("unattendedTicksLeft")
                 ? tag.getInt("unattendedTicksLeft")
                 : SkyportConfig.unattendedMinutes * 60 * 20;
-        if (state != FlightState.IDLE) simulatedPosition = getBlockPos().getCenter();
+        // simulatedPosition is deliberately NOT restored here.
+        //
+        // It used to be seeded with getBlockPos().getCenter(), which for a
+        // block on an assembled craft is a plot-local coordinate - somewhere
+        // in the sub-level storage region, not where the aeroplane is. The
+        // state machine then ran against it on the first tick after a reload:
+        // isOnGround said no, so a departure went to CLIMB instead of
+        // PUSHBACK and the aircraft flew off without taxiing, and rememberSelf
+        // wrote that position to the tower, which is where the ghost aircraft
+        // on the map came from.
+        //
+        // Both callbacks set it from the sub-level's own pose, and serverTick
+        // sets it for a block with no craft at all. Leaving it null until then
+        // is what makes those the only sources.
     }
 }

@@ -628,7 +628,19 @@ public class AutopilotScreen extends Screen {
             guiGraphics.drawString(font, "loops back to stop 1", left, belowList, 0xFF7A9E7A);
         }
 
-        if (pickerOpen) renderPicker(guiGraphics, mouseX, mouseY);
+        if (pickerOpen) {
+            // Lifted above everything else on the screen before it is drawn.
+            //
+            // GuiGraphics batches text and flushes it at the end of the frame,
+            // so a panel filled after the schedule was drawn still comes out
+            // UNDER that text - the list showed through the dropdown, which
+            // looks exactly like a translucent background and is not one.
+            // Vanilla does the same thing for tooltips, at 400.
+            guiGraphics.pose().pushPose();
+            guiGraphics.pose().translate(0, 0, 300);
+            renderPicker(guiGraphics, mouseX, mouseY);
+            guiGraphics.pose().popPose();
+        }
     }
 
     /** The destination list, drawn over the schedule it is about to change. */
