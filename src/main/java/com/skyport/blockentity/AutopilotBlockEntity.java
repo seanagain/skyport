@@ -691,6 +691,59 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     }
 
     /**
+     * Every loaded autopilot, by the id its aircraft is known by.
+     *
+     * The tower's roster is written down and survives an unloaded chunk,
+     * which is what makes it useful and also what makes it thin: a position,
+     * a callsign and a state, and nothing else. Everything live - the
+     * schedule, which stop it is on, which sub-level Sable has it in - exists
+     * only on the block entity, and an admin asking about one aircraft has no
+     * other way to reach it. Entries leave on setRemoved.
+     */
+    private static final java.util.Map<UUID, AutopilotBlockEntity> LOADED =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** The autopilot flying this aircraft, if its chunk is loaded. */
+    @org.jetbrains.annotations.Nullable
+    public static AutopilotBlockEntity loaded(UUID planeId) {
+        AutopilotBlockEntity autopilot = LOADED.get(planeId);
+        return autopilot == null || autopilot.isRemoved() ? null : autopilot;
+    }
+
+    private void rememberLoaded() {
+        if (planeId != null) LOADED.put(planeId, this);
+    }
+
+    /** Sable's own id for the craft this autopilot is riding on, or null when
+     *  it is not on one - a loose block, or a craft nothing has loaded. */
+    @org.jetbrains.annotations.Nullable
+    public UUID subLevelId() {
+        return activeSubLevel == null || activeSubLevel.isRemoved() ? null : activeSubLevel.getUniqueId();
+    }
+
+    /** Which stop of the schedule it is working on. */
+    public int currentStopIndex() {
+        return scheduleIndex;
+    }
+
+    /** Seconds of unattended running left - see tickUnattendedAllowance. */
+    public int unattendedSecondsLeft() {
+        return unattendedTicksLeft / 20;
+    }
+
+    /** Fuel still lit, in the units FuelBurn counts. Zero when not burning. */
+    public double fuelRemaining() {
+        return fuelReserve;
+    }
+
+    /** The id the tower and the admin command know this aircraft by, or null
+     *  if it has never been engaged. */
+    @org.jetbrains.annotations.Nullable
+    public UUID aircraftId() {
+        return planeId;
+    }
+
+    /**
      * Start the saved schedule with no player involved - what a redstone
      * pulse does.
      *
@@ -914,6 +967,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
 
         this.activeSubLevel = subLevel;
+        rememberLoaded();
         this.lastPhysicsTickGameTime = serverLevel.getGameTime();
         // Clamped, not trusted: a stalled server can hand back a huge step,
         // and scaling a velocity correction by it would fire the craft off
@@ -957,6 +1011,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (!(subLevel.getLevel() instanceof ServerLevel serverLevel)) return;
 
         this.activeSubLevel = subLevel;
+        rememberLoaded();
         // Where the craft actually is. This block's own coordinates are
         // plot-local (see craftReferencePosition), and taking them at face
         // value is what put aircraft somewhere impossible after a reload.
@@ -1013,6 +1068,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     /** Runs every server tick this block entity is loaded and ticking. */
     public void serverTick() {
         if (state == FlightState.IDLE || !(level instanceof ServerLevel serverLevel)) return;
+        rememberLoaded();
         // Mounted on a craft: sable$tick and sable$physicsTick own it, and
         // this block's own coordinates describe a spot in the sub-level's plot
         // rather than anywhere in the world. Running the state machine off
@@ -3717,6 +3773,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      */
     @Override
     public void setRemoved() {
+        if (planeId != null) LOADED.remove(planeId, this);
         super.setRemoved();
         releaseChunks();
         // Hand back any clearance too. Breaking an autopilot mid-flight used

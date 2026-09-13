@@ -201,6 +201,34 @@ The checks run on the server for every action, not in the screen — the screen
 only produces packets, and a modified client can produce them without ever
 opening anything. Turning the setting off turns off that enforcement too.
 
+## Admin commands
+
+Three, all at permission level 2 — the level a command block or an operator
+has.
+
+| Command | What it does |
+| --- | --- |
+| `/skyport list` | Every engaged aircraft: callsign, what it is doing, where, and where it is going |
+| `/skyport info <aircraft>` | One aircraft in full — ids, position, and its flight plan with the current stop marked |
+| `/skyport forget <aircraft>` | Takes an aircraft off the tower, disengaging it first if its autopilot is loaded |
+
+Name an aircraft by callsign or by id; tab-completion offers the callsigns.
+An ambiguous callsign is refused with the ids rather than guessed at.
+
+**`info`** prints the aircraft id the tower uses, the **Sable id** of the craft
+it is riding on, its state and whether it is still ticking, and — when its
+chunk is loaded — the whole schedule with a `>` against the stop it is working
+on, plus unattended time and fuel where those apply. With the chunk unloaded
+only the written-down half exists, and it says so rather than printing blanks.
+
+**`forget`** is for an aircraft that is on the map but not really there: a
+contraption picked up with a wrench or a container leaves its autopilot behind
+holding clearances nothing will release, and that is what a ghost at a gate
+is. If the autopilot is loaded it is disengaged first, which hands back the
+runway and taxiway and stops it writing itself back onto the roster. If it is
+not loaded and the aircraft does still exist, it will come back the next time
+its chunk loads — break or disengage the block to be rid of it for good.
+
 ## Config
 
 Two files, and which one a setting is in decides who gets to choose it.

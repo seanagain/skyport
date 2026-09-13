@@ -276,6 +276,14 @@ that is largely how the order gets decided.
 > through it, and stops can be moved up and down the route. That order is the
 > route, and a VOR only counts when it sits above the airport it routes toward.
 >
+> **Admin commands.** `/skyport list`, `/skyport info <aircraft>` and
+> `/skyport forget <aircraft>`, all at permission level 2. `info` prints an
+> aircraft's ids — including Sable's own id for the craft — its state, and its
+> flight plan with the stop it is working on marked. `forget` takes one off
+> the tower, disengaging it first if its autopilot is loaded, which is the
+> cure for an aircraft that is on the map but was picked up with a container
+> and left its clearances behind.
+>
 > Crafted from a lightning rod over brass, an electron tube and brass, over
 > three andesite alloy. Mine it with a pickaxe to get it back.
 
