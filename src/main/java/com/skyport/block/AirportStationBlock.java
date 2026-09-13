@@ -1,7 +1,6 @@
 package com.skyport.block;
 
 import com.skyport.blockentity.AirportStationBlockEntity;
-import com.skyport.registry.ModBlockEntities;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
