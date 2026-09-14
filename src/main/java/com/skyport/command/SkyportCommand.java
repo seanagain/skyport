@@ -5,12 +5,14 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import com.skyport.Skyport;
+import com.skyport.SkyportConfig;
 import com.skyport.blockentity.AutopilotBlockEntity;
 import com.skyport.data.AirportLayout;
 import com.skyport.data.AirportRegistry;
 import com.skyport.data.FlightSchedule;
 import com.skyport.data.VorBeacon;
 import com.skyport.logic.FlightPlanReport;
+import com.skyport.world.FleetWake;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -29,18 +31,18 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Admin commands for looking at aircraft, and for getting rid of one.
+ * Admin commands for looking at aircraft, waking one, and getting rid of one.
  *
- * These exist for the case the screens cannot reach: an aircraft that is on
- * the tower's roster but not really there any more. A contraption picked up
- * with a wrench or a container takes its blocks away without its autopilot
- * ever hearing about it, and what is left is an entry on the map holding
- * clearances that nothing will ever release. Until now the only cure was
- * editing the save.
+ * These exist for the cases the screens cannot reach: an aircraft that is on
+ * the tower's roster but not really there any more, and an aircraft that has
+ * stopped somewhere with nobody to ask why. A contraption picked up with a
+ * wrench or a container takes its blocks away without its autopilot ever
+ * hearing about it, and what is left is an entry on the map holding
+ * clearances that nothing will ever release.
  *
  * Level 2 throughout, info included. What it prints - schedules, positions,
- * ids - is exactly what a player would need to plan around somebody else's
- * aircraft, and the tower already shows everyone what is public about it.
+ * ids - is what a player would need to plan around somebody else's aircraft,
+ * and the tower already shows everyone what is public about it.
  */
 @EventBusSubscriber(modid = Skyport.MOD_ID)
 public final class SkyportCommand {
@@ -57,6 +59,11 @@ public final class SkyportCommand {
                         .then(Commands.argument("aircraft", StringArgumentType.greedyString())
                                 .suggests(SkyportCommand::suggestAircraft)
                                 .executes(context -> info(context,
+                                        StringArgumentType.getString(context, "aircraft")))))
+                .then(Commands.literal("wake")
+                        .then(Commands.argument("aircraft", StringArgumentType.greedyString())
+                                .suggests(SkyportCommand::suggestAircraft)
+                                .executes(context -> wake(context,
                                         StringArgumentType.getString(context, "aircraft")))))
                 .then(Commands.literal("forget")
                         .then(Commands.argument("aircraft", StringArgumentType.greedyString())
@@ -106,7 +113,7 @@ public final class SkyportCommand {
         say(source, label(aircraft), ChatFormatting.AQUA);
         say(source, "  aircraft id   " + aircraft.planeId());
         say(source, "  sable id      " + sableId(autopilot));
-        say(source, "  state         " + pretty(aircraft.state()) + (awake ? "" : "  (asleep - not ticking)"));
+        say(source, "  state         " + pretty(aircraft.state()) + (awake ? "" : "  (asleep - not reporting)"));
         say(source, "  where         " + aircraft.dimension()
                 + "  " + aircraft.position().getX() + ", " + aircraft.position().getY()
                 + ", " + aircraft.position().getZ());
@@ -116,24 +123,62 @@ public final class SkyportCommand {
             // Everything below lives on the block entity, and its chunk is
             // not loaded. Say which half is missing rather than printing
             // blanks that read like an aircraft with no schedule.
-            say(source, "  Its chunk is not loaded, so the flight plan cannot be read from here.");
-            say(source, "  Wake it from the tower, or fly out to it, and ask again.");
+            say(source, "  Its chunk is not loaded, so nothing live can be read from here.");
+            say(source, "  Try /skyport wake " + label(aircraft) + ", or fly out to it.");
             return 1;
+        }
+
+        // The two clocks tell different stories. Actor ticks stop when the
+        // craft is not loaded at all; physics ticks stop when its chunks are
+        // gone, which leaves it loaded but frozen - and those need different
+        // answers, so they are printed apart.
+        say(source, "  ticking       " + age(autopilot.ticksSinceActorTick(now)) + " since Sable last ticked it, "
+                + age(autopilot.ticksSincePhysicsTick(now)) + " since physics stepped it");
+        say(source, "  holding       " + autopilot.heldChunkCount() + " chunks"
+                + (autopilot.heldChunkCount() == 0 ? "  (relying on something else to keep it loaded)" : ""));
+        say(source, "  unattended    " + autopilot.unattendedSecondsLeft() + "s left"
+                + " of " + SkyportConfig.unattendedMinutes * 60 + "s"
+                + (autopilot.unattendedSecondsLeft() == 0 ? "  (spent - it stops when nobody is near)" : ""));
+        if (autopilot.fuelRemaining() > 0) {
+            say(source, "  fuel          " + String.format(java.util.Locale.ROOT, "%.1f", autopilot.fuelRemaining()));
         }
 
         FlightSchedule schedule = autopilot.schedule();
         say(source, "  plan          " + FlightPlanReport.summary(schedule));
-        if (autopilot.unattendedSecondsLeft() > 0) {
-            say(source, "  unattended    " + autopilot.unattendedSecondsLeft() + "s left");
-        }
-        if (autopilot.fuelRemaining() > 0) {
-            say(source, "  fuel          " + String.format(java.util.Locale.ROOT, "%.1f", autopilot.fuelRemaining()));
-        }
         ServerLevel overworld = server.overworld();
         for (String line : FlightPlanReport.lines(schedule, autopilot.currentStopIndex(),
                 id -> AirportRegistry.get(overworld).byId(id).map(AirportLayout::displayName).orElse(null),
                 id -> AirportRegistry.get(overworld).vorById(id).map(VorBeacon::name).orElse(null))) {
             say(source, "  " + line);
+        }
+        return 1;
+    }
+
+    // ---- wake ----
+
+    /**
+     * The tower's Wake button, reachable from anywhere.
+     *
+     * Same machinery, and the same answer a few seconds later about whether
+     * the aircraft actually started running - which is the part worth having
+     * when the complaint is that waking does nothing.
+     */
+    private static int wake(CommandContext<CommandSourceStack> context, String query) {
+        CommandSourceStack source = context.getSource();
+        AirportRegistry registry = registry(source);
+        AirportRegistry.KnownAircraft aircraft = resolve(source, registry, query).orElse(null);
+        if (aircraft == null) return 0;
+
+        MinecraftServer server = source.getServer();
+        if (!FleetWake.wake(server, aircraft.planeId())) {
+            say(source, "Could not wake " + label(aircraft)
+                    + " - performance.fleetWakeMinutes may be 0, or it has moved on already.", ChatFormatting.RED);
+            return 0;
+        }
+        say(source, "Loading the world around " + label(aircraft)
+                + " for " + SkyportConfig.fleetWakeMinutes + " minutes.", ChatFormatting.YELLOW);
+        if (source.getEntity() instanceof net.minecraft.server.level.ServerPlayer player) {
+            FleetWake.confirmLater(server, aircraft.planeId(), player.getUUID(), label(aircraft));
         }
         return 1;
     }
@@ -173,7 +218,7 @@ public final class SkyportCommand {
     /**
      * Find the aircraft an admin meant.
      *
-     * By id first, because that is what the other two commands print and what
+     * By id first, because that is what the other commands print and what
      * survives two aircraft sharing a name. Callsigns are matched case
      * insensitively, and an ambiguous one is refused with the ids rather than
      * guessed at - "forget" is not a command to run on the wrong aeroplane.
@@ -224,6 +269,14 @@ public final class SkyportCommand {
         if (autopilot == null) return "(not loaded)";
         UUID id = autopilot.subLevelId();
         return id == null ? "(not on an assembled craft)" : id.toString();
+    }
+
+    /** Ticks as something readable, or "never" for a clock that has not run. */
+    private static String age(long ticks) {
+        if (ticks < 0) return "never";
+        if (ticks < 20) return "now";
+        long seconds = ticks / 20;
+        return seconds < 120 ? seconds + "s" : (seconds / 60) + "m";
     }
 
     private static String pretty(String state) {

@@ -210,6 +210,7 @@ has.
 | --- | --- |
 | `/skyport list` | Every engaged aircraft: callsign, what it is doing, where, and where it is going |
 | `/skyport info <aircraft>` | One aircraft in full — ids, position, and its flight plan with the current stop marked |
+| `/skyport wake <aircraft>` | The tower Wake button, from anywhere — loads the world around it and reports back whether it actually started running |
 | `/skyport forget <aircraft>` | Takes an aircraft off the tower, disengaging it first if its autopilot is loaded |
 
 Name an aircraft by callsign or by id; tab-completion offers the callsigns.

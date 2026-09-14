@@ -743,6 +743,28 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return planeId;
     }
 
+    /** When Sable last called the actor tick. Separate from the physics one:
+     *  a craft whose chunks have gone still gets actor ticks and stops being
+     *  stepped, and telling those apart is the difference between "nothing is
+     *  running it" and "nothing is simulating it". */
+    private long lastActorTickGameTime;
+
+    /** How long since Sable last called the actor tick, in ticks. */
+    public long ticksSinceActorTick(long now) {
+        return lastActorTickGameTime == 0 ? -1 : now - lastActorTickGameTime;
+    }
+
+    /** How long since the rigid body was last stepped, in ticks. */
+    public long ticksSincePhysicsTick(long now) {
+        return lastPhysicsTickGameTime == 0 ? -1 : now - lastPhysicsTickGameTime;
+    }
+
+    /** How many chunks this aircraft is currently holding open. Zero means it
+     *  is relying on somebody else to keep its patch of world loaded. */
+    public int heldChunkCount() {
+        return heldChunks.size();
+    }
+
     /**
      * Start the saved schedule with no player involved - what a redstone
      * pulse does.
@@ -1011,6 +1033,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (!(subLevel.getLevel() instanceof ServerLevel serverLevel)) return;
 
         this.activeSubLevel = subLevel;
+        this.lastActorTickGameTime = serverLevel.getGameTime();
         rememberLoaded();
         // Where the craft actually is. This block's own coordinates are
         // plot-local (see craftReferencePosition), and taking them at face
