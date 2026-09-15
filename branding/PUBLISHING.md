@@ -284,6 +284,12 @@ that is largely how the order gets decided.
 > cure for an aircraft that is on the map but was picked up with a container
 > and left its clearances behind.
 >
+> **Aircraft no longer sleep in the air.** performance.unattendedMinutes used
+> to bound flying itself, so an aircraft whose time ran out mid-leg froze
+> wherever it happened to be - over open country, or over a VOR. It bounds
+> departures now: an airborne aircraft always finishes its leg and lands, and
+> a parked one waits at its gate once the clock is spent.
+>
 > Crafted from a lightning rod over brass, an electron tube and brass, over
 > three andesite alloy. Mine it with a pickaxe to get it back.
 

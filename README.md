@@ -164,21 +164,25 @@ biggest cost this mod imposes on a server.
 
 A parked aircraft releases its chunks and sleeps, so a route only ever
 advanced as far as its first stop unless a player followed it round — a loop
-never looped. `performance.unattendedMinutes` is how long an aircraft may
-carry on regardless: fifteen minutes by default, and fifteen is also the cap.
+never looped. `performance.unattendedMinutes` is how long a parked aircraft
+may keep setting off regardless: fifteen minutes by default, and fifteen is
+the cap.
 
-While no player is within about 128 blocks it spends that time keeping its own
-chunks loaded — finishing its gate wait, flying the next leg, and going again
-until the clock runs out. Then it goes quiet wherever it got to and waits to
-be found, which is what it always did. The clock refills whenever a player
-comes near, and on engage. Set it to 0 for the old behaviour.
+**It bounds departures, not flights.** An aircraft already in the air always
+finishes its leg and lands, however long that takes. There is nowhere to put
+an aeroplane down half way, and stopping the clock mid-route left one frozen
+over open country until somebody flew out to it. A gate is the one place an
+aircraft can wait indefinitely and cost nothing, so that is where the limit
+bites: out of time, it stays parked and waits to be found.
 
-Server config rather than per-aircraft on purpose. This is an aircraft asking
-the server to hold chunks open, so it costs the same as
-`performance.chunkRadius` — see Chunk loading above — for as long as it lasts;
-left to individual aircraft, any player could pin a patch of world for as long
-as they liked. If you want parked aircraft loaded indefinitely, that is
-`performance.keepParkedLoaded`, and it is the honest way to ask for it.
+The clock refills whenever a player comes within about 128 blocks, on engage,
+and when the tower wakes it. Set it to 0 for the old behaviour, where an
+aircraft sleeps on arrival and goes nowhere until something wakes it.
+
+Holding chunks is what all this costs — the same as `performance.chunkRadius`,
+see Chunk loading above, for as long as an aircraft is flying or has time
+left. `/skyport info` prints what an aircraft has left and how many chunks it
+is holding, which is the quickest way to find out why one has stopped.
 
 ## Locks
 

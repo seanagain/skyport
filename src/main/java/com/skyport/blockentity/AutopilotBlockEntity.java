@@ -15,6 +15,7 @@ import com.skyport.network.OpenAutopilotPayload;
 import com.skyport.registry.ModBlockEntities;
 import com.skyport.logic.FuelBurn;
 import com.skyport.logic.GroundNetwork;
+import com.skyport.logic.UnattendedPolicy;
 import com.skyport.world.FleetWake;
 import com.skyport.world.FlightChunkLoader;
 import net.minecraft.core.BlockPos;
@@ -1562,44 +1563,20 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // Drag the loaded-chunk bubble along with the plane, so it doesn't
         // fly into unloaded world and freeze - see FlightChunkLoader.
         if (tickCounter % CHUNK_FOLLOW_INTERVAL_TICKS == 0) {
-            // Only while the aircraft still has allowance to be out here on
-            // its own. Spent, it stops dragging the world along with it and
-            // goes quiet wherever it has got to - which is the aircraft's
-            // side of the bargain: unattended flight is not free, and this is
-            // what limits how much of it one route can ask for.
-            if (unattendedTicksLeft <= 0 && !SkyportConfig.keepParkedLoaded) {
-                // Out of time: stop dragging the world along behind us.
-                //
-                // Deliberately not a return. Refusing to run the flight logic
-                // froze an aircraft in mid-air for as long as anything else
-                // kept its chunks loaded, and an aircraft a player can see
-                // hanging motionless is a bug however well justified. Letting
-                // it fly on means it goes quiet the honest way: these chunks
-                // unload a moment later because nothing holds them any more,
-                // the block entity stops ticking, and it resumes from there
-                // when someone finds it.
-                releaseChunks();
-                // And hand back the wake ticket, if a wake is what got us out
-                // here. Otherwise fleetWakeMinutes could outlast the allowance
-                // - it goes up to 30 - and an aircraft would keep flying on
-                // chunks the tower was still holding open, well past the limit
-                // this setting is supposed to be. The allowance is the ceiling.
-                FleetWake.release(serverLevel.getServer(), planeId());
-                if (tickCounter % UNATTENDED_REPORT_TICKS == 0) {
-                    note("Out of unattended time - will stop once this area unloads.");
-                }
-            } else {
-                FlightChunkLoader.follow(serverLevel, planeId(),
-                        new ChunkPos(BlockPos.containing(simulatedPosition)), heldChunks);
-                // Moving under our own bubble now, so hand back any wake
-                // ticket that got us started. It has done its job, and
-                // leaving it to time out keeps a second patch of world open
-                // at the airport this aircraft has already left. The wake
-                // WINDOW outlives the ticket on purpose - see
-                // FleetWake.claimWake - so this does not put the aircraft
-                // straight back to being unattended.
-                FleetWake.release(serverLevel.getServer(), planeId());
-            }
+            // Airborne aircraft always hold their bubble, whatever the
+            // unattended clock says - see UnattendedPolicy. Letting it run out
+            // here stopped the aircraft being simulated wherever it happened
+            // to be, which is how one ended up asleep over a VOR. The bound
+            // lives at the gate now, where waiting costs nothing.
+            FlightChunkLoader.follow(serverLevel, planeId(),
+                    new ChunkPos(BlockPos.containing(simulatedPosition)), heldChunks);
+            // Moving under our own bubble now, so hand back any wake ticket
+            // that got us started. It has done its job, and leaving it to
+            // time out keeps a second patch of world open at the airport this
+            // aircraft has already left. The wake WINDOW outlives the ticket
+            // on purpose - see FleetWake.claimWake - so this does not put the
+            // aircraft straight back to being unattended.
+            FleetWake.release(serverLevel.getServer(), planeId());
         }
 
         // Power, once a second of world time. Both the cadence and the fuel
@@ -1736,6 +1713,18 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         };
         if (!ready) {
             if (++tickCounter % TELEMETRY_INTERVAL_TICKS == 0) sendTelemetry(serverLevel.getServer());
+            return;
+        }
+
+        // Out of unattended time: stay at the gate rather than starting a leg
+        // nobody is watching. This is the only place the allowance stops
+        // anything now - an aircraft already in the air finishes its leg, and
+        // a gate is somewhere an aeroplane can wait indefinitely for nothing.
+        // Being near refills the clock, so an attended aircraft never sees it.
+        if (!UnattendedPolicy.mayDepart(SkyportConfig.keepParkedLoaded, unattendedTicksLeft)) {
+            if (tickCounter % UNATTENDED_REPORT_TICKS == 0) {
+                note("Out of unattended time - holding at the gate until someone comes by.");
+            }
             return;
         }
 
