@@ -51,6 +51,20 @@ public class AirportLayout {
      */
     private int taxiSpeed = 4;
     private boolean holdingPatternClockwise = true;
+    /**
+     * Roll the OTHER way for takeoff on a single-runway field: backtrack down
+     * the strip to the far end, turn, and take off back toward the gate end
+     * instead of away from it.
+     *
+     * Ignored the moment a dedicated departure runway is drawn - that pair
+     * already says which way departures go, by how it was drawn, and this
+     * flag would just be a second, contradictory answer to the same question.
+     * It exists for the field that only has the one strip, where the gate end
+     * is fixed by wherever the taxiway was actually built and is not itself a
+     * choice - so the only thing left to choose is which way down it planes
+     * leave.
+     */
+    private boolean reversedTakeoff = false;
 
     // Gates are named endpoints, not part of a connected line, so they get
     // their own map instead of living in `waypoints`. LinkedHashMap keeps
@@ -147,6 +161,34 @@ public class AirportLayout {
      *  does not count until both its ends exist. */
     public int runwayCount() {
         return waypoints(Waypoint.Type.RUNWAY).size() / 2;
+    }
+
+    public boolean reversedTakeoff() {
+        return reversedTakeoff;
+    }
+
+    public void setReversedTakeoff(boolean reversedTakeoff) {
+        this.reversedTakeoff = reversedTakeoff;
+    }
+
+    /**
+     * The two points a departure actually rolls between, in the order it
+     * rolls them - which is {@link #departureRunway} itself, unless this is a
+     * single-runway field with {@link #reversedTakeoff} set, in which case
+     * it is that pair backwards.
+     *
+     * Kept apart from departureRunway() on purpose: taxi routing still has to
+     * aim at departureRunway().get(0), the physical gate end the taxiway
+     * network was built to reach, whichever way this says the roll itself
+     * runs. Reversed, a departure taxis up to that same gate end as always,
+     * then continues past it to the far end before turning - a real
+     * backtrack, not a different entry point that no taxiway actually
+     * connects to.
+     */
+    public List<BlockPos> takeoffRoll() {
+        List<BlockPos> runway = departureRunway();
+        if (runway.size() < 2 || hasDepartureRunway() || !reversedTakeoff) return runway;
+        return List.of(runway.get(1), runway.get(0));
     }
 
     /**
@@ -300,6 +342,7 @@ public class AirportLayout {
         tag.putInt("holdingPatternHeight", holdingPatternHeight);
         tag.putInt("taxiSpeed", taxiSpeed);
         tag.putBoolean("holdingPatternClockwise", holdingPatternClockwise);
+        tag.putBoolean("reversedTakeoff", reversedTakeoff);
         tag.putLong("stationPos", stationPos.asLong());
 
         for (Waypoint.Type type : Waypoint.Type.values()) {
@@ -348,6 +391,7 @@ public class AirportLayout {
         // exactly the default they were flying at.
         if (tag.contains("taxiSpeed")) layout.taxiSpeed = tag.getInt("taxiSpeed");
         layout.holdingPatternClockwise = !tag.contains("holdingPatternClockwise") || tag.getBoolean("holdingPatternClockwise");
+        layout.reversedTakeoff = tag.contains("reversedTakeoff") && tag.getBoolean("reversedTakeoff");
         if (tag.contains("stationPos")) layout.stationPos = BlockPos.of(tag.getLong("stationPos"));
         for (Waypoint.Type type : Waypoint.Type.values()) {
             ListTag list = tag.getList(type.name(), 10); // 10 = CompoundTag id
@@ -384,6 +428,7 @@ public class AirportLayout {
         buf.writeVarInt(holdingPatternHeight);
         buf.writeVarInt(taxiSpeed);
         buf.writeBoolean(holdingPatternClockwise);
+        buf.writeBoolean(reversedTakeoff);
         buf.writeBlockPos(stationPos);
 
         for (Waypoint.Type type : Waypoint.Type.values()) {
@@ -414,12 +459,14 @@ public class AirportLayout {
         int holdingPatternHeight = buf.readVarInt();
         int taxiSpeed = buf.readVarInt();
         boolean holdingPatternClockwise = buf.readBoolean();
+        boolean reversedTakeoff = buf.readBoolean();
         BlockPos stationPos = buf.readBlockPos();
 
         AirportLayout layout = new AirportLayout(id, name, dimension);
         layout.holdingPatternHeight = holdingPatternHeight;
         layout.taxiSpeed = taxiSpeed;
         layout.holdingPatternClockwise = holdingPatternClockwise;
+        layout.reversedTakeoff = reversedTakeoff;
         layout.stationPos = stationPos;
         for (Waypoint.Type type : Waypoint.Type.values()) {
             int count = buf.readVarInt();

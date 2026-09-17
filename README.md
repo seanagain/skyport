@@ -68,6 +68,14 @@ departures and never by arrivals, so a departure stops queueing behind a
 landing aircraft. With two selected the dropdown lists them separately. Leave
 it off and one runway does both.
 
+**Takeoff direction.** With one runway, the Airport Station screen has a
+"Takeoff: normal / reversed" toggle — normal rolls from the gate end toward
+the far end, same as before this existed; reversed backtracks the aircraft
+down to the far end first and rolls back the other way, the way a real
+runway backtrack works. Landing and taxiing are unaffected either way. It
+does nothing once a second runway is drawn, since that one's own direction
+is already whatever you drew it as.
+
 **One-way taxiways.** In Taxiway mode, click the *body* of a drawn segment to
 cycle it two-way → one-way → reversed. One-way segments get an arrowhead, and
 aircraft route around them — so a loop with an inbound and an outbound half

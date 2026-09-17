@@ -25,6 +25,7 @@ public class AirportStationScreen extends Screen {
     private final AirportLayout layout;
     private EditBox nameBox;
     private Button taxiSpeedButton;
+    private Button reversedTakeoffButton;
 
     public AirportStationScreen(BlockPos stationPos, AirportLayout layout) {
         super(Component.translatable("gui.skyport.airport_station.title"));
@@ -70,9 +71,21 @@ public class AirportStationScreen extends Screen {
                 .bounds(left + boxW - stepW, top + 50, stepW, 20)
                 .build());
 
+        // Which way departures roll on a single-runway field - see
+        // AirportLayout#takeoffRoll. A no-op once a second runway exists, so
+        // it stays visible rather than vanishing on you: what changed the
+        // airport out from under this setting should be obvious from the
+        // summary line below, not from a button quietly disappearing.
+        reversedTakeoffButton = addRenderableWidget(Button.builder(reversedTakeoffLabel(),
+                        b -> toggleReversedTakeoff())
+                .bounds(left, top + 74, boxW, 20)
+                .build());
+        reversedTakeoffButton.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(
+                "With one runway, which end departures take off toward. Ignored once a "
+                        + "second runway is drawn - that one's own direction is set by how you drew it.")));
         addRenderableWidget(Button.builder(Component.translatable("gui.skyport.airport_station.save"),
                         b -> saveAndClose())
-                .bounds(left, top + 74, boxW, 20)
+                .bounds(left, top + 98, boxW, 20)
                 .build());
 
         // Reaching the lock through the screen rather than through sneak +
@@ -82,7 +95,7 @@ public class AirportStationScreen extends Screen {
         addRenderableWidget(Button.builder(Component.translatable("gui.skyport.passcode.button"),
                         b -> PacketDistributor.sendToServer(
                                 new com.skyport.network.LockRequestPayload(stationPos)))
-                .bounds(left, top + 98, boxW, 20)
+                .bounds(left, top + 122, boxW, 20)
                 .build());
     }
 
@@ -93,6 +106,15 @@ public class AirportStationScreen extends Screen {
     private void adjustTaxiSpeed(int delta) {
         layout.setTaxiSpeed(layout.taxiSpeed() + delta);
         if (taxiSpeedButton != null) taxiSpeedButton.setMessage(taxiSpeedLabel());
+    }
+
+    private Component reversedTakeoffLabel() {
+        return Component.literal(layout.reversedTakeoff() ? "Takeoff: reversed" : "Takeoff: normal");
+    }
+
+    private void toggleReversedTakeoff() {
+        layout.setReversedTakeoff(!layout.reversedTakeoff());
+        if (reversedTakeoffButton != null) reversedTakeoffButton.setMessage(reversedTakeoffLabel());
     }
 
     private void save() {

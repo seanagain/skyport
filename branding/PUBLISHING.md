@@ -276,19 +276,27 @@ that is largely how the order gets decided.
 > through it, and stops can be moved up and down the route. That order is the
 > route, and a VOR only counts when it sits above the airport it routes toward.
 >
-> **Admin commands.** `/skyport list`, `/skyport info <aircraft>` and
-> `/skyport forget <aircraft>`, all at permission level 2. `info` prints an
-> aircraft's ids — including Sable's own id for the craft — its state, and its
-> flight plan with the stop it is working on marked. `forget` takes one off
-> the tower, disengaging it first if its autopilot is loaded, which is the
-> cure for an aircraft that is on the map but was picked up with a container
-> and left its clearances behind.
+> **Admin commands.** `/skyport list`, `/skyport info <aircraft>`, `/skyport
+> wake <aircraft>` and `/skyport forget <aircraft>`, all at permission level 2.
+> `info` prints an aircraft's ids — including Sable's own id for the craft —
+> its state, how long since it last ticked, and its flight plan with the stop
+> it is working on marked. `wake` is the tower's Wake button from anywhere.
+> `forget` takes one off the tower, disengaging it first if its autopilot is
+> loaded, which is the cure for an aircraft that is on the map but was picked
+> up with a container and left its clearances behind.
 >
 > **Aircraft no longer sleep in the air.** performance.unattendedMinutes used
 > to bound flying itself, so an aircraft whose time ran out mid-leg froze
 > wherever it happened to be - over open country, or over a VOR. It bounds
 > departures now: an airborne aircraft always finishes its leg and lands, and
 > a parked one waits at its gate once the clock is spent.
+>
+> **Takeoff direction, on a single runway.** A toggle on the Airport Station
+> screen: normal rolls from the gate end toward the far end, as it always
+> did; reversed backtracks to the far end first and rolls back the other
+> way. Landing and taxiing are unaffected either way, and it does nothing
+> once a second runway is drawn — that one already says which way it goes by
+> how you drew it.
 >
 > Crafted from a lightning rod over brass, an electron tube and brass, over
 > three andesite alloy. Mine it with a pickaxe to get it back.

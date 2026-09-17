@@ -1326,6 +1326,17 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                         List<BlockPos> outbound = groundTaxiPath(departureAirport, false);
                         out.addAll(simulatedPosition == null ? outbound
                                 : GroundNetwork.dropPassed(outbound, BlockPos.containing(simulatedPosition)));
+                        // Reversed on a single-runway field: keep going past
+                        // the gate end to the far one instead of stopping
+                        // there - a real backtrack. TAKEOFF_ROLL reads
+                        // takeoffRoll() too, so no turn needs driving here;
+                        // arriving pointed the wrong way is exactly what the
+                        // roll's own line-up wait is for.
+                        List<BlockPos> departure = departureAirport.departureRunway();
+                        List<BlockPos> roll = departureAirport.takeoffRoll();
+                        if (!roll.isEmpty() && !departure.isEmpty() && !roll.get(0).equals(departure.get(0))) {
+                            out.add(roll.get(0));
+                        }
                     }
                     return out;
                 }), () -> setState(FlightState.TAKEOFF_ROLL));
@@ -1334,9 +1345,11 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             // by the halfway point, then pitch up and fly.
             case TAKEOFF_ROLL -> {
                 AirportLayout origin = originLayout(serverLevel);
-                // Departures roll down the departure runway, which is the
-                // second one if the field has one and the only one if not.
-                List<BlockPos> runway = origin != null ? origin.departureRunway() : List.<BlockPos>of();
+                // Departures roll down the departure runway - the second one
+                // if the field has one, the only one otherwise - and backwards
+                // along it if the field has just the one and was told to
+                // reverse its takeoffs. See AirportLayout#takeoffRoll.
+                List<BlockPos> runway = origin != null ? origin.takeoffRoll() : List.<BlockPos>of();
                 if (runway.size() < 2) {
                     setState(FlightState.CLIMB);
                 } else {
