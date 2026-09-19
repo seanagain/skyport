@@ -25,7 +25,7 @@ public class AirportStationScreen extends Screen {
     private final AirportLayout layout;
     private EditBox nameBox;
     private Button taxiSpeedButton;
-    private Button reversedTakeoffButton;
+    private Button takeoffButton;
 
     public AirportStationScreen(BlockPos stationPos, AirportLayout layout) {
         super(Component.translatable("gui.skyport.airport_station.title"));
@@ -71,18 +71,19 @@ public class AirportStationScreen extends Screen {
                 .bounds(left + boxW - stepW, top + 50, stepW, 20)
                 .build());
 
-        // Which way departures roll on a single-runway field - see
-        // AirportLayout#takeoffRoll. A no-op once a second runway exists, so
-        // it stays visible rather than vanishing on you: what changed the
-        // airport out from under this setting should be obvious from the
-        // summary line below, not from a button quietly disappearing.
-        reversedTakeoffButton = addRenderableWidget(Button.builder(reversedTakeoffLabel(),
-                        b -> toggleReversedTakeoff())
+        // Which way departures roll, against the final leg - see
+        // AirportLayout#takeoffSense. Disabled rather than hidden when it
+        // means nothing yet, so it is clear the setting exists and what it is
+        // waiting for.
+        takeoffButton = addRenderableWidget(Button.builder(takeoffLabel(), b -> toggleTakeoffSense())
                 .bounds(left, top + 74, boxW, 20)
                 .build());
-        reversedTakeoffButton.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(
-                "With one runway, which end departures take off toward. Ignored once a "
-                        + "second runway is drawn - that one's own direction is set by how you drew it.")));
+        takeoffButton.active = takeoffChoosable();
+        takeoffButton.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(
+                "Which way departures roll on a single runway: toward the outer end of the final leg, "
+                        + "or away from it - the way landing aircraft fly. Needs a final leg drawn roughly "
+                        + "in line with the runway, and does nothing once a second runway is drawn.")));
+
         addRenderableWidget(Button.builder(Component.translatable("gui.skyport.airport_station.save"),
                         b -> saveAndClose())
                 .bounds(left, top + 98, boxW, 20)
@@ -108,13 +109,28 @@ public class AirportStationScreen extends Screen {
         if (taxiSpeedButton != null) taxiSpeedButton.setMessage(taxiSpeedLabel());
     }
 
-    private Component reversedTakeoffLabel() {
-        return Component.literal(layout.reversedTakeoff() ? "Takeoff: reversed" : "Takeoff: normal");
+    private Component takeoffLabel() {
+        return Component.literal(switch (layout.takeoffSense()) {
+            case TOWARDS_FINAL_LEG -> "Takeoff: towards final leg";
+            case AWAY_FROM_FINAL_LEG -> "Takeoff: away from final leg";
+            case UNDEFINED -> "Takeoff: needs a final leg";
+        });
     }
 
-    private void toggleReversedTakeoff() {
-        layout.setReversedTakeoff(!layout.reversedTakeoff());
-        if (reversedTakeoffButton != null) reversedTakeoffButton.setMessage(reversedTakeoffLabel());
+    /** Only meaningful with a final leg to measure against, and only while a
+     *  single runway does both jobs - a dedicated departure runway already
+     *  says which way it goes by how it was drawn. */
+    private boolean takeoffChoosable() {
+        return layout.takeoffSense() != AirportLayout.TakeoffSense.UNDEFINED
+                && !layout.hasDepartureRunway();
+    }
+
+    private void toggleTakeoffSense() {
+        AirportLayout.TakeoffSense now = layout.takeoffSense();
+        layout.setTakeoffSense(now == AirportLayout.TakeoffSense.TOWARDS_FINAL_LEG
+                ? AirportLayout.TakeoffSense.AWAY_FROM_FINAL_LEG
+                : AirportLayout.TakeoffSense.TOWARDS_FINAL_LEG);
+        if (takeoffButton != null) takeoffButton.setMessage(takeoffLabel());
     }
 
     private void save() {

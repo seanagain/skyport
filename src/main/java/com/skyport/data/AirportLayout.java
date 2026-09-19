@@ -191,6 +191,82 @@ public class AirportLayout {
         return List.of(runway.get(1), runway.get(0));
     }
 
+    /** Which way a departure rolls, measured against the final leg. */
+    public enum TakeoffSense {
+        /** Rolls toward the outer end of the final leg - head-on with the
+         *  direction landing aircraft come in. */
+        TOWARDS_FINAL_LEG,
+        /** Rolls the way landing aircraft fly, away from where the final leg
+         *  starts. */
+        AWAY_FROM_FINAL_LEG,
+        /** No final leg, or one not in line with the runway, so "towards" and
+         *  "away" mean nothing yet. */
+        UNDEFINED
+    }
+
+    /**
+     * How closely the final leg has to run along the runway for towards and
+     * away to mean anything, as the cosine of the angle between them. Sixty
+     * degrees either side: a leg drawn a little crooked is still an approach
+     * to this runway, and one drawn across it is not an approach to it at all.
+     */
+    private static final double SENSE_MIN_COSINE = 0.5;
+
+    /**
+     * Which way departures roll, in terms of the final leg rather than of how
+     * the runway happened to be drawn.
+     *
+     * The runway's two ends are only labelled gate end and far end because of
+     * the order they were clicked in, which is not something anyone reasons
+     * about. "Toward the final leg or away from it" is: it says whether a
+     * departure leaves the way the arrivals come in from or the way they are
+     * flying, and it stays true if the runway is redrawn the other way round.
+     *
+     * Measured against the LAST segment of the final leg, because that is the
+     * direction an aircraft is actually flying when it reaches the runway.
+     */
+    public TakeoffSense takeoffSense() {
+        return senseOf(takeoffRoll());
+    }
+
+    private TakeoffSense senseOf(List<BlockPos> roll) {
+        List<Waypoint> leg = waypoints(Waypoint.Type.FINAL_LEG);
+        if (roll.size() < 2 || leg.size() < 2) return TakeoffSense.UNDEFINED;
+
+        BlockPos legFrom = leg.get(leg.size() - 2).pos();
+        BlockPos legTo = leg.get(leg.size() - 1).pos();
+        double legX = legTo.getX() - legFrom.getX();
+        double legZ = legTo.getZ() - legFrom.getZ();
+        double rollX = roll.get(1).getX() - roll.get(0).getX();
+        double rollZ = roll.get(1).getZ() - roll.get(0).getZ();
+
+        double legLength = Math.hypot(legX, legZ);
+        double rollLength = Math.hypot(rollX, rollZ);
+        if (legLength < 1.0e-6 || rollLength < 1.0e-6) return TakeoffSense.UNDEFINED;
+
+        double cosine = (legX * rollX + legZ * rollZ) / (legLength * rollLength);
+        if (Math.abs(cosine) < SENSE_MIN_COSINE) return TakeoffSense.UNDEFINED;
+        return cosine < 0 ? TakeoffSense.TOWARDS_FINAL_LEG : TakeoffSense.AWAY_FROM_FINAL_LEG;
+    }
+
+    /**
+     * Make departures roll the given way relative to the final leg, by
+     * setting whichever way round of the runway that takes.
+     *
+     * Changes nothing when it cannot be answered - no usable final leg, or a
+     * dedicated departure runway that already decides the matter - rather
+     * than guessing, so a request that means nothing here leaves the airport
+     * exactly as it was.
+     */
+    public void setTakeoffSense(TakeoffSense wanted) {
+        if (wanted == TakeoffSense.UNDEFINED || hasDepartureRunway()) return;
+        // Judged against the runway as drawn, not as currently flagged: the
+        // question is which of the two orientations gives what was asked for.
+        TakeoffSense asDrawn = senseOf(departureRunway());
+        if (asDrawn == TakeoffSense.UNDEFINED) return;
+        reversedTakeoff = asDrawn != wanted;
+    }
+
     /**
      * Place one end of a specific runway, leaving the other alone.
      *

@@ -291,12 +291,13 @@ that is largely how the order gets decided.
 > departures now: an airborne aircraft always finishes its leg and lands, and
 > a parked one waits at its gate once the clock is spent.
 >
-> **Takeoff direction, on a single runway.** A toggle on the Airport Station
-> screen: normal rolls from the gate end toward the far end, as it always
-> did; reversed backtracks to the far end first and rolls back the other
-> way. Landing and taxiing are unaffected either way, and it does nothing
-> once a second runway is drawn — that one already says which way it goes by
-> how you drew it.
+> **Takeoff direction, on a single runway.** A button on the Airport Station
+> screen: "towards final leg" rolls departures toward the outer end of the
+> final leg, as a conventionally drawn airport always did; "away from final leg" rolls them the way
+> landing aircraft fly, backtracking to the far end first. It is measured
+> against where your final leg actually points, so it means the same thing
+> however the runway was drawn. Landing and taxiing are unaffected, and it
+> does nothing once a second runway is drawn.
 >
 > Crafted from a lightning rod over brass, an electron tube and brass, over
 > three andesite alloy. Mine it with a pickaxe to get it back.

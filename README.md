@@ -69,12 +69,19 @@ landing aircraft. With two selected the dropdown lists them separately. Leave
 it off and one runway does both.
 
 **Takeoff direction.** With one runway, the Airport Station screen has a
-"Takeoff: normal / reversed" toggle — normal rolls from the gate end toward
-the far end, same as before this existed; reversed backtracks the aircraft
-down to the far end first and rolls back the other way, the way a real
-runway backtrack works. Landing and taxiing are unaffected either way. It
-does nothing once a second runway is drawn, since that one's own direction
-is already whatever you drew it as.
+button that reads "Takeoff: towards final leg" or "Takeoff: away from final
+leg". Towards means departures roll toward the outer end of the final leg —
+head-on with the way landing aircraft come in, which is what an airport
+drawn the way this README describes always did. Away means they roll the way landing aircraft fly:
+the aircraft taxis up to the runway as usual, carries on down it to the far
+end, turns, and takes off back the other way, the way a real runway backtrack
+works. Landing and taxiing are unaffected either way.
+
+It is measured against where your final leg actually points, so it means the
+same thing however the runway was clicked. It needs a final leg drawn roughly
+in line with the runway — the button says so and stays greyed out until there
+is one — and it does nothing once a second runway is drawn, since that one's
+direction is whatever you drew it as.
 
 **One-way taxiways.** In Taxiway mode, click the *body* of a drawn segment to
 cycle it two-way → one-way → reversed. One-way segments get an arrowhead, and
