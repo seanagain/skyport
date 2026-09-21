@@ -781,6 +781,40 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         engageCurrentLeg(serverLevel, craftPositionOr(getBlockPos()), null);
     }
 
+    /** Which redstone updates are worth acting on - see RedstoneGate. Not
+     *  persisted: after a reload the first update reads as a change, which is
+     *  what makes a lever left on engage the plane under it. */
+    private final com.skyport.logic.RedstoneGate redstone = new com.skyport.logic.RedstoneGate();
+
+    /**
+     * A neighbour changed, and this is the signal it leaves us with.
+     *
+     * Everything about which of these is worth acting on lives in
+     * RedstoneGate, including why: an Autopilot next to a block that pokes
+     * its neighbours every tick used to re-run the engage - route check,
+     * terrain scan, chunk loading and all - twenty times a second, and hang
+     * the server for minutes.
+     *
+     * Powered goes through the cooldown whether or not the signal changed,
+     * because both ways of arriving here repeatedly end in the same expensive
+     * place. Unpowered only acts on a real change; disengaging an aircraft
+     * that is already idle is cheap but it is not free, and there is nothing
+     * to be gained by doing it every tick.
+     */
+    public void onRedstoneChanged(ServerLevel serverLevel, boolean powered) {
+        boolean changed = redstone.signalChanged(powered);
+
+        if (!powered) {
+            if (changed) disengage();
+            return;
+        }
+
+        long now = serverLevel.getGameTime();
+        if (!redstone.mayEngage(now)) return;
+        redstone.engageAttempted(now);
+        engageFromRedstone(serverLevel);
+    }
+
     public void engage(FlightSchedule newSchedule, ServerPlayer player) {
         if (newSchedule.isEmpty()) {
             message(player, "Schedule is empty - add at least one stop first.");
@@ -3294,7 +3328,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * far enough to have real blocks in them. Anything outside the band is
      * not this check's business.
      */
-    private RouteScan scanRoute(ServerLevel serverLevel, BlockPos from, BlockPos to, int altitude) {
+    private RouteScan scanRoute(ServerLevel serverLevel, BlockPos from, BlockPos to, int altitude,
+                                ScanBudget budget) {
         double distance = horizontalDistance(from, to);
         int samples = (int) Math.min(TERRAIN_SCAN_MAX_SAMPLES,
                 Math.max(2, distance / TERRAIN_SCAN_SPACING));
@@ -3309,7 +3344,6 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         ChunkAccess chunk = null;
         long chunkKey = Long.MIN_VALUE;
-        int generated = 0;
         boolean partial = false;
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
 
@@ -3334,12 +3368,12 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
                 // a budget: past it the scan reads chunks that happen to be
                 // loaded and reports itself as partial rather than stalling
                 // the tick to be thorough.
-                boolean mayGenerate = generated < TERRAIN_SCAN_MAX_GENERATED_CHUNKS;
+                boolean mayGenerate = budget.mayGenerate();
                 chunk = serverLevel.getChunk(SectionPos.blockToSectionCoord(x),
                         SectionPos.blockToSectionCoord(z),
                         ChunkStatus.SURFACE, mayGenerate);
                 if (chunk == null) partial = true;
-                else if (mayGenerate) generated++;
+                else if (mayGenerate) budget.spent();
             }
             if (chunk == null) continue;
 
@@ -3416,13 +3450,15 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * altitude that clears all of them.
      */
     private RouteScan scanLegs(ServerLevel serverLevel, List<BlockPos> route, int altitude) {
+        // One budget for the route, not one per leg - see ScanBudget.
+        ScanBudget budget = new ScanBudget();
         boolean clear = true;
         boolean partial = false;
         int blockedAtY = 0;
         BlockPos blockedNear = null;
         int clearAbove = Integer.MIN_VALUE;
         for (int i = 1; i < route.size(); i++) {
-            RouteScan leg = scanRoute(serverLevel, route.get(i - 1), route.get(i), altitude);
+            RouteScan leg = scanRoute(serverLevel, route.get(i - 1), route.get(i), altitude, budget);
             partial |= leg.partial();
             clearAbove = Math.max(clearAbove, leg.clearAbove());
             if (clear && !leg.clear()) {
@@ -3432,6 +3468,28 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             }
         }
         return new RouteScan(clear, blockedAtY, blockedNear, clearAbove, partial);
+    }
+
+    /**
+     * How much terrain one route check is allowed to generate, shared by
+     * every leg of it.
+     *
+     * It used to be a local inside scanRoute, which meant the budget was per
+     * LEG - so a route over three VORs allowed four times as much generation
+     * as the number was ever meant to permit, all of it synchronous, all of
+     * it on the main thread. Counting the route as a whole is what the figure
+     * always claimed to be.
+     */
+    private static final class ScanBudget {
+        private int generated;
+
+        boolean mayGenerate() {
+            return generated < TERRAIN_SCAN_MAX_GENERATED_CHUNKS;
+        }
+
+        void spent() {
+            generated++;
+        }
     }
 
     /**

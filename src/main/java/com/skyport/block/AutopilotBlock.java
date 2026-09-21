@@ -102,6 +102,13 @@ public class AutopilotBlock extends Block implements EntityBlock {
      * Level-triggered rather than edge-triggered on purpose - a lever left on
      * means "this plane should be flying", which survives a reload, whereas a
      * pulse that happened while the chunk was out would just be missed.
+     *
+     * Which of these updates is worth acting on is the block entity's to
+     * decide, and it is not obvious: this fires for any change to any
+     * neighbour, and some blocks poke theirs every tick. Taking each one at
+     * face value re-ran the engage - route check, terrain scan, chunk loading
+     * - twenty times a second and hung a server for minutes at a stretch. See
+     * RedstoneGate.
      */
     @Override
     protected void neighborChanged(BlockState state, Level level, BlockPos pos,
@@ -110,11 +117,7 @@ public class AutopilotBlock extends Block implements EntityBlock {
         if (level.isClientSide || !(level instanceof ServerLevel serverLevel)) return;
         if (!(level.getBlockEntity(pos) instanceof AutopilotBlockEntity autopilot)) return;
 
-        if (level.hasNeighborSignal(pos)) {
-            autopilot.engageFromRedstone(serverLevel);
-        } else {
-            autopilot.disengage();
-        }
+        autopilot.onRedstoneChanged(serverLevel, level.hasNeighborSignal(pos));
     }
 
     /**

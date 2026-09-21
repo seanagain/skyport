@@ -299,6 +299,24 @@ that is largely how the order gets decided.
 > however the runway was drawn. Landing and taxiing are unaffected, and it
 > does nothing once a second runway is drawn.
 >
+> **Fixed: an Autopilot beside a chatty block could hang the server.** Some
+> blocks tell their neighbours something changed every single tick. The
+> Autopilot believed each one and re-ran its engage - route check, terrain
+> scan, chunk loading and all - twenty times a second, holding the main
+> thread for minutes at a stretch and saying nothing, since a redstone engage
+> has no player to report a refusal to. Reported against Create Simulated's
+> Docking Connector; anything that pokes its neighbours would have done it.
+>
+> An update now has to actually change the signal to mean anything, and an
+> engage may only be attempted once every five seconds however it was asked
+> for, which also covers a signal genuinely toggling and a lever left on
+> above a plane that cannot take off. A lever left on still retries, so
+> fixing whatever was wrong still starts the flight.
+>
+> The route check also budgeted the terrain it may generate per LEG rather
+> than per route, so a flight over three VORs allowed four times what that
+> limit was ever meant to permit. It is counted across the whole route now.
+>
 > Crafted from a lightning rod over brass, an electron tube and brass, over
 > three andesite alloy. Mine it with a pickaxe to get it back.
 
