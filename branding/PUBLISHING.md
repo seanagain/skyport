@@ -247,12 +247,44 @@ that is largely how the order gets decided.
 
 | Field | Value |
 | --- | --- |
-| File | `build/libs/skyport-1.0.1.jar` |
-| Display name | Skyport 1.0.1 |
+| File | `build/libs/skyport-1.0.2.jar` |
+| Display name | Skyport 1.0.2 |
 | Release type | **Release** |
 | Game version | 1.21.1 |
 | Loader | NeoForge |
 | Java | 21 |
+
+### Changelog for 1.0.2
+
+> **Fixed: an Autopilot beside a chatty block could hang the server.** Some
+> blocks tell their neighbours something changed every single tick. The
+> Autopilot believed each one and re-ran its engage — route check, terrain
+> scan, chunk loading and all — twenty times a second, holding the main
+> thread for minutes at a stretch until the watchdog killed it, and saying
+> nothing the whole time, because a redstone engage has no player to report a
+> refusal to. Reported against Create Simulated's Docking Connector, but
+> anything that pokes its neighbours each tick would have done it.
+>
+> An update now has to actually change the signal to mean anything, and an
+> engage may only be attempted once every five seconds however it was asked
+> for — which also covers a signal genuinely toggling, and a lever left on
+> above a plane that cannot take off. A lever left on still retries, so
+> fixing whatever was wrong still starts the flight.
+>
+> The route check also budgeted the terrain it may generate per leg rather
+> than per route, so a flight over three VORs allowed four times what that
+> limit was ever meant to permit. It is counted across the whole route now.
+>
+> If you run a server, this one is worth taking.
+>
+> **Takeoff direction, on a single runway.** A button on the Airport Station
+> screen: "towards final leg" rolls departures toward the outer end of the
+> final leg, which is what a conventionally drawn airport always did; "away
+> from final leg" rolls them the way landing aircraft fly, backtracking to
+> the far end first. It is measured against where your final leg actually
+> points, so it means the same thing however the runway was drawn. Landing
+> and taxiing are unaffected, and it does nothing once a second runway is
+> drawn — that one's direction is already whatever you drew it as.
 
 ### Changelog for 1.0.1
 
@@ -290,32 +322,6 @@ that is largely how the order gets decided.
 > wherever it happened to be - over open country, or over a VOR. It bounds
 > departures now: an airborne aircraft always finishes its leg and lands, and
 > a parked one waits at its gate once the clock is spent.
->
-> **Takeoff direction, on a single runway.** A button on the Airport Station
-> screen: "towards final leg" rolls departures toward the outer end of the
-> final leg, as a conventionally drawn airport always did; "away from final leg" rolls them the way
-> landing aircraft fly, backtracking to the far end first. It is measured
-> against where your final leg actually points, so it means the same thing
-> however the runway was drawn. Landing and taxiing are unaffected, and it
-> does nothing once a second runway is drawn.
->
-> **Fixed: an Autopilot beside a chatty block could hang the server.** Some
-> blocks tell their neighbours something changed every single tick. The
-> Autopilot believed each one and re-ran its engage - route check, terrain
-> scan, chunk loading and all - twenty times a second, holding the main
-> thread for minutes at a stretch and saying nothing, since a redstone engage
-> has no player to report a refusal to. Reported against Create Simulated's
-> Docking Connector; anything that pokes its neighbours would have done it.
->
-> An update now has to actually change the signal to mean anything, and an
-> engage may only be attempted once every five seconds however it was asked
-> for, which also covers a signal genuinely toggling and a lever left on
-> above a plane that cannot take off. A lever left on still retries, so
-> fixing whatever was wrong still starts the flight.
->
-> The route check also budgeted the terrain it may generate per LEG rather
-> than per route, so a flight over three VORs allowed four times what that
-> limit was ever meant to permit. It is counted across the whole route now.
 >
 > Crafted from a lightning rod over brass, an electron tube and brass, over
 > three andesite alloy. Mine it with a pickaxe to get it back.
