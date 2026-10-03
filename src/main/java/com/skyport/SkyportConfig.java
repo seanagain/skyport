@@ -159,7 +159,19 @@ public final class SkyportConfig {
         /** Create rotational force reaching the Autopilot block. */
         ROTATION,
         /** Furnace fuel, burned from a container on the aircraft. */
-        FUEL
+        FUEL,
+        /** Both at once: a turning powertrain AND fuel to burn. */
+        BOTH;
+
+        /** Does this mode want rotation at the block? */
+        public boolean needsRotation() {
+            return this == ROTATION || this == BOTH;
+        }
+
+        /** Does this mode want fuel aboard to burn? */
+        public boolean needsFuel() {
+            return this == FUEL || this == BOTH;
+        }
     }
 
     public static final ModConfigSpec.EnumValue<PowerRequirement> POWER_REQUIREMENT = SERVER
@@ -176,9 +188,16 @@ public final class SkyportConfig {
                      "aircraft, the way a furnace would. Self-contained, and readable at a",
                      "glance from the chest it is drawing on.",
                      "",
-                     "Either way, losing power in flight is an engine failure, not a pause:",
-                     "the autopilot keeps the wings level but stops driving the craft",
-                     "forward, and it comes down.")
+                     "BOTH: rotation AND fuel. The powertrain has to be turning and",
+                     "there has to be something burnable aboard - an engine that needs",
+                     "running and feeding, which is the most demanding of the four and the",
+                     "closest to an aircraft that costs what an aircraft should. A stopped",
+                     "powertrain is refused before the holds are opened, so an engine that",
+                     "is not turning never lights a fresh item.",
+                     "",
+                     "In any mode that asks for something, losing power in flight is an",
+                     "engine failure, not a pause: the autopilot keeps the wings level",
+                     "but stops driving the craft forward, and it comes down.")
             .defineEnum("survival.powerRequirement", PowerRequirement.NONE);
 
     public static final ModConfigSpec.IntValue ROTATION_MINIMUM_RPM = SERVER

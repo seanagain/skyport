@@ -71,11 +71,11 @@ it off and one runway does both.
 **Takeoff direction.** With one runway, the Airport Station screen has a
 button that reads "Takeoff: towards final leg" or "Takeoff: away from final
 leg". Towards means departures roll toward the outer end of the final leg —
-head-on with the way landing aircraft come in, which is what an airport
-drawn the way this README describes always did. Away means they roll the way landing aircraft fly:
-the aircraft taxis up to the runway as usual, carries on down it to the far
-end, turns, and takes off back the other way, the way a real runway backtrack
-works. Landing and taxiing are unaffected either way.
+head-on with the way landing aircraft come in, which is what an airport drawn
+the way this README describes always did. Away means they roll the way landing
+aircraft fly: the aircraft taxis up to the runway as usual, carries on down it
+to the far end, turns, and takes off back the other way, the way a real runway
+backtrack works. Landing and taxiing are unaffected either way.
 
 It is measured against where your final leg actually points, so it means the
 same thing however the runway was clicked. It needs a final leg drawn roughly
@@ -151,9 +151,14 @@ config (see [Config](#config) for where it lives):
   a shaft or cogwheel against it, driven by the craft's own powertrain.
 - **`FUEL`** — burns furnace fuel from any container on the aircraft. Anything
   that burns in a furnace works, including other mods' fuels.
+- **`BOTH`** — rotation *and* fuel: the powertrain has to be turning and there
+  has to be something burnable aboard. A stopped powertrain is refused before
+  the holds are ever opened, so an engine that is not turning never lights a
+  fresh item out of the bunker.
 
-In `FUEL` mode, **cruise speed costs fuel**, and faster costs more per block
-travelled, not merely more per second. On one coal at default settings:
+Wherever fuel is burned — `FUEL` and `BOTH` — **cruise speed costs fuel**, and
+faster costs more per block travelled, not merely more per second. On one coal
+at default settings:
 
 | Cruise speed | Endurance | Range |
 | --- | --- | --- |

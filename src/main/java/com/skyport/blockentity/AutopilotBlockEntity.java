@@ -3590,17 +3590,20 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * and running out a second from now is not worth a per-tick scan.
      */
     private boolean hasPower(long now) {
-        if (SkyportConfig.powerRequirement == SkyportConfig.PowerRequirement.NONE) return true;
+        SkyportConfig.PowerRequirement requirement = SkyportConfig.powerRequirement;
+        if (requirement == SkyportConfig.PowerRequirement.NONE) return true;
         if (level == null) return true;
 
-        if (SkyportConfig.powerRequirement == SkyportConfig.PowerRequirement.ROTATION) {
-            return PowerSource.hasRotation(level, getBlockPos());
-        }
+        // Rotation first, and in BOTH the order is the point: an aircraft
+        // whose powertrain has stopped must not go on burning fuel to find
+        // out it has no power anyway. Checking the cheap half first also
+        // means a stopped engine never touches the containers.
+        if (requirement.needsRotation() && !PowerSource.hasRotation(level, getBlockPos())) return false;
+        if (!requirement.needsFuel()) return true;
 
-        // FUEL: burn down what's lit, then light another item when it runs
-        // out. Fuel is only spent while actually flying a leg - an aircraft
+        // Burn down what's lit, then light another item when it runs out.
+        // Fuel is only spent while actually flying a leg - an aircraft
         // sitting at a gate for ten minutes shouldn't empty its bunker.
-        //
         if (fuelReserve > 0) return true;
 
         if (fuelContainers == null) fuelContainers = PowerSource.findFuelContainers(level, getBlockPos());
@@ -3651,12 +3654,22 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return FuelBurn.rateForSpeed(speed);
     }
 
-    /** What to tell the player when there's no power, in this mode's terms. */
+    /**
+     * What to tell the player when there's no power, in this mode's terms.
+     *
+     * In BOTH, name the half that is actually missing rather than both at
+     * once: "it needs rotation and fuel" is true and useless, and the
+     * aircraft already knows which one stopped it. Rotation is asked about
+     * first because that is the order hasPower refuses them in.
+     */
     private String powerMissingReason() {
-        return SkyportConfig.powerRequirement == SkyportConfig.PowerRequirement.ROTATION
-                ? "No rotational force at the autopilot - it needs at least "
-                        + SkyportConfig.rotationMinimumRpm + " RPM from a shaft or cogwheel against it."
-                : "No fuel aboard - put something burnable in a container on the aircraft.";
+        SkyportConfig.PowerRequirement requirement = SkyportConfig.powerRequirement;
+        if (requirement.needsRotation()
+                && (level == null || !PowerSource.hasRotation(level, getBlockPos()))) {
+            return "No rotational force at the autopilot - it needs at least "
+                    + SkyportConfig.rotationMinimumRpm + " RPM from a shaft or cogwheel against it.";
+        }
+        return "No fuel aboard - put something burnable in a container on the aircraft.";
     }
 
     private BlockPos destinationPad(AirportLayout destination) {
@@ -4527,7 +4540,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * that answer moves when the throttle does.
      */
     private String fuelReadout() {
-        if (SkyportConfig.powerRequirement != SkyportConfig.PowerRequirement.FUEL) return "";
+        if (!SkyportConfig.powerRequirement.needsFuel()) return "";
         if (fuelReserve <= 0) return "  DRY";
         return String.format("  fuel %.0fs", fuelReserve / fuelBurnRate() / 20.0);
     }

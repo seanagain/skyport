@@ -152,7 +152,7 @@ hold lines you have not placed yet, jams rather than crashes.
 
 ### Make it cost something
 
-Flight is free by default, which is right for building. Two options are not:
+Flight is free by default, which is right for building. Three options are not:
 
 - **Rotation** — Create rotational force must reach the Autopilot. Run a shaft
   to it from the powertrain your aircraft already carries.
@@ -160,6 +160,9 @@ Flight is free by default, which is right for building. Two options are not:
   per block travelled, not just per second, so speed is genuinely traded
   against range. Run dry mid-flight and it is an engine failure, not a pause:
   wings level, and down you go.
+- **Both** — a turning powertrain and something burnable aboard. An engine that
+  has to be run and fed, and the closest of the four to an aircraft costing
+  what an aircraft should.
 
 ### On a shared server
 
@@ -256,6 +259,16 @@ that is largely how the order gets decided.
 
 ### Changelog for 1.0.2
 
+> **A survival mode that wants both.** `survival.powerRequirement` takes a
+> fourth setting, `BOTH`: the powertrain has to be turning and there has to be
+> something burnable aboard. An engine that needs running and feeding, which
+> is the closest of the four to an aircraft costing what an aircraft should.
+>
+> A stopped powertrain is refused before the holds are ever opened, so an
+> engine that is not turning never lights a fresh item out of the bunker, and
+> when the autopilot refuses it names the half that is missing rather than
+> reciting both.
+>
 > **Fixed: an Autopilot beside a chatty block could hang the server.** Some
 > blocks tell their neighbours something changed every single tick. The
 > Autopilot believed each one and re-ran its engage — route check, terrain
