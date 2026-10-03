@@ -67,7 +67,8 @@ public final class ClientPayloadHandlers {
     public static void openAutopilot(OpenAutopilotPayload payload, IPayloadContext context) {
         context.enqueueWork(() ->
                 Minecraft.getInstance().setScreen(new AutopilotScreen(
-                        payload.autopilotPos(), payload.airports(), payload.vors(), payload.schedule())));
+                        payload.autopilotPos(), payload.airports(), payload.vors(), payload.schedule(),
+                        payload.serverPower())));
     }
 
     public static void openVor(OpenVorPayload payload, IPayloadContext context) {

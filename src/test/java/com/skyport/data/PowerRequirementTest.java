@@ -11,8 +11,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * Every place that charges an aircraft for flying reads these two questions
  * rather than comparing against the mode itself, so this is where "BOTH means
- * both" is actually settled - and where a fifth mode added later would have
- * to say which halves it wants rather than quietly meaning neither.
+ * both" is actually settled - and where a mode added later has to say which
+ * halves it wants rather than quietly meaning neither.
+ *
+ * EITHER answers yes to both here, which is not what an aircraft under it
+ * actually pays - it is resolved against that craft's own choice first. See
+ * PowerChoiceTest for what that resolve has to guarantee.
  */
 class PowerRequirementTest {
 
@@ -40,8 +44,8 @@ class PowerRequirementTest {
         assertTrue(PowerRequirement.BOTH.needsFuel());
     }
 
-    /** Adding a mode that answers no to both would make it a silent second
-     *  NONE - free flight under a name that sounds like it costs something. */
+    /** A mode that answers no to both would be a silent second NONE - free
+     *  flight under a name that sounds like it costs something. */
     @Test
     void everyModeExceptNoneCostsSomething() {
         for (PowerRequirement mode : PowerRequirement.values()) {

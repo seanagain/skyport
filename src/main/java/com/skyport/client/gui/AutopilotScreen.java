@@ -1,5 +1,6 @@
 package com.skyport.client.gui;
 
+import com.skyport.SkyportConfig;
 import com.skyport.data.AirportSummary;
 import com.skyport.data.FlightSchedule;
 import com.skyport.data.ScheduleEntry;
@@ -57,6 +58,9 @@ public class AutopilotScreen extends Screen {
     /** Every VOR beacon, sorted by name on the server. */
     private final List<VorBeacon> vors;
     private final FlightSchedule schedule;
+    /** What the server asks an aircraft for, as it was when this screen
+     *  opened. Only read to decide whether the aircraft has a choice to make. */
+    private final SkyportConfig.PowerRequirement serverPower;
 
     /** Which stop the edit buttons act on. -1 when the schedule is empty. */
     private int selected = -1;
@@ -77,14 +81,18 @@ public class AutopilotScreen extends Screen {
     private Button removeButton;
     private Button upButton;
     private Button downButton;
+    /** Null in every power mode but EITHER, where the aircraft gets to pick. */
+    @Nullable
+    private Button powerButton;
     private EditBox nameBox;
 
     public AutopilotScreen(BlockPos autopilotPos, List<AirportSummary> airports, List<VorBeacon> vors,
-                           FlightSchedule schedule) {
+                           FlightSchedule schedule, SkyportConfig.PowerRequirement serverPower) {
         super(Component.translatable("gui.skyport.autopilot.title"));
         this.autopilotPos = autopilotPos;
         this.airports = airports;
         this.vors = vors;
+        this.serverPower = serverPower;
         // The block's existing schedule, so reopening shows the route you set
         // rather than a blank one.
         this.schedule = schedule;
@@ -93,6 +101,10 @@ public class AutopilotScreen extends Screen {
 
     @Override
     protected void init() {
+        // init runs again on a resize, and the widget list is rebuilt from
+        // scratch each time - so drop the reference to the old button rather
+        // than leaving a stale one that is no longer on the screen.
+        powerButton = null;
         int panelW = Math.min(260, width - 20);
         int left = (width - panelW) / 2;
         int listTop = LIST_TOP;
@@ -171,13 +183,39 @@ public class AutopilotScreen extends Screen {
         addRenderableWidget(Button.builder(Component.literal("+"), b -> adjustCruiseSpeed(4))
                 .bounds(left + half + 26 + valueW + 2, top + 96, 20, 20).build());
 
-        // Shares the row with Engage rather than adding one below it, so the
-        // panel does not grow a line taller and start clipping off the
-        // bottom of a small window.
+        // The bottom row: what this aircraft pays to fly, then Engage, then
+        // Passcode. All three share one row rather than the power choice
+        // getting a line of its own, for the same reason Passcode does - the
+        // panel is anchored to the top of the screen, so another line is
+        // another 24 pixels off the bottom of a small window, and this screen
+        // is already close to the edge at a high GUI scale.
+        //
+        // The choice only appears where the server allows either half. In
+        // every other mode the server has already decided, and a button that
+        // cannot change anything is worse than no button at all - so on those
+        // servers this row is exactly what it was before.
+        //
+        // The fixed widths carry the long labels and Engage takes what is
+        // left, because "Engage" is six characters and survives being
+        // squeezed in a way that "Power: rotation" does not.
         int lockW = 80;
+        // Wide enough for "Power: rotation", plus the gap, or nothing at all
+        // when there is no choice to show.
+        int powerSpan = serverPower.isChoice() ? 92 + 4 : 0;
+        if (serverPower.isChoice()) {
+            powerButton = addRenderableWidget(Button.builder(powerLabel(), b -> togglePower())
+                    .bounds(left, top + 120, powerSpan - 4, 20).build());
+            powerButton.setTooltip(Tooltip.create(Component.literal(
+                    "What this aircraft pays to fly. Rotation wants a shaft or cogwheel turning "
+                            + "against the Autopilot; fuel wants something burnable in a container "
+                            + "aboard, and costs more the faster you cruise. This server takes "
+                            + "either one.")));
+        }
+        int engageX = left + powerSpan;
+        int engageW = panelW - powerSpan - lockW - 4;
         engageButton = addRenderableWidget(Button.builder(Component.translatable("gui.skyport.autopilot.engage"),
                         b -> engage())
-                .bounds(left, top + 120, panelW - lockW - 4, 20).build());
+                .bounds(engageX, top + 120, engageW, 20).build());
         addRenderableWidget(Button.builder(Component.translatable("gui.skyport.passcode.button"),
                         b -> net.neoforged.neoforge.network.PacketDistributor.sendToServer(
                                 new com.skyport.network.LockRequestPayload(autopilotPos)))
@@ -421,6 +459,21 @@ public class AutopilotScreen extends Screen {
         return Component.literal(schedule.craftType().label());
     }
 
+    private Component powerLabel() {
+        return Component.literal(schedule.prefersFuel() ? "Power: fuel" : "Power: rotation");
+    }
+
+    /**
+     * Only ever reachable in EITHER, so this writes a preference the server
+     * will actually honour. It saves with the rest of the schedule on close,
+     * which means switching an aircraft from coal to a windmill is a button
+     * and not a rebuild.
+     */
+    private void togglePower() {
+        schedule.setPrefersFuel(!schedule.prefersFuel());
+        refresh();
+    }
+
     /**
      * Which stops this aircraft can be sent to: gates for a plane, helipads
      * for anything that lands vertically.
@@ -483,6 +536,7 @@ public class AutopilotScreen extends Screen {
         craftButton.setMessage(craftLabel());
         altitudeButton.setMessage(altitudeLabel());
         speedButton.setMessage(speedLabel());
+        if (powerButton != null) powerButton.setMessage(powerLabel());
 
         airportButton.active = sel && destinationCount() > 0;
         gateButton.active = airport != null && stopsAt(airport).size() > 1;

@@ -161,16 +161,46 @@ public final class SkyportConfig {
         /** Furnace fuel, burned from a container on the aircraft. */
         FUEL,
         /** Both at once: a turning powertrain AND fuel to burn. */
-        BOTH;
+        BOTH,
+        /**
+         * The server will take either one, and each aircraft picks which from
+         * its own Autopilot screen. This is never what an aircraft is actually
+         * held to - resolve it against that choice first.
+         */
+        EITHER;
 
-        /** Does this mode want rotation at the block? */
+        /**
+         * Does this mode want rotation at the block?
+         *
+         * Asked of an EITHER that should have been resolved first, this says
+         * yes, and so does needsFuel. An unresolved EITHER therefore charges
+         * an aircraft for both halves rather than neither, which is the
+         * failure worth having: one is a player telling you their engine was
+         * refused, the other is a survival setting that quietly does nothing.
+         */
         public boolean needsRotation() {
-            return this == ROTATION || this == BOTH;
+            return this != NONE && this != FUEL;
         }
 
-        /** Does this mode want fuel aboard to burn? */
+        /** Does this mode want fuel aboard to burn? See needsRotation on EITHER. */
         public boolean needsFuel() {
-            return this == FUEL || this == BOTH;
+            return this != NONE && this != ROTATION;
+        }
+
+        /** Whether the aircraft, rather than the server, picks what it pays in. */
+        public boolean isChoice() {
+            return this == EITHER;
+        }
+
+        /**
+         * What an aircraft that picked one half or the other is actually held
+         * to. Only EITHER has anything to resolve: every other mode is already
+         * an answer, and a server that demands a powertrain is not something a
+         * player gets to talk their way out of from a screen.
+         */
+        public PowerRequirement resolved(boolean prefersFuel) {
+            if (this != EITHER) return this;
+            return prefersFuel ? FUEL : ROTATION;
         }
     }
 
@@ -195,26 +225,35 @@ public final class SkyportConfig {
                      "powertrain is refused before the holds are opened, so an engine that",
                      "is not turning never lights a fresh item.",
                      "",
+                     "EITHER: rotation OR fuel, whichever the aircraft would rather pay,",
+                     "chosen per aircraft on its own Autopilot screen. Right for a server",
+                     "that wants flight to cost something without dictating how every",
+                     "machine is built - a windmill-driven glider and a coal burner are",
+                     "both paying, in the currency that suits them.",
+                     "",
                      "In any mode that asks for something, losing power in flight is an",
                      "engine failure, not a pause: the autopilot keeps the wings level",
                      "but stops driving the craft forward, and it comes down.")
             .defineEnum("survival.powerRequirement", PowerRequirement.NONE);
 
     public static final ModConfigSpec.IntValue ROTATION_MINIMUM_RPM = SERVER
-            .comment("ROTATION mode: rotation speed needed at the Autopilot block, in RPM.",
+            .comment("Wherever rotation is wanted: the speed needed at the Autopilot",
+                     "block, in RPM.",
                      "Sign is ignored - either direction will do. 16 is one water wheel's",
                      "worth; raise it to demand a real powertrain rather than a hand crank.")
             .defineInRange("survival.rotationMinimumRpm", 16, 1, 256);
 
     public static final ModConfigSpec.DoubleValue FUEL_EFFICIENCY = SERVER
-            .comment("FUEL mode: how far one item's burn time goes, as a multiplier.",
+            .comment("Wherever fuel is burned: how far one item's burn time goes, as",
+                     "a multiplier.",
                      "1.0 means an item burns for exactly as long as it would in a furnace",
                      "- coal for 80 seconds of flight. Raise it for longer range on less",
                      "fuel; lower it to make range a real constraint on route planning.")
             .defineInRange("survival.fuelEfficiency", 1.0, 0.05, 20.0);
 
     public static final ModConfigSpec.DoubleValue FUEL_SPEED_EXPONENT = SERVER
-            .comment("FUEL mode: how sharply fuel burn rises with cruise speed.",
+            .comment("Wherever fuel is burned: how sharply burn rate rises with cruise",
+                     "speed.",
                      "",
                      "Burn rate is (cruise speed / reference speed) raised to this power.",
                      "The exponent is what creates the trade-off, and it has to be above 1",
@@ -231,8 +270,8 @@ public final class SkyportConfig {
             .defineInRange("survival.fuelSpeedExponent", 2.0, 0.0, 4.0);
 
     public static final ModConfigSpec.IntValue FUEL_REFERENCE_SPEED = SERVER
-            .comment("FUEL mode: the cruise speed that burns fuel at exactly the rate",
-                     "fuelEfficiency describes - one coal for 80 seconds at 1.0.",
+            .comment("Wherever fuel is burned: the cruise speed that burns at exactly",
+                     "the rate fuelEfficiency describes - one coal for 80 seconds at 1.0.",
                      "Below this an aircraft is cheaper than that, above it dearer.",
                      "Defaults to 24, the default cruise speed, so an aircraft nobody has",
                      "retuned burns exactly what it always did.")

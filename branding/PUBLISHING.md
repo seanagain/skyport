@@ -152,7 +152,7 @@ hold lines you have not placed yet, jams rather than crashes.
 
 ### Make it cost something
 
-Flight is free by default, which is right for building. Three options are not:
+Flight is free by default, which is right for building. Four options are not:
 
 - **Rotation** — Create rotational force must reach the Autopilot. Run a shaft
   to it from the powertrain your aircraft already carries.
@@ -161,8 +161,11 @@ Flight is free by default, which is right for building. Three options are not:
   against range. Run dry mid-flight and it is an engine failure, not a pause:
   wings level, and down you go.
 - **Both** — a turning powertrain and something burnable aboard. An engine that
-  has to be run and fed, and the closest of the four to an aircraft costing
-  what an aircraft should.
+  has to be run and fed, and the closest of these to an aircraft costing what
+  an aircraft should.
+- **Either** — rotation or fuel, whichever each aircraft would rather pay,
+  picked on its own Autopilot screen. Flight costs something on every machine
+  without the server telling anybody how to build one.
 
 ### On a shared server
 
@@ -259,15 +262,22 @@ that is largely how the order gets decided.
 
 ### Changelog for 1.0.2
 
-> **A survival mode that wants both.** `survival.powerRequirement` takes a
-> fourth setting, `BOTH`: the powertrain has to be turning and there has to be
-> something burnable aboard. An engine that needs running and feeding, which
-> is the closest of the four to an aircraft costing what an aircraft should.
+> **Two more ways to make flight cost something.** `survival.powerRequirement`
+> had rotation and fuel as an either-or. It now also takes `BOTH` - the
+> powertrain has to be turning AND there has to be something burnable aboard,
+> an engine that needs running and feeding - and `EITHER`, where the server
+> takes one or the other and each aircraft picks which on its own Autopilot
+> screen, from a new Power button.
 >
-> A stopped powertrain is refused before the holds are ever opened, so an
-> engine that is not turning never lights a fresh item out of the bunker, and
-> when the autopilot refuses it names the half that is missing rather than
-> reciting both.
+> `EITHER` is the one for a server that wants flight to cost something without
+> dictating how every machine is built: a windmill-driven glider and a coal
+> burner are both paying, in the currency that suits them, and switching an
+> aircraft from one to the other is a button rather than a rebuild.
+>
+> Wherever a powertrain is wanted, a stopped one is refused before the holds
+> are ever opened, so an engine that is not turning never lights a fresh item
+> out of the bunker - and when the autopilot refuses, it names the half that is
+> missing rather than reciting both.
 >
 > **Fixed: an Autopilot beside a chatty block could hang the server.** Some
 > blocks tell their neighbours something changed every single tick. The

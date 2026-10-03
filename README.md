@@ -155,10 +155,14 @@ config (see [Config](#config) for where it lives):
   has to be something burnable aboard. A stopped powertrain is refused before
   the holds are ever opened, so an engine that is not turning never lights a
   fresh item out of the bunker.
+- **`EITHER`** — rotation *or* fuel, whichever each aircraft would rather pay.
+  The Autopilot screen grows a **Power** button, and that aircraft is held to
+  the half it picked and nothing else. Flight still costs something on every
+  machine; the server just does not dictate which something.
 
-Wherever fuel is burned — `FUEL` and `BOTH` — **cruise speed costs fuel**, and
-faster costs more per block travelled, not merely more per second. On one coal
-at default settings:
+Wherever fuel is burned — `FUEL`, `BOTH`, and an `EITHER` craft set to fuel —
+**cruise speed costs fuel**, and faster costs more per block travelled, not
+merely more per second. On one coal at default settings:
 
 | Cruise speed | Endurance | Range |
 | --- | --- | --- |

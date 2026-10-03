@@ -1,5 +1,6 @@
 package com.skyport.network;
 
+import com.skyport.SkyportConfig;
 import com.skyport.data.AirportSummary;
 import com.skyport.data.FlightSchedule;
 import com.skyport.data.VorBeacon;
@@ -22,9 +23,14 @@ import java.util.List;
  * The schedule round-trips deliberately: without it the screen built a
  * fresh empty one every time it opened, so reopening an autopilot silently
  * discarded the route you had already set.
+ *
+ * The server power mode comes along for the same reason the airports do: the
+ * screen offers a rotation-or-fuel choice only where the server allows either,
+ * and a client has no way to read a server config it was never sent.
  */
 public record OpenAutopilotPayload(BlockPos autopilotPos, List<AirportSummary> airports,
-                                   List<VorBeacon> vors, FlightSchedule schedule) implements CustomPacketPayload {
+                                   List<VorBeacon> vors, FlightSchedule schedule,
+                                   SkyportConfig.PowerRequirement serverPower) implements CustomPacketPayload {
 
     public static final Type<OpenAutopilotPayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath("skyport", "open_autopilot"));
@@ -37,6 +43,7 @@ public record OpenAutopilotPayload(BlockPos autopilotPos, List<AirportSummary> a
                 buf.writeVarInt(payload.vors().size());
                 for (VorBeacon vor : payload.vors()) vor.write(buf);
                 payload.schedule().write(buf);
+                buf.writeEnum(payload.serverPower());
             },
             buf -> {
                 BlockPos pos = buf.readBlockPos();
@@ -46,7 +53,9 @@ public record OpenAutopilotPayload(BlockPos autopilotPos, List<AirportSummary> a
                 int vorCount = buf.readVarInt();
                 List<VorBeacon> vors = new ArrayList<>(vorCount);
                 for (int i = 0; i < vorCount; i++) vors.add(VorBeacon.read(buf));
-                return new OpenAutopilotPayload(pos, airports, vors, FlightSchedule.read(buf));
+                FlightSchedule schedule = FlightSchedule.read(buf);
+                return new OpenAutopilotPayload(pos, airports, vors, schedule,
+                        buf.readEnum(SkyportConfig.PowerRequirement.class));
             });
 
     @Override

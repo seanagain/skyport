@@ -28,6 +28,12 @@ public class FlightSchedule {
     /** Player-given name for this aircraft. Blank means fall back to the
      *  generated callsign - see AutopilotBlockEntity#callsign. */
     private String craftName = "";
+    /** Which half this aircraft pays in where the server takes either one
+     *  (SkyportConfig.PowerRequirement.EITHER). Rotation by default, because
+     *  an aircraft built on Create is far likelier to have a powertrain aboard
+     *  than a chest of coal. Means nothing in the other power modes - there
+     *  the server has already decided. */
+    private boolean prefersFuel;
 
     public List<ScheduleEntry> entries() {
         return entries;
@@ -71,6 +77,14 @@ public class FlightSchedule {
 
     public void setCraftName(String craftName) {
         this.craftName = craftName;
+    }
+
+    public boolean prefersFuel() {
+        return prefersFuel;
+    }
+
+    public void setPrefersFuel(boolean prefersFuel) {
+        this.prefersFuel = prefersFuel;
     }
 
     public boolean isEmpty() {
@@ -170,6 +184,7 @@ public class FlightSchedule {
         tag.putInt("cruiseSpeed", cruiseSpeed);
         tag.putString("craftType", craftType.name());
         tag.putString("craftName", craftName);
+        tag.putBoolean("prefersFuel", prefersFuel);
         return tag;
     }
 
@@ -184,6 +199,7 @@ public class FlightSchedule {
         if (tag.contains("cruiseSpeed")) schedule.cruiseSpeed = tag.getInt("cruiseSpeed");
         if (tag.contains("craftType")) schedule.craftType = CraftType.valueOf(tag.getString("craftType"));
         if (tag.contains("craftName")) schedule.craftName = tag.getString("craftName");
+        schedule.prefersFuel = tag.getBoolean("prefersFuel");
         return schedule;
     }
 
@@ -195,6 +211,7 @@ public class FlightSchedule {
         buf.writeVarInt(cruiseSpeed);
         buf.writeEnum(craftType);
         buf.writeUtf(craftName);
+        buf.writeBoolean(prefersFuel);
     }
 
     public static FlightSchedule read(FriendlyByteBuf buf) {
@@ -206,6 +223,7 @@ public class FlightSchedule {
         schedule.cruiseSpeed = buf.readVarInt();
         schedule.craftType = buf.readEnum(CraftType.class);
         schedule.craftName = buf.readUtf();
+        schedule.prefersFuel = buf.readBoolean();
         return schedule;
     }
 }

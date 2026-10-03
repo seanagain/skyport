@@ -506,7 +506,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         List<VorBeacon> vors = AirportRegistry.get(serverLevel).allVors().stream()
                 .sorted(java.util.Comparator.comparing(VorBeacon::name, String.CASE_INSENSITIVE_ORDER))
                 .toList();
-        PacketDistributor.sendToPlayer(player, new OpenAutopilotPayload(getBlockPos(), airports, vors, schedule));
+        PacketDistributor.sendToPlayer(player, new OpenAutopilotPayload(
+                getBlockPos(), airports, vors, schedule, SkyportConfig.powerRequirement));
     }
 
     /**
@@ -3589,8 +3590,22 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * sweeps containers, and the difference between running out of coal now
      * and running out a second from now is not worth a per-tick scan.
      */
+    /**
+     * The power mode this particular aircraft is held to.
+     *
+     * Every other mode is the same for the whole server, but EITHER is a
+     * server saying "pay in one or the other" and leaving the choice to the
+     * machine, so the configured value has to be resolved against this
+     * craft's own setting before anything asks it what it needs. Going
+     * through here rather than reading the config directly is what keeps a
+     * craft that chose rotation from also being asked for coal.
+     */
+    private SkyportConfig.PowerRequirement powerMode() {
+        return SkyportConfig.powerRequirement.resolved(schedule.prefersFuel());
+    }
+
     private boolean hasPower(long now) {
-        SkyportConfig.PowerRequirement requirement = SkyportConfig.powerRequirement;
+        SkyportConfig.PowerRequirement requirement = powerMode();
         if (requirement == SkyportConfig.PowerRequirement.NONE) return true;
         if (level == null) return true;
 
@@ -3663,7 +3678,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * first because that is the order hasPower refuses them in.
      */
     private String powerMissingReason() {
-        SkyportConfig.PowerRequirement requirement = SkyportConfig.powerRequirement;
+        SkyportConfig.PowerRequirement requirement = powerMode();
         if (requirement.needsRotation()
                 && (level == null || !PowerSource.hasRotation(level, getBlockPos()))) {
             return "No rotational force at the autopilot - it needs at least "
@@ -4540,7 +4555,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * that answer moves when the throttle does.
      */
     private String fuelReadout() {
-        if (!SkyportConfig.powerRequirement.needsFuel()) return "";
+        if (!powerMode().needsFuel()) return "";
         if (fuelReserve <= 0) return "  DRY";
         return String.format("  fuel %.0fs", fuelReserve / fuelBurnRate() / 20.0);
     }
