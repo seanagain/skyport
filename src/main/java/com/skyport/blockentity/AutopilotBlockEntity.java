@@ -523,6 +523,50 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return BlockPos.containing(activeSubLevel.logicalPose().transformPosition(getBlockPos().getCenter()));
     }
 
+    /**
+     * The craft this block is mounted on, asked of the world rather than
+     * remembered from a callback.
+     *
+     * activeSubLevel is only ever assigned by sable$tick and
+     * sable$physicsTick, and both of those return immediately while the
+     * autopilot is IDLE. So on a parked aircraft - which is every aircraft at
+     * the moment somebody tries to start it - the cached value is null, and
+     * it is transient, so it is null again after every reload.
+     *
+     * That was survivable while the only way to engage was a player standing
+     * on the plane, because their position stood in for the craft's. It is
+     * not survivable for redstone or for a computer: both fell back to
+     * getBlockPos(), which on a mounted block is a coordinate in Sable's plot
+     * grid, twenty million blocks from the runway. The refusal that produced
+     * - "not parked on a taxiway or at a gate" - was true of the position it
+     * was given and useless to the player reading it.
+     *
+     * The container knows which plot a chunk belongs to whether or not
+     * anything has ticked, so ask it.
+     */
+    @org.jetbrains.annotations.Nullable
+    private dev.ryanhcode.sable.sublevel.SubLevel mountedSubLevel(ServerLevel serverLevel) {
+        if (activeSubLevel != null && !activeSubLevel.isRemoved()) return activeSubLevel;
+        SubLevelContainer container = SubLevelContainer.getContainer(serverLevel);
+        if (container == null) return null;
+        dev.ryanhcode.sable.sublevel.plot.LevelPlot plot =
+                container.getPlot(new ChunkPos(getBlockPos()));
+        if (plot == null) return null;
+        dev.ryanhcode.sable.sublevel.SubLevel subLevel = plot.getSubLevel();
+        return subLevel == null || subLevel.isRemoved() ? null : subLevel;
+    }
+
+    /**
+     * Where the craft actually is, resolving it from the world if nothing has
+     * ticked yet. The fallback is for a block genuinely sitting loose, where
+     * its own coordinates are the honest answer.
+     */
+    private BlockPos craftPositionOr(ServerLevel serverLevel, BlockPos fallback) {
+        dev.ryanhcode.sable.sublevel.SubLevel subLevel = mountedSubLevel(serverLevel);
+        if (subLevel == null) return fallback;
+        return BlockPos.containing(subLevel.logicalPose().transformPosition(getBlockPos().getCenter()));
+    }
+
     @org.jetbrains.annotations.Nullable
     private ScheduleEntry currentEntry() {
         if (scheduleIndex < 0 || scheduleIndex >= schedule.entries().size()) return null;
@@ -711,7 +755,9 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * million blocks from the airport they were sitting at.
      */
     public net.minecraft.core.BlockPos craftPosition() {
-        return craftPositionOr(getBlockPos());
+        return level instanceof ServerLevel serverLevel
+                ? craftPositionOr(serverLevel, getBlockPos())
+                : craftPositionOr(getBlockPos());
     }
 
     /**
@@ -742,6 +788,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      *  it is not on one - a loose block, or a craft nothing has loaded. */
     @org.jetbrains.annotations.Nullable
     public UUID subLevelId() {
+        if (level instanceof ServerLevel serverLevel) {
+            dev.ryanhcode.sable.sublevel.SubLevel subLevel = mountedSubLevel(serverLevel);
+            return subLevel == null ? null : subLevel.getUniqueId();
+        }
         return activeSubLevel == null || activeSubLevel.isRemoved() ? null : activeSubLevel.getUniqueId();
     }
 
@@ -801,7 +851,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (state != FlightState.IDLE || !schedule.hasAirportStop()) return;
         this.scheduleIndex = 0;
         this.controllingPlayerId = null;
-        engageCurrentLeg(serverLevel, craftPositionOr(getBlockPos()), null);
+        engageCurrentLeg(serverLevel, craftPositionOr(serverLevel, getBlockPos()), null);
     }
 
     /** Which redstone updates are worth acting on - see RedstoneGate. Not
@@ -894,7 +944,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // Prefer the craft's own position when it's assembled - that's the
         // real answer. The player's position is the fallback for a block
         // sitting loose in the world, where there's no craft to ask.
-        engageCurrentLeg(player.serverLevel(), craftPositionOr(player.blockPosition()), player);
+        engageCurrentLeg(player.serverLevel(),
+                craftPositionOr(player.serverLevel(), player.blockPosition()), player);
     }
 
     /**
@@ -1217,9 +1268,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * a reload can come first.
      */
     private boolean isMounted(ServerLevel serverLevel) {
-        if (activeSubLevel != null && !activeSubLevel.isRemoved()) return true;
-        SubLevelContainer container = SubLevelContainer.getContainer(serverLevel);
-        return container != null && container.getPlot(new ChunkPos(getBlockPos())) != null;
+        return mountedSubLevel(serverLevel) != null;
     }
 
     /** Runs every server tick this block entity is loaded and ticking. */
