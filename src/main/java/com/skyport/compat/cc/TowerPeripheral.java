@@ -64,11 +64,7 @@ public class TowerPeripheral implements IPeripheral {
     /** Every airport that has been drawn and saved, by name. */
     @LuaFunction(mainThread = true)
     public final Map<Integer, Map<String, Object>> getAirports() throws LuaException {
-        List<Map<String, Object>> out = new ArrayList<>();
-        AirportRegistry.get(level()).all().stream()
-                .sorted(Comparator.comparing(AirportLayout::displayName, String.CASE_INSENSITIVE_ORDER))
-                .forEach(airport -> out.add(CCPeripherals.describeAirport(airport)));
-        return LuaSchedule.luaList(out);
+        return LuaSchedule.luaList(CCPeripherals.sortedAirports(level()));
     }
 
     /** One airport by name, or nil. */
@@ -85,11 +81,7 @@ public class TowerPeripheral implements IPeripheral {
 
     @LuaFunction(mainThread = true)
     public final Map<Integer, Map<String, Object>> getVors() throws LuaException {
-        List<Map<String, Object>> out = new ArrayList<>();
-        AirportRegistry.get(level()).allVors().stream()
-                .sorted(Comparator.comparing(VorBeacon::name, String.CASE_INSENSITIVE_ORDER))
-                .forEach(vor -> out.add(CCPeripherals.describeVor(vor)));
-        return LuaSchedule.luaList(out);
+        return LuaSchedule.luaList(CCPeripherals.sortedVors(level()));
     }
 
     /**

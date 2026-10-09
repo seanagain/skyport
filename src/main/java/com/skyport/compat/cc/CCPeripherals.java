@@ -188,6 +188,33 @@ final class CCPeripherals {
         return out;
     }
 
+    /**
+     * Every airport there is, by name.
+     *
+     * Shared between the tower and the autopilot deliberately. The Autopilot
+     * screen has always shown a player the whole destination list, however
+     * far from the tower they were standing, and a peripheral that could read
+     * its own schedule but not find out what else exists would be a strictly
+     * worse version of the screen it sits beside - which is exactly the gap
+     * the first test script fell into.
+     */
+    static List<Map<String, Object>> sortedAirports(ServerLevel level) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        AirportRegistry.get(level).all().stream()
+                .sorted(java.util.Comparator.comparing(AirportLayout::displayName,
+                        String.CASE_INSENSITIVE_ORDER))
+                .forEach(airport -> out.add(describeAirport(airport)));
+        return out;
+    }
+
+    static List<Map<String, Object>> sortedVors(ServerLevel level) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        AirportRegistry.get(level).allVors().stream()
+                .sorted(java.util.Comparator.comparing(VorBeacon::name, String.CASE_INSENSITIVE_ORDER))
+                .forEach(vor -> out.add(describeVor(vor)));
+        return out;
+    }
+
     static List<Map<String, Object>> sortedTraffic(AirportRegistry registry, long now) {
         List<Map<String, Object>> out = new ArrayList<>();
         registry.allTraffic(now).stream()

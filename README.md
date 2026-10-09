@@ -221,17 +221,33 @@ aeroplane can fly its own route. ([CC: Sable](https://modrinth.com/mod/cc-sable)
 is worth adding alongside if you write onboard programs — it gives them their
 craft's pose and velocity. Skyport does not need it.)
 
+**Read before you write.** Airport and gate names are whatever you called them
+when you drew them, so a script that hard-codes them is a script that breaks
+the first time somebody renames one. Every peripheral can list what actually
+exists, and `examples/skyport-info.lua` in this repository prints the lot —
+run that first and use the spellings it gives you.
+
 ```lua
 local ap = peripheral.find("skyport_autopilot")
 
 print(ap.getCallsign(), ap.getState())      --> Cargo 1   cruise
 print(ap.getFuel().seconds)                 --> 61.4
 
+for _, a in ipairs(ap.getAirports()) do     -- what can this aircraft be sent to?
+  print(a.name)
+  for gate in pairs(a.gates) do print("  " .. gate) end
+end
+```
+
+Then build a route out of names you just read, rather than ones you assumed:
+
+```lua
+local first = ap.getAirports()[1]
+local gate  = next(first.gates)             -- any gate that really is there
+
 ap.setCruiseSpeed(40)
 ap.setSchedule{ stops = {
-  { airport = "Heathrow", gate = "Gate A", wait = "cargo_loaded" },
-  { vor = "ALPHA" },
-  { airport = "Gatwick",  wait = "timer", waitSeconds = 30 },
+  { airport = first.name, gate = gate, wait = "cargo_loaded" },
 } }
 ap.engage()
 ```
@@ -239,10 +255,11 @@ ap.engage()
 `setSchedule` is a **partial** update: a table naming only `cruiseSpeed`
 changes the speed and leaves the route alone. Everything it accepts is checked
 before anything is applied, and a refusal says what was wrong — ask for a gate
-that does not exist and it names the ones that do. Also available:
-`addStop`, `removeStop`, `moveStop`, `setName`, `setCruiseAltitude`, `setLoop`,
-`setPowerSource`, `disengage`, `getSchedule`, `getCurrentStop`, `getPosition`,
-`getAircraftId`, `getSubLevelId`, `getUnattendedSeconds`.
+that does not exist and it names the ones that do, and nothing is changed.
+Also available: `getAirports`, `getVors`, `addStop`, `removeStop`, `moveStop`,
+`setName`, `setCruiseAltitude`, `setLoop`, `setPowerSource`, `disengage`,
+`getSchedule`, `getCurrentStop`, `getPosition`, `getAircraftId`,
+`getSubLevelId`, `getUnattendedSeconds`.
 
 Put a computer against the **ATC block** and you have the whole network,
 including aircraft that are in the air right now — a control room without a

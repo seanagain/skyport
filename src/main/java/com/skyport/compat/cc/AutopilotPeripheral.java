@@ -135,6 +135,27 @@ public class AutopilotPeripheral implements IPeripheral {
         return LuaSchedule.describe(autopilot.schedule(), CCPeripherals.lookup(level()));
     }
 
+    /**
+     * Everywhere this aircraft could be sent, with each airport's gates and
+     * helipads - the same list the Autopilot screen offers a player, and the
+     * one a script has to read before it can name a destination.
+     *
+     * Here rather than only on the tower because a computer bolted to an
+     * aeroplane is nowhere near a tower, and because a script that has to be
+     * told the airport names in advance is a script that breaks the moment
+     * somebody renames one.
+     */
+    @LuaFunction(mainThread = true)
+    public final Map<Integer, Map<String, Object>> getAirports() throws LuaException {
+        return LuaSchedule.luaList(CCPeripherals.sortedAirports(level()));
+    }
+
+    /** Every VOR beacon, which is what a stop can name besides an airport. */
+    @LuaFunction(mainThread = true)
+    public final Map<Integer, Map<String, Object>> getVors() throws LuaException {
+        return LuaSchedule.luaList(CCPeripherals.sortedVors(level()));
+    }
+
     /** Which stop it is working on, 1-based to match the list getSchedule
      *  hands back and the numbers on the Autopilot screen. */
     @LuaFunction(mainThread = true)
