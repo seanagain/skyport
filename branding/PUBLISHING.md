@@ -167,6 +167,16 @@ Flight is free by default, which is right for building. Four options are not:
   picked on its own Autopilot screen. Flight costs something on every machine
   without the server telling anybody how to build one.
 
+### Programmable, if you want it
+
+Install CC: Tweaked and every block here becomes a ComputerCraft peripheral.
+An Autopilot is one aircraft - its schedule readable and rewritable, on the
+ground or aboard the craft. The ATC block is the whole network, down to
+re-routing something already in the air. An Airport Station is one airport's
+gates and arrivals, for a departures board that updates itself.
+
+Nothing is required. Without CC the mod is exactly what it was.
+
 ### On a shared server
 
 Airport Stations and Autopilots belong to whoever placed them. Nobody else can
@@ -259,6 +269,28 @@ that is largely how the order gets decided.
 | Game version | 1.21.1 |
 | Loader | NeoForge |
 | Java | 21 |
+
+### Changelog for 1.1.0
+
+> **Your airports are now programmable.** Install CC: Tweaked and Skyport's
+> blocks turn into ComputerCraft peripherals. A computer against an Autopilot
+> is that aircraft - read its callsign, state, position, fuel and schedule,
+> rewrite the route, engage it. It works aboard the craft, so a computer
+> bolted to the aeroplane can fly its own flight plan.
+>
+> A computer against the ATC block is the whole network, including aircraft
+> that are in the air right now: list the traffic, list the roster down to the
+> ones asleep at a gate, and re-route any of them by callsign. A control room
+> without a computer on every aeroplane. An Airport Station gives you one
+> airport's gates and inbound traffic, which is all a departures board needs.
+>
+> Schedules handed over by a script are checked before anything is applied,
+> and a refusal explains itself - ask for a gate that does not exist and it
+> names the ones that do. Partial updates do what you would hope: setting the
+> cruise speed does not quietly delete the route.
+>
+> CC: Tweaked is entirely optional. Without it, nothing about the mod changes
+> and nobody is asked to install anything.
 
 ### Changelog for 1.0.2
 

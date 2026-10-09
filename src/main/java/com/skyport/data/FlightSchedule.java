@@ -16,6 +16,19 @@ import java.util.List;
  */
 public class FlightSchedule {
 
+    /** Cruise altitude bounds. The floor is sea level rather than the world
+     *  floor because an aircraft told to cruise underground just digs in. */
+    public static final int MIN_CRUISE_ALTITUDE = 0;
+    public static final int MAX_CRUISE_ALTITUDE = 400;
+    /** Cruise speed bounds, in blocks per second. Below the floor an
+     *  aircraft barely holds a heading; above the ceiling it outruns the
+     *  terrain scan that keeps it from flying into a hill. */
+    public static final int MIN_CRUISE_SPEED = 4;
+    public static final int MAX_CRUISE_SPEED = 80;
+    /** A gate wait is a duration, so it has a floor and no ceiling worth
+     *  naming - an aircraft parked for a week is a parked aircraft. */
+    public static final int MIN_WAIT_SECONDS = 0;
+
     private final List<ScheduleEntry> entries = new ArrayList<>();
     private boolean loop = true;
     /** Y level the plane levels out at between airports. */

@@ -23,6 +23,11 @@ repositories {
     // to be pulled in separately for the dev-run runtime classpath.
     maven { url = 'https://maven.ithundxr.dev/snapshots' }
 
+    // CC: Tweaked's own maven, for the peripheral API. Note the host: the
+    // repository moved to maven.squiddev.cc, and the older squiddev.cc/maven
+    // path 404s on every artifact.
+    maven { url = 'https://maven.squiddev.cc' }
+
     // Modrinth's maven proxy - lets us pull a specific released build of
     // Create Aeronautics (and its Sable dependency) as a compile-time jar,
     // since neither publishes its own dev maven. Scoped to the
@@ -145,6 +150,20 @@ dependencies {
     runtimeOnly "com.tterrag.registrate:Registrate:MC1.21-1.3.0+67"
     runtimeOnly "maven.modrinth:create-aeronautics:${create_aeronautics_version}"
     runtimeOnly "maven.modrinth:sable:${sable_version}"
+
+    // --- ComputerCraft: Tweaked (optional) -----------------------------
+    // Split in two on CC's side: "core-api" is the Lua half (LuaFunction,
+    // IPeripheral, the type conversions) and "forge-api" is the Minecraft
+    // half (PeripheralCapability, the block capability peripherals attach
+    // through). Both are needed to compile a peripheral, and neither is
+    // shipped - unlike Create, CC is genuinely optional here, so the compat
+    // code has to be unreachable rather than merely unused when it is
+    // absent. See CCCompat and the "optional" entry in neoforge.mods.toml.
+    compileOnly "cc.tweaked:cc-tweaked-${minecraft_version}-core-api:${cc_tweaked_version}"
+    compileOnly "cc.tweaked:cc-tweaked-${minecraft_version}-forge-api:${cc_tweaked_version}"
+    // The whole mod, dev runs only, so runClient/runServer can actually
+    // place a computer next to an autopilot and talk to it.
+    runtimeOnly "cc.tweaked:cc-tweaked-${minecraft_version}-forge:${cc_tweaked_version}"
 
     // --- dev convenience -----------------------------------------------
     // WorldEdit in the dev client only, for carving out realistic airports

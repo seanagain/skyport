@@ -692,6 +692,28 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return schedule;
     }
 
+    /** What this aircraft is doing right now. */
+    public FlightState flightState() {
+        return state;
+    }
+
+    /** Flying, taxiing or waiting at a gate - anything but sitting idle. */
+    public boolean isEngaged() {
+        return state != FlightState.IDLE;
+    }
+
+    /**
+     * Where the aircraft actually is in the world.
+     *
+     * Mounted on a craft this is the craft's position, not the block's:
+     * getBlockPos() on a mounted block is a plot-local coordinate, and
+     * handing that out is what once had aircraft reporting themselves a
+     * million blocks from the airport they were sitting at.
+     */
+    public net.minecraft.core.BlockPos craftPosition() {
+        return craftPositionOr(getBlockPos());
+    }
+
     /**
      * Every loaded autopilot, by the id its aircraft is known by.
      *
@@ -815,6 +837,41 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         redstone.engageAttempted(now);
         engageFromRedstone(serverLevel);
     }
+
+    /**
+     * Start the saved schedule on behalf of a computer, and say why not.
+     *
+     * Distinct from the redstone path in two ways that both come from Lua
+     * being a caller that can be told things. It reports its refusal as a
+     * string rather than silently returning - a script that asked for a
+     * flight deserves to know it is out of fuel - and it goes through the
+     * SAME cooldown gate as redstone, because the expensive part is the
+     * route scan and a lever plus a loop would otherwise get two budgets
+     * between them.
+     *
+     * @return null when the flight started, otherwise why it did not
+     */
+    public String engageFromComputer(ServerLevel serverLevel) {
+        if (state != FlightState.IDLE) return "Already flying - disengage first.";
+        if (schedule.isEmpty()) return "No schedule set.";
+        if (!schedule.hasAirportStop()) {
+            return "Schedule has no airport to land at - VORs are flown over, not stopped at.";
+        }
+        long now = serverLevel.getGameTime();
+        if (!redstone.mayEngage(now)) {
+            long wait = com.skyport.logic.RedstoneGate.ENGAGE_RETRY_TICKS - (now - lastComputerEngage);
+            return "Engage was attempted too recently - try again in "
+                    + Math.max(1, (wait + 19) / 20) + "s.";
+        }
+        redstone.engageAttempted(now);
+        lastComputerEngage = now;
+        engageFromRedstone(serverLevel);
+        return state == FlightState.IDLE ? "Could not start the flight - check fuel, power and position." : null;
+    }
+
+    /** Only for wording the cooldown refusal above; the gate itself keeps
+     *  the authoritative timestamp. */
+    private long lastComputerEngage;
 
     public void engage(FlightSchedule newSchedule, ServerPlayer player) {
         if (newSchedule.isEmpty()) {
@@ -3808,7 +3865,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * aircraft is flying - "[Skyport] Holding short" is ambiguous the moment
      * there are two of them.
      */
-    private String callsign() {
+    public String callsign() {
         // A name the player typed beats a generated one: "Cargo 1" is what
         // they'll look for on the tower's traffic strip, not SKY-4F2A.
         String named = schedule.craftName();

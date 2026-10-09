@@ -18,6 +18,7 @@ is an animation or a scripted path.
 | Create | 6.0.0+ |
 | Create Aeronautics | 1.3.0+ |
 | Sable | any |
+| CC: Tweaked | optional - 1.117.0+ for the ComputerCraft peripherals |
 
 ## The blocks
 
@@ -207,6 +208,78 @@ Holding chunks is what all this costs — the same as `performance.chunkRadius`,
 see Chunk loading above, for as long as an aircraft is flying or has time
 left. `/skyport info` prints what an aircraft has left and how many chunks it
 is holding, which is the quickest way to find out why one has stopped.
+
+## ComputerCraft
+
+Install [CC: Tweaked](https://modrinth.com/mod/cc-tweaked) and Skyport's blocks
+become peripherals. Without it nothing changes — CC is optional, and a server
+that does not have it is not asked to.
+
+Put a computer against an **Autopilot** and you have that aircraft. This works
+aboard the craft as well as on the ground, so a computer bolted to the
+aeroplane can fly its own route. ([CC: Sable](https://modrinth.com/mod/cc-sable)
+is worth adding alongside if you write onboard programs — it gives them their
+craft's pose and velocity. Skyport does not need it.)
+
+```lua
+local ap = peripheral.find("skyport_autopilot")
+
+print(ap.getCallsign(), ap.getState())      --> Cargo 1   cruise
+print(ap.getFuel().seconds)                 --> 61.4
+
+ap.setCruiseSpeed(40)
+ap.setSchedule{ stops = {
+  { airport = "Heathrow", gate = "Gate A", wait = "cargo_loaded" },
+  { vor = "ALPHA" },
+  { airport = "Gatwick",  wait = "timer", waitSeconds = 30 },
+} }
+ap.engage()
+```
+
+`setSchedule` is a **partial** update: a table naming only `cruiseSpeed`
+changes the speed and leaves the route alone. Everything it accepts is checked
+before anything is applied, and a refusal says what was wrong — ask for a gate
+that does not exist and it names the ones that do. Also available:
+`addStop`, `removeStop`, `moveStop`, `setName`, `setCruiseAltitude`, `setLoop`,
+`setPowerSource`, `disengage`, `getSchedule`, `getCurrentStop`, `getPosition`,
+`getAircraftId`, `getSubLevelId`, `getUnattendedSeconds`.
+
+Put a computer against the **ATC block** and you have the whole network,
+including aircraft that are in the air right now — a control room without a
+computer on every aeroplane. Aircraft are addressed by callsign or by id:
+
+```lua
+local tower = peripheral.find("skyport_tower")
+
+for _, ac in ipairs(tower.getTraffic()) do
+  print(ac.callsign, ac.state, ac.destination)
+end
+
+for _, ac in ipairs(tower.getRoster()) do          -- includes sleeping craft
+  if not ac.awake then print(ac.callsign .. " is parked at " .. ac.destination) end
+end
+
+tower.setSchedule("Cargo 1", { cruiseAltitude = 200 })
+tower.engage("Cargo 1")
+```
+
+Also: `getAirports`, `getAirport(name)`, `getVors`, `getAircraft(which)`,
+`disengage(which)`.
+
+An **Airport Station** gives you that one airport — `getAirport`, `getName`,
+`getGates`, `getHelipads`, `getTraffic` — which is what a departures board on
+a terminal wall wants, and it keeps working when somebody builds a second
+airport across the valley. Layouts are read-only: gates and runways are placed
+by eye against terrain, and a script setting one to a coordinate it worked out
+arithmetically would make an airport that looks right in a table and taxis
+aircraft into a wall.
+
+Two things worth knowing before you write a loop. `engage` is rate-limited to
+one attempt every five seconds, sharing that budget with the redstone input,
+because engaging rescans the whole route for terrain — this is the same limit
+that stopped a chatty neighbour block from hanging a server. And every call
+runs on the server thread, so a tight polling loop costs real server time;
+read what you need and sleep.
 
 ## Locks
 
