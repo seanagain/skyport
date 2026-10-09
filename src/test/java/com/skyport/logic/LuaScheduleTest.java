@@ -380,6 +380,63 @@ class LuaScheduleTest {
         assertEquals("helicopter", LuaSchedule.luaName(CraftType.HELICOPTER));
     }
 
+    /**
+     * What describe() hands out has to be something parse() will take back.
+     *
+     * Not a tidiness property - it is what lets a script read a schedule,
+     * change one thing and put it back, and it is what lets a test program
+     * save an aircraft's route before experimenting on it and restore it
+     * afterwards. Every key describe emits therefore has to be a key parse
+     * allows, which the unknown-key check would otherwise turn into a
+     * refusal: the two lists are easy to let drift apart, and this is what
+     * notices.
+     */
+    @Test
+    void whatDescribeHandsOutIsAcceptedBackByParse() throws Exception {
+        FlightSchedule original = baseline();
+        original.setCraftType(CraftType.HELICOPTER);
+        original.entries().clear();
+        original.entries().add(new ScheduleEntry(HEATHROW, "Pad 1",
+                ScheduleEntry.WaitCondition.CARGO_EMPTY, 45));
+        original.entries().add(ScheduleEntry.vor(VOR_ALPHA));
+        original.setPrefersFuel(true);
+        original.setLoop(false);
+
+        Map<String, Object> described = LuaSchedule.describe(original, WORLD);
+        FlightSchedule restored = LuaSchedule.parse(asLuaTable(described), original, WORLD);
+
+        assertEquals(original.craftName(), restored.craftName());
+        assertEquals(original.craftType(), restored.craftType());
+        assertEquals(original.loop(), restored.loop());
+        assertEquals(original.cruiseAltitude(), restored.cruiseAltitude());
+        assertEquals(original.cruiseSpeed(), restored.cruiseSpeed());
+        assertEquals(original.prefersFuel(), restored.prefersFuel());
+        assertEquals(original.entries(), restored.entries(), "the route has to come back unchanged");
+    }
+
+    /**
+     * describe() emits a Lua array as integer keys and whole numbers as
+     * Integers; a round trip through an actual computer turns those into the
+     * doubles Lua uses. Doing the same here keeps this test honest about what
+     * parse will really be handed.
+     */
+    private static Map<Object, Object> asLuaTable(Map<String, Object> described) {
+        Map<Object, Object> out = new LinkedHashMap<>();
+        described.forEach((key, value) -> out.put(key, asLuaValue(value)));
+        return out;
+    }
+
+    private static Object asLuaValue(Object value) {
+        if (value instanceof Integer number) return (double) number;
+        if (value instanceof Map<?, ?> map) {
+            Map<Object, Object> out = new LinkedHashMap<>();
+            map.forEach((key, inner) -> out.put(
+                    key instanceof Integer index ? (double) index : key, asLuaValue(inner)));
+            return out;
+        }
+        return value;
+    }
+
     /** parse builds a new schedule, so the caller can apply it or drop it -
      *  this is what makes the all-or-nothing behaviour above possible. */
     @Test
