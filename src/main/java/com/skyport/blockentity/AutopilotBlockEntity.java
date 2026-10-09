@@ -866,7 +866,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         redstone.engageAttempted(now);
         lastComputerEngage = now;
         engageFromRedstone(serverLevel);
-        return state == FlightState.IDLE ? "Could not start the flight - check fuel, power and position." : null;
+        if (state != FlightState.IDLE) return null;
+        // The real reason, recorded by whichever check refused it. The
+        // fallback should be unreachable - every refusal records one - but a
+        // sixth check added later without doing so would otherwise return
+        // null and report a flight that never started as a success.
+        return engageRefusal != null ? engageRefusal
+                : "Could not start the flight, and the autopilot did not say why.";
     }
 
     /** Only for wording the cooldown refusal above; the gate itself keeps
@@ -898,8 +904,37 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      *                  the plane's own tracked position on later legs, since
      *                  by then it has flown somewhere the player may not be.
      */
+    /**
+     * Why the last engage attempt did not start a flight.
+     *
+     * Engaging refuses in five different places and only ever said so out
+     * loud - which works for a player stood next to the plane and for nobody
+     * else. A redstone engage had no one to tell, and a computer asking for a
+     * flight got back a guess at the reason rather than the reason, which is
+     * worse than silence: it sent someone to check the fuel on an aircraft
+     * whose fuel was fine.
+     *
+     * Cleared at the start of every attempt, so it always describes the most
+     * recent one and never a stale failure from ten minutes ago.
+     */
+    @org.jetbrains.annotations.Nullable
+    private String engageRefusal;
+
+    /** Record why this engage is being refused, and say it the way this
+     *  method always did. */
+    private void refuse(String reason) {
+        engageRefusal = reason;
+        message(reason);
+    }
+
+    private void refuse(@org.jetbrains.annotations.Nullable ServerPlayer player, String reason) {
+        engageRefusal = reason;
+        message(player, reason);
+    }
+
     private void engageCurrentLeg(ServerLevel serverLevel, BlockPos reference,
                                   @org.jetbrains.annotations.Nullable ServerPlayer player) {
+        engageRefusal = null;
         // Note what this deliberately does NOT use: this block entity's own
         // getBlockPos() and getLevel().
         //
@@ -938,7 +973,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // coal every time the player pressed Engage.
         fuelContainers = null;
         if (!hasPower(serverLevel.getGameTime())) {
-            message(powerMissingReason());
+            refuse(powerMissingReason());
             setState(FlightState.IDLE);
             return;
         }
@@ -969,15 +1004,21 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             AirportRegistry registry = AirportRegistry.get(serverLevel);
             AirportLayout origin = findGroundOrigin(registry, reference);
             if (origin == null) {
-                message(player, "Can't engage here - not parked on a taxiway or at a gate.");
                 // Nothing marks these positions in the world, so a bare
                 // refusal is a dead end - name somewhere concrete to tow to.
                 NearestGround nearest = findNearestGround(registry, reference);
+                String where = String.format(" (judging from %d, %d)",
+                        reference.getX(), reference.getZ());
                 if (nearest == null) {
-                    message(player, "No airport has any runway, taxiway or gate drawn yet. Draw one at an Airport Station first.");
+                    refuse(player, "Can't engage here - not parked on a taxiway or at a gate" + where
+                            + ". No airport has any runway, taxiway or gate drawn yet."
+                            + " Draw one at an Airport Station first.");
                 } else {
-                    message(player, String.format("Nearest is %s at %d, %d (%.0f blocks away) - tow the plane there.",
-                            nearest.description(), nearest.pos().getX(), nearest.pos().getZ(), nearest.distance()));
+                    refuse(player, String.format(
+                            "Can't engage here - not parked on a taxiway or at a gate%s."
+                                    + " Nearest is %s at %d, %d (%.0f blocks away) - tow the plane there.",
+                            where, nearest.description(),
+                            nearest.pos().getX(), nearest.pos().getZ(), nearest.distance()));
                 }
                 return;
             }
@@ -3496,7 +3537,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         String where = scan.blockedNear() == null ? "on this route"
                 : "near " + scan.blockedNear().getX() + ", " + scan.blockedNear().getZ();
-        message("Cruising at Y " + cruiseAltitude() + " runs into terrain at Y "
+        refuse("Cruising at Y " + cruiseAltitude() + " runs into terrain at Y "
                 + scan.blockedAtY() + " " + where
                 + " - set cruise altitude to at least Y " + scan.clearAbove() + ".");
         return false;
@@ -3629,13 +3670,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private boolean destinationIsUsable(AirportLayout destination) {
         if (craftType().isVertical()) {
             if (!destination.helipads().isEmpty()) return true;
-            message(destination.displayName() + " has no landing pad - "
+            refuse(destination.displayName() + " has no landing pad - "
                     + "draw one on its map before sending a " + craftType().name().toLowerCase(Locale.ROOT)
                     + " there.");
             return false;
         }
         if (positionsOf(destination, Waypoint.Type.RUNWAY).size() >= 2) return true;
-        message(destination.displayName() + " has no runway drawn - "
+        refuse(destination.displayName() + " has no runway drawn - "
                 + "a plane cannot land there.");
         return false;
     }
