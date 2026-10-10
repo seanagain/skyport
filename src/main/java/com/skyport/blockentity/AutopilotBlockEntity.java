@@ -98,7 +98,37 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         VERTICAL_CLIMB, VERTICAL_DESCENT,
         /** Rotorcraft equivalent of the holding pattern: stop and wait for
          *  the pad to clear. */
-        HOVERING
+        HOVERING;
+
+        /**
+         * Is the aircraft off the ground?
+         *
+         * Taxiing counts as on the ground even though the autopilot is very
+         * much running: what this distinguishes is whether a change of
+         * destination means turning around in the air or simply departing
+         * somewhere else when it gets to the runway.
+         */
+        public boolean airborne() {
+            return this == CLIMB || this == CRUISE || this == HOLDING || this == APPROACH
+                    || this == VERTICAL_CLIMB || this == VERTICAL_DESCENT || this == HOVERING;
+        }
+
+        /**
+         * Has this aircraft booked something at the airport it is flying to?
+         *
+         * Holding, approaching, hovering over a pad and descending onto one
+         * all mean a slot or a pad is reserved in that airport's name. Give a
+         * schedule like that a new destination and the booking is never used
+         * and never given back, and everything behind it queues for an
+         * aircraft that left - which is the bug this answers.
+         *
+         * Cruising and climbing have booked nothing yet: clearance is asked
+         * for on arrival, so a reroute before then costs nobody anything.
+         */
+        public boolean holdsDestinationBooking() {
+            return this == HOLDING || this == APPROACH || this == HOVERING
+                    || this == VERTICAL_DESCENT;
+        }
     }
 
     /** How near a player counts as "boarded" for WaitCondition.PLAYER. */
@@ -725,11 +755,100 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         setChanged();
     }
 
-    /** Store a route without flying it - see SaveSchedulePayload. */
+    /**
+     * Store a route - see SaveSchedulePayload, and the two peripherals.
+     *
+     * On an idle aircraft this is what it has always been: keep the route,
+     * fly it later. On one already flying it is a reroute, and that is a
+     * different thing with an obligation attached.
+     *
+     * An aircraft that is holding or on approach has booked a runway slot or
+     * a helipad in the name of the airport it is going to. Sending it
+     * somewhere else used to swap the schedule and walk away, leaving that
+     * booking held forever by an aircraft that had left - so everything
+     * behind it queued for a ghost. Giving it back has to happen BEFORE the
+     * new schedule is stored, because which airport is being released is
+     * worked out from the schedule, and after the swap that answer is the
+     * new destination rather than the abandoned one.
+     *
+     * Deliberately not releaseApproach(): that also stops the aircraft
+     * advertising itself as traffic, which is right when it lands and wrong
+     * here. It is still in the air, and everyone else should still be
+     * keeping out of its way.
+     */
     public void setSchedule(FlightSchedule newSchedule) {
+        UUID abandoned = state == FlightState.IDLE ? null : destinationAirportId();
+        boolean rerouting = state != FlightState.IDLE
+                && !java.util.Objects.equals(abandoned, destinationOf(newSchedule));
+
+        if (rerouting && state.holdsDestinationBooking()) {
+            giveBackDestination(abandoned);
+        }
+
         this.schedule = newSchedule;
         this.scheduleIndex = 0;
+
+        if (rerouting) beginRerouteLeg();
         setChanged();
+    }
+
+    /** Where a schedule would send the aircraft if it started now - asked of
+     *  a schedule this block is not flying yet, which is why it cannot go
+     *  through destinationAirportId. */
+    @org.jetbrains.annotations.Nullable
+    private UUID destinationOf(FlightSchedule candidate) {
+        int index = candidate.destinationIndexFrom(0);
+        return index < 0 ? null : candidate.entries().get(index).airportId();
+    }
+
+    /** Hand back the slot and the pad booked at an airport this aircraft is
+     *  no longer going to, while leaving everything the origin owns alone -
+     *  it may still be climbing out of it. */
+    private void giveBackDestination(@org.jetbrains.annotations.Nullable UUID abandoned) {
+        releasePad();
+        if (abandoned == null || planeId == null) return;
+        ServerLevel serverLevel = level instanceof ServerLevel direct ? direct
+                : (activeSubLevel != null && activeSubLevel.getLevel() instanceof ServerLevel parent ? parent : null);
+        if (serverLevel == null) return;
+        AirportRegistry registry = AirportRegistry.get(serverLevel);
+        releaseBothRunways(registry, abandoned);
+        registry.releaseTaxiway(abandoned, planeId);
+    }
+
+    /**
+     * Start the new leg cleanly.
+     *
+     * Everything here describes progress through a leg that is being
+     * abandoned - how far along its waypoints, which way it entered a
+     * holding pattern, how many laps it has flown, whether it passed the VOR
+     * it was routed over. Carried into the new leg, each one is a lie about a
+     * journey that is not happening.
+     *
+     * An aircraft that had committed to landing goes back to cruising, since
+     * the approach it was flying belongs to an airport it is no longer going
+     * to. One that was climbing or cruising simply carries on, now pointed
+     * somewhere else.
+     */
+    private void beginRerouteLeg() {
+        currentWaypointIndex = 0;
+        holdingEntryIndex = -1;
+        holdingLaps = 0;
+        clearedPastHoldShort = false;
+        vorPassage.reset();
+        vorPassageFor = null;
+
+        // CRUISE for both kinds. A rotorcraft's descent onto a pad and a
+        // plane's approach are different manoeuvres, but the state they both
+        // belong back in is the one that means "flying toward a destination
+        // and not yet asking to land".
+        if (state.holdsDestinationBooking()) setState(FlightState.CRUISE);
+        AirportLayout now = destinationAirportId() == null ? null
+                : (level instanceof ServerLevel serverLevel
+                        ? AirportRegistry.get(serverLevel).byId(destinationAirportId()).orElse(null)
+                        : null);
+        message(now == null
+                ? "Rerouted in flight."
+                : "Rerouted in flight - now heading for " + now.displayName() + ".");
     }
 
     public FlightSchedule schedule() {
