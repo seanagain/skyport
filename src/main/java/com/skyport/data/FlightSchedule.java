@@ -205,7 +205,10 @@ public class FlightSchedule {
         FlightSchedule schedule = new FlightSchedule();
         ListTag list = tag.getList("entries", 10); // 10 = CompoundTag id
         for (int i = 0; i < list.size(); i++) {
-            schedule.entries.add(ScheduleEntry.load(list.getCompound(i)));
+            // Null means that stop could not be read - see ScheduleEntry#load
+            // for why one unreadable stop must not take the aircraft with it.
+            ScheduleEntry entry = ScheduleEntry.load(list.getCompound(i));
+            if (entry != null) schedule.entries.add(entry);
         }
         schedule.loop = tag.getBoolean("loop");
         if (tag.contains("cruiseAltitude")) schedule.cruiseAltitude = tag.getInt("cruiseAltitude");

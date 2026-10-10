@@ -74,13 +74,43 @@ public record ScheduleEntry(@Nullable UUID airportId, String gateName, WaitCondi
         return tag;
     }
 
+    /**
+     * One stop, or null if this tag does not describe one.
+     *
+     * Every read here used to be unguarded, and each one could throw: a
+     * missing airportId makes getUUID blow up, and a missing condition makes
+     * valueOf("") do the same. That matters out of all proportion to how
+     * likely it is, because this runs inside the autopilot's own load. An
+     * exception escaping here does not cost you a stop - Minecraft drops the
+     * whole block entity, so the aircraft loses its schedule, its identity
+     * and its ability to be woken, and says so only in one line of a log
+     * nobody is reading.
+     *
+     * So a stop that cannot be read is skipped and the rest of the route
+     * survives. A route missing a stop is obvious the moment anyone looks at
+     * it; an aeroplane that quietly stopped existing is not.
+     *
+     * @return the stop, or null if the tag is not a readable one
+     */
+    @Nullable
     public static ScheduleEntry load(CompoundTag tag) {
         if (tag.hasUUID("vorId")) return vor(tag.getUUID("vorId"));
+        if (!tag.hasUUID("airportId")) return null;
         return new ScheduleEntry(
                 tag.getUUID("airportId"),
                 tag.getString("gateName"),
-                WaitCondition.valueOf(tag.getString("condition")),
+                waitCondition(tag.getString("condition")),
                 tag.getInt("waitSeconds"));
+    }
+
+    /** A wait this version understands. An unreadable one becomes a timer,
+     *  which is the condition that always completes - the alternative is a
+     *  stop nothing can ever satisfy. */
+    private static WaitCondition waitCondition(String name) {
+        for (WaitCondition candidate : WaitCondition.values()) {
+            if (candidate.name().equals(name)) return candidate;
+        }
+        return WaitCondition.TIMER;
     }
 
     public void write(FriendlyByteBuf buf) {

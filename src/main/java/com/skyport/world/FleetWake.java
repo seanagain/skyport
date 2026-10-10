@@ -13,6 +13,7 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.common.world.chunk.RegisterTicketControllersEvent;
 import net.neoforged.neoforge.common.world.chunk.TicketController;
+import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 import java.util.ArrayList;
@@ -197,6 +198,74 @@ public final class FleetWake {
      * Picking the one you actually want is both cheaper and easier to reason
      * about.
      */
+    /**
+     * Put the aircraft that were in the air back in the air.
+     *
+     * An autopilot issues its own chunk bubble while it ticks, and it can
+     * only tick while its chunk is loaded. On a fresh server that is a
+     * deadlock with nothing to break it: the bubble is held in memory, so it
+     * is gone, and the aeroplane sits frozen wherever the world stopped -
+     * out over the sea, halfway to somewhere, with its schedule abandoned.
+     * Waking it by hand fixed it, which is the whole proof that a bubble is
+     * all it ever needed.
+     *
+     * So do by itself what somebody otherwise has to do per aircraft. The
+     * roster already records where each one was and what it was doing, which
+     * is exactly and only what this needs.
+     *
+     * Only the ones that were AIRBORNE. A parked aircraft sleeping through a
+     * restart is the design working - it costs nothing at a gate and the
+     * tower can wake it on demand - and waking the whole fleet on every boot
+     * would force a patch of world open for every aeroplane anyone has ever
+     * flown.
+     *
+     * The ticket is temporary on purpose. It only has to last until the
+     * aircraft ticks and takes over with its own bubble, at which point
+     * runFlightLogic hands this one back (see FleetWake#release).
+     */
+    @SubscribeEvent
+    static void onServerStarted(ServerStartedEvent event) {
+        resumeAirborne(event.getServer());
+    }
+
+    /**
+     * @return how many aircraft were handed a ticket to get going again
+     */
+    public static int resumeAirborne(MinecraftServer server) {
+        // A server that has turned chunk loading off has accepted that
+        // aircraft freeze when unobserved, and a restart is the same thing.
+        if (!SkyportConfig.chunkLoading) return 0;
+
+        int resumed = 0;
+        for (AirportRegistry.KnownAircraft aircraft
+                : AirportRegistry.get(server.overworld()).known()) {
+            if (!wasAirborne(aircraft.state())) continue;
+            if (wake(server, aircraft)) resumed++;
+        }
+        return resumed;
+    }
+
+    /**
+     * Was this roster entry written by an aircraft that was off the ground?
+     *
+     * The roster stores the state as the name it had when it was written, so
+     * this has to cope with a name that no longer exists - a world rolled
+     * back onto an older jar, or a state renamed between versions. Anything
+     * unrecognised is treated as parked, because the cost of being wrong
+     * that way is an aeroplane that waits to be woken, and the cost of being
+     * wrong the other way is a chunk forced open for something that may not
+     * even be there.
+     */
+    static boolean wasAirborne(String state) {
+        if (state == null) return false;
+        try {
+            return com.skyport.blockentity.AutopilotBlockEntity.FlightState
+                    .valueOf(state).airborne();
+        } catch (IllegalArgumentException unknownToThisVersion) {
+            return false;
+        }
+    }
+
     public static boolean wake(MinecraftServer server, UUID planeId) {
         return AirportRegistry.get(server.overworld()).knownById(planeId)
                 .map(aircraft -> wake(server, aircraft))
