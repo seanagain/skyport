@@ -228,6 +228,9 @@ the first time somebody renames one. Every peripheral can list what actually
 exists, and `examples/skyport-info.lua` in this repository prints the lot —
 run that first and use the spellings it gives you.
 
+Every function, with its arguments and the shape of what it returns, is
+listed in [`examples/API.md`](examples/API.md).
+
 ```lua
 local ap = peripheral.find("skyport_autopilot")
 
