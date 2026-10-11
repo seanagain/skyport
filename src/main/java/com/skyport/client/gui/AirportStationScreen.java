@@ -52,15 +52,23 @@ public class AirportStationScreen extends Screen {
 
         // Edit and Traffic share a row rather than adding one. Drawing the
         // airport and watching it work are the two things you come to this
-        // block for, and they belong side by side - and the panel below is
-        // already five rows deep before this.
-        int halfW = (boxW - 4) / 2;
-        addRenderableWidget(Button.builder(Component.literal("Traffic"), b -> openTraffic())
-                .bounds(left + halfW + 4, top + 26, halfW, 20)
-                .build());
+        // block for, so they belong side by side - and the panel below is
+        // already five rows deep before this one.
+        //
+        // The odd pixel goes to Edit, so the pair spans exactly the width of
+        // everything beneath them at any GUI scale. Both halves have to be
+        // sized here: giving one of them a width and leaving the other at the
+        // full row drew the second straight over the first, which looks like
+        // one button with two labels on it.
+        int gap = 4;
+        int trafficW = (boxW - gap) / 2;
+        int editW = boxW - gap - trafficW;
         addRenderableWidget(Button.builder(Component.translatable("gui.skyport.airport_station.edit_map"),
                         b -> openMap())
-                .bounds(left, top + 26, boxW, 20)
+                .bounds(left, top + 26, editW, 20)
+                .build());
+        addRenderableWidget(Button.builder(Component.literal("Traffic"), b -> openTraffic())
+                .bounds(left + editW + gap, top + 26, trafficW, 20)
                 .build());
 
         // Taxi speed is a property of the field, not of the aircraft: a
