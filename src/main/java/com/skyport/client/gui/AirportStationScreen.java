@@ -50,6 +50,14 @@ public class AirportStationScreen extends Screen {
         nameBox.setResponder(layout::setDisplayName);
         setInitialFocus(nameBox);
 
+        // Edit and Traffic share a row rather than adding one. Drawing the
+        // airport and watching it work are the two things you come to this
+        // block for, and they belong side by side - and the panel below is
+        // already five rows deep before this.
+        int halfW = (boxW - 4) / 2;
+        addRenderableWidget(Button.builder(Component.literal("Traffic"), b -> openTraffic())
+                .bounds(left + halfW + 4, top + 26, halfW, 20)
+                .build());
         addRenderableWidget(Button.builder(Component.translatable("gui.skyport.airport_station.edit_map"),
                         b -> openMap())
                 .bounds(left, top + 26, boxW, 20)
@@ -141,6 +149,12 @@ public class AirportStationScreen extends Screen {
     private void saveAndClose() {
         save();
         super.onClose();
+    }
+
+    /** The same map, opened to watch rather than to draw. */
+    private void openTraffic() {
+        save();
+        Minecraft.getInstance().setScreen(new AirportMapScreen(stationPos, layout, true));
     }
 
     private void openMap() {

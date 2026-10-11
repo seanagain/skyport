@@ -39,7 +39,7 @@ public record AirportOccupancy(UUID airportId,
                                @Nullable Claim departureRunway,
                                Map<String, Claim> pads,
                                Map<String, List<String>> occupants,
-                               Map<String, List<String>> expected,
+                               Map<String, List<StopOccupancy.Arrival>> expected,
                                int fleetLoaded,
                                int fleetKnown) {
 
@@ -83,7 +83,7 @@ public record AirportOccupancy(UUID airportId,
             AutopilotBlockEntity autopilot = AutopilotBlockEntity.loaded(known.planeId());
             if (autopilot == null) continue;
             loaded++;
-            fleet.add(describe(autopilot, id));
+            fleet.add(describe(autopilot, airport));
         }
 
         Map<String, Claim> pads = new LinkedHashMap<>();
@@ -107,13 +107,10 @@ public record AirportOccupancy(UUID airportId,
      * One aircraft, reduced to what this airport cares about: whether it is
      * sitting at one of these stops, and which of them its route visits.
      */
-    private static StopOccupancy.Aircraft describe(AutopilotBlockEntity autopilot, UUID airportId) {
+    private static StopOccupancy.Aircraft describe(AutopilotBlockEntity autopilot,
+                                                   AirportLayout airport) {
+        UUID airportId = airport.id();
         FlightSchedule schedule = autopilot.schedule();
-        List<String> scheduled = new ArrayList<>();
-        for (ScheduleEntry entry : schedule.entries()) {
-            if (entry.isVor() || !airportId.equals(entry.airportId())) continue;
-            if (!entry.gateName().isEmpty()) scheduled.add(entry.gateName());
-        }
 
         // Parked here means waiting at a gate on THIS airport - not merely
         // heading for one. A craft on approach is coming, not occupying.
@@ -124,7 +121,52 @@ public record AirportOccupancy(UUID airportId,
             ScheduleEntry here = schedule.entries().get(index);
             if (!here.isVor() && airportId.equals(here.airportId())) parkedAt = here.gateName();
         }
-        return new StopOccupancy.Aircraft(autopilot.callsign(), parkedAt, scheduled);
+
+        // Walk the route from where it is now, counting airport stops rather
+        // than list positions: a VOR is flown over on the way somewhere and
+        // is not an arrival anyone is waiting for, so counting it would put
+        // every gate one further off than it is.
+        List<StopOccupancy.Leg> legs = new ArrayList<>();
+        int at = index;
+        int airportsPassed = 0;
+        for (int step = 0; step < schedule.entries().size() && at >= 0; step++) {
+            ScheduleEntry entry = schedule.entries().get(at);
+            if (!entry.isVor()) {
+                if (airportId.equals(entry.airportId()) && !entry.gateName().isEmpty()) {
+                    legs.add(new StopOccupancy.Leg(entry.gateName(), airportsPassed,
+                            airportsPassed == 0
+                                    ? etaSeconds(autopilot, airport, entry.gateName())
+                                    : -1));
+                }
+                airportsPassed++;
+            }
+            at = schedule.nextIndex(at);
+        }
+        return new StopOccupancy.Aircraft(autopilot.callsign(), parkedAt, legs);
+    }
+
+    /**
+     * Roughly how long until it gets here, for the leg it is flying now.
+     *
+     * Straight-line distance over cruise speed, which is an estimate and
+     * reads like one on screen. Only offered while it is actually in the air:
+     * an aircraft taxiing is moving at a different speed entirely, and one
+     * sitting at a gate somewhere else has a departure condition between it
+     * and here that no arithmetic is going to predict.
+     *
+     * @return seconds, or negative when there is no honest number
+     */
+    private static double etaSeconds(AutopilotBlockEntity autopilot, AirportLayout airport,
+                                     String stopName) {
+        if (!autopilot.flightState().airborne()) return -1;
+        net.minecraft.core.BlockPos target = airport.gates().get(stopName);
+        if (target == null) target = airport.helipads().get(stopName);
+        if (target == null) return -1;
+
+        int speed = autopilot.schedule().cruiseSpeed();
+        if (speed <= 0) return -1;
+        double distance = Math.sqrt(autopilot.craftPosition().distSqr(target));
+        return distance / speed;
     }
 
     @Nullable
@@ -149,7 +191,15 @@ public record AirportOccupancy(UUID airportId,
             claim.write(buf);
         });
         writeLists(buf, occupants);
-        writeLists(buf, expected);
+        buf.writeVarInt(expected.size());
+        expected.forEach((name, arrivals) -> {
+            buf.writeUtf(name);
+            buf.writeVarInt(arrivals.size());
+            arrivals.forEach(arrival -> {
+                buf.writeUtf(arrival.callsign());
+                buf.writeUtf(arrival.when());
+            });
+        });
         buf.writeVarInt(fleetLoaded);
         buf.writeVarInt(fleetKnown);
     }
@@ -163,7 +213,17 @@ public record AirportOccupancy(UUID airportId,
         Map<String, Claim> pads = new LinkedHashMap<>();
         for (int i = 0; i < padCount; i++) pads.put(buf.readUtf(), Claim.read(buf));
         Map<String, List<String>> occupants = readLists(buf);
-        Map<String, List<String>> expected = readLists(buf);
+        int expectedCount = buf.readVarInt();
+        Map<String, List<StopOccupancy.Arrival>> expected = new LinkedHashMap<>();
+        for (int i = 0; i < expectedCount; i++) {
+            String name = buf.readUtf();
+            int size = buf.readVarInt();
+            List<StopOccupancy.Arrival> arrivals = new ArrayList<>(size);
+            for (int j = 0; j < size; j++) {
+                arrivals.add(new StopOccupancy.Arrival(buf.readUtf(), buf.readUtf()));
+            }
+            expected.put(name, arrivals);
+        }
         return new AirportOccupancy(id, taxiways, arrival, departure, pads, occupants, expected,
                 buf.readVarInt(), buf.readVarInt());
     }

@@ -19,7 +19,7 @@ public class FlightSchedule {
     /** Cruise altitude bounds. The floor is sea level rather than the world
      *  floor because an aircraft told to cruise underground just digs in. */
     public static final int MIN_CRUISE_ALTITUDE = 0;
-    public static final int MAX_CRUISE_ALTITUDE = 400;
+    public static final int MAX_CRUISE_ALTITUDE = 600;
     /** Cruise speed bounds, in blocks per second. Below the floor an
      *  aircraft barely holds a heading; above the ceiling it outruns the
      *  terrain scan that keeps it from flying into a hill. */

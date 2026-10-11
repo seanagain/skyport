@@ -179,9 +179,20 @@ public class AirportMapScreen extends Screen {
     private long flowNoticeShownAtMs;
 
     public AirportMapScreen(BlockPos stationPos, AirportLayout layout) {
+        this(stationPos, layout, false);
+    }
+
+    /**
+     * @param traffic open straight into the traffic view rather than the
+     *                editor - the two are different jobs, and which one you
+     *                came to do is decided at the station screen rather than
+     *                by arriving in the wrong one and switching
+     */
+    public AirportMapScreen(BlockPos stationPos, AirportLayout layout, boolean traffic) {
         super(Component.translatable("gui.skyport.airport_map.title"));
         this.stationPos = stationPos;
         this.layout = layout;
+        this.trafficView = traffic;
     }
 
     @Override
@@ -242,11 +253,18 @@ public class AirportMapScreen extends Screen {
         }
         selectTool(Tool.DRAW);
 
-        // Under the tools rather than among them: those are verbs that change
-        // the airport, and this changes what you are looking at.
-        addRenderableWidget(Button.builder(Component.literal("Traffic"), b -> toggleTrafficView())
-                .bounds(mapX - TOOL_BUTTON_WIDTH - 4, toolY + 6, TOOL_BUTTON_WIDTH, rowH)
-                .build());
+        // Opened to watch rather than to draw: put the editor's controls
+        // away. Map clicks are already swallowed, and leaving Undo and Save
+        // sitting there live would be offering to change an airport somebody
+        // came here to look at.
+        if (trafficView) {
+            for (net.minecraft.client.gui.components.events.GuiEventListener child : children()) {
+                if (child instanceof net.minecraft.client.gui.components.AbstractWidget widget) {
+                    widget.visible = false;
+                    widget.active = false;
+                }
+            }
+        }
 
         // --- row 2: undo + holding-pattern height/direction ---
         int undoW = Math.max(52, mapW / 5);
@@ -581,6 +599,9 @@ public class AirportMapScreen extends Screen {
     }
 
     private void drawDropdown(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        // Nothing to pick while watching: the list chooses what you are
+        // drawing, and in the traffic view you are not drawing.
+        if (trafficView) return;
         // Raised, not merely drawn last. GuiGraphics batches text and flushes
         // it separately from fills, so the buttons underneath printed their
         // labels straight through this panel however late it was drawn. Depth
@@ -1705,12 +1726,6 @@ public class AirportMapScreen extends Screen {
 
     // ---- the traffic view ------------------------------------------------
 
-    private void toggleTrafficView() {
-        trafficView = !trafficView;
-        // Ask immediately rather than waiting out the refresh interval, so
-        // the tab does not open onto a second of blank panel.
-        if (trafficView) lastOccupancyRequestMs = 0;
-    }
 
     /**
      * Take a snapshot from the server, if it is about the airport on screen.
@@ -1840,27 +1855,35 @@ public class AirportMapScreen extends Screen {
                 guiGraphics.drawString(font, "...", x, y, 0xFF8A8A8A, false);
                 return y + 9;
             }
-            List<String> here = occupantsOf(snapshot, stop);
-            List<String> routed = expectedAt(snapshot, stop);
             guiGraphics.drawString(font, stop, x, y, 0xFFD9D9D9, false);
             y += 9;
 
-            String detail;
-            int colour;
-            if (!here.isEmpty()) {
-                detail = String.join(", ", here);
-                colour = COLOR_PLAYER;
-            } else if (routed.isEmpty()) {
+            List<com.skyport.logic.StopOccupancy.Arrival> due = expectedAt(snapshot, stop);
+            if (due.isEmpty()) {
                 // Worth saying out loud. A gate nothing is routed to looks
                 // exactly like a busy one until somebody counts.
-                detail = "unused";
-                colour = 0xFF6A6A6A;
-            } else {
-                detail = routed.size() + " routed";
-                colour = 0xFF63D66B;
+                guiGraphics.drawString(font, "  unused", x, y, 0xFF6A6A6A, false);
+                return y + 13;
             }
-            guiGraphics.drawString(font, "  " + detail, x, y, colour, false);
-            y += 11;
+
+            // Named, soonest first, because "3 routed" tells you a gate is
+            // busy and nothing about whether the aeroplane you are waiting
+            // for is one of them.
+            for (com.skyport.logic.StopOccupancy.Arrival arrival : due) {
+                if (y > mapY + mapH - 22) {
+                    guiGraphics.drawString(font, "  ...", x, y, 0xFF8A8A8A, false);
+                    y += 9;
+                    break;
+                }
+                boolean present = arrival.when().equals("here");
+                guiGraphics.drawString(font, "  " + arrival.callsign(), x, y,
+                        present ? COLOR_PLAYER : 0xFFD9D9D9, false);
+                int width = font.width("  " + arrival.callsign());
+                guiGraphics.drawString(font, " " + arrival.when(), x + width, y,
+                        present ? COLOR_PLAYER : 0xFF63D66B, false);
+                y += 9;
+            }
+            y += 4;
         }
         return y + 2;
     }
@@ -1894,10 +1917,15 @@ public class AirportMapScreen extends Screen {
             }
         }
 
-        List<String> routed = expectedAt(snapshot, stop);
-        lines.add(Component.literal(routed.isEmpty()
-                ? "No schedule uses it"
-                : "Routed here: " + String.join(", ", routed)));
+        List<com.skyport.logic.StopOccupancy.Arrival> due = expectedAt(snapshot, stop);
+        if (due.isEmpty()) {
+            lines.add(Component.literal("No schedule uses it"));
+        } else {
+            lines.add(Component.literal("Due here, soonest first:"));
+            for (com.skyport.logic.StopOccupancy.Arrival arrival : due) {
+                lines.add(Component.literal("  " + arrival.callsign() + "  " + arrival.when()));
+            }
+        }
 
         guiGraphics.renderComponentTooltip(font, lines, mouseX, mouseY);
     }
@@ -1922,7 +1950,8 @@ public class AirportMapScreen extends Screen {
         return snapshot.occupants().getOrDefault(stop, List.of());
     }
 
-    private static List<String> expectedAt(com.skyport.data.AirportOccupancy snapshot, String stop) {
+    private static List<com.skyport.logic.StopOccupancy.Arrival> expectedAt(
+            com.skyport.data.AirportOccupancy snapshot, String stop) {
         return snapshot.expected().getOrDefault(stop, List.of());
     }
 
