@@ -263,14 +263,40 @@ that is largely how the order gets decided.
 
 | Field | Value |
 | --- | --- |
-| File | `build/libs/skyport-1.0.2.jar` |
-| Display name | Skyport 1.0.2 |
+| File | `build/libs/skyport-1.1.0.jar` |
+| Display name | Skyport 1.1.0 |
 | Release type | **Release** |
 | Game version | 1.21.1 |
 | Loader | NeoForge |
 | Java | 21 |
 
 ### Changelog for 1.1.0
+
+> **Fixed: aircraft no longer freeze in mid-air when a world is reloaded.**
+> An aeroplane holds the chunks it is flying through loaded, and it did that
+> from the autopilot's own tick - which cannot run until those chunks are
+> loaded. On a fresh server that is a deadlock with nothing to break it, so
+> anything in the air stayed frozen where the world stopped, its schedule
+> abandoned, until somebody went and woke it by hand.
+>
+> Because updating a mod means closing the world, this looked for a long time
+> like updates corrupting schedules. It was not: the reload was the variable
+> all along, and every update guarantees one. Aircraft that were flying now
+> get themselves going again when the server starts. Parked ones still sleep,
+> which is the point of them.
+
+> **Fixed: the Autopilot could refuse to start a parked aircraft, saying it
+> was not parked on a taxiway.** Mounted on a craft, the block's own
+> coordinates describe a spot in Sable's plot grid rather than anywhere in
+> the world, and nothing had resolved the craft yet because the callbacks
+> that do it skip an idle aircraft. Engaging from the Autopilot screen hid
+> this by using the player's position instead, so it only ever bit redstone,
+> which has nobody to borrow a position from. Redstone-engaging a parked
+> aeroplane works now.
+
+> **Fixed: re-routing an aircraft on approach left the airport blocked.** Its
+> runway slot or helipad stayed booked in the name of a craft that had gone
+> somewhere else, and everything behind it queued for a ghost.
 
 > **Your airports are now programmable.** Install CC: Tweaked and Skyport's
 > blocks turn into ComputerCraft peripherals. A computer against an Autopilot
@@ -291,9 +317,7 @@ that is largely how the order gets decided.
 >
 > CC: Tweaked is entirely optional. Without it, nothing about the mod changes
 > and nobody is asked to install anything.
-
-### Changelog for 1.0.2
-
+>
 > **Two more ways to make flight cost something.** `survival.powerRequirement`
 > had rotation and fuel as an either-or. It now also takes `BOTH` - the
 > powertrain has to be turning AND there has to be something burnable aboard,
