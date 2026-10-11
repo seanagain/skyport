@@ -298,6 +298,18 @@ that is largely how the order gets decided.
 > runway slot or helipad stayed booked in the name of a craft that had gone
 > somewhere else, and everything behind it queued for a ghost.
 
+> **See who is using an airport.** A Traffic button on the Airport Station
+> opens its map with the traffic drawn on it: which runway and which pads are
+> claimed and by whom, a ring on every gate somebody is at or routed to, and
+> a tooltip on any of them. Beside it, every gate and pad lists the aircraft
+> due there by name and in the order they will arrive - the one on the ground
+> first, then the ones flying in with an estimate, then everyone else by how
+> far down their schedule it is.
+>
+> It also names the gates nothing is routed to at all, which is the thing you
+> cannot see by watching: a gate drawn and then forgotten looks exactly like
+> a busy one until something counts for you.
+>
 > **Your airports are now programmable.** Install CC: Tweaked and Skyport's
 > blocks turn into ComputerCraft peripherals. A computer against an Autopilot
 > is that aircraft - read its callsign, state, position, fuel and schedule,
@@ -335,6 +347,9 @@ that is largely how the order gets decided.
 > out of the bunker - and when the autopilot refuses, it names the half that is
 > missing rather than reciting both.
 >
+> **Cruise altitude now goes up to 600**, for routes that have to clear
+> terrain the old ceiling of 400 did not.
+
 > **Fixed: an Autopilot beside a chatty block could hang the server.** Some
 > blocks tell their neighbours something changed every single tick. The
 > Autopilot believed each one and re-ran its engage — route check, terrain

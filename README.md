@@ -26,7 +26,8 @@ is an animation or a scripted path.
 draw its layout on a terrain-accurate map. The airport registers world-wide,
 so any aircraft anywhere can be sent to it. Hold the block after drawing and
 the layout is traced in the world in front of you, which is how you build a
-runway where you drew one.
+runway where you drew one. Press **Traffic** for the same map with what is
+happening on it — see [Seeing the traffic](#seeing-the-traffic).
 
 **Autopilot** — placed on an assembled aircraft, arrow pointing along the
 fuselage. Pick Plane, Heli or Blimp, set a cruise speed and altitude, and
@@ -297,6 +298,46 @@ because engaging rescans the whole route for terrain — this is the same limit
 that stopped a chatty neighbour block from hanging a server. And every call
 runs on the server thread, so a tight polling loop costs real server time;
 read what you need and sleep.
+
+## Seeing the traffic
+
+Open an Airport Station and press **Traffic**. It shows the airport's map with
+what is actually happening on it.
+
+Gates and pads get a ring: a double red one where an aircraft is parked, a
+plain one where something is merely routed there. Hover any of them for who is
+there, who has claimed it, and who is due.
+
+The panel beside the map lists what is claimed — the taxiways, the arrival
+runway, the departure runway — and then every gate and pad with the aircraft
+due there, by name, soonest first:
+
+```
+Gate A
+  Cargo 1  here
+  Post 2   ~45s
+  Relay 1  2 stops
+Gate B
+  unused
+```
+
+Three kinds of answer, and they are not equally precise. `here` is a fact.
+`~45s` is an estimate from the aircraft's distance and cruise speed, honest
+for the leg it is flying now. `2 stops` is a position in a schedule, not a
+time, because gate waits and a cargo condition nobody may come to satisfy sit
+in between and nothing can predict those.
+
+**`unused` is the one worth looking for.** A gate drawn and then never routed
+to looks exactly like a gate in constant use until something counts, and an
+airport quietly running on two of its six gates is hard to notice any other
+way.
+
+Two things it cannot tell you. The taxiways are claimed as a set rather than
+one strip at a time, so the panel says *the taxiways are busy* and never
+*this taxiway* — that is the traffic system's granularity, not a shortcut in
+the display. And schedules live on the aircraft, so one whose chunk is
+unloaded cannot be read at all; the panel says how many are asleep and
+therefore uncounted, rather than passing a short list off as a complete one.
 
 ## Locks
 
