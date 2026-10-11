@@ -54,3 +54,25 @@ description = '''${mod_description}'''
     versionRange = "[1.0.0,)"
     ordering = "AFTER"
     side = "BOTH"
+
+# ComputerCraft is OPTIONAL, and the difference from the three above is the
+# whole point: without Create Aeronautics this mod does nothing, while without
+# CC it simply has no peripherals. "optional" means NeoForge will not ask
+# anyone to install it, but still holds it to the version range if they have
+# it - below 1.117 the peripheral API we compile against is not there, and a
+# missing-method crash at the moment a player clicks a computer is a worse
+# way to find that out than a load-time message.
+#
+# Ordering AFTER so CC has registered its own capability before we attach to
+# it. Nothing in com.skyport.compat.cc is loaded at all unless CC is present
+# - see CCCompat for why that has to be true rather than merely tidy.
+#
+# CC: Sable is deliberately absent. It gives Lua programs their craft's pose
+# and velocity; it is not something this mod calls, so it is a nice extra for
+# players writing onboard scripts and not a dependency in either direction.
+[[dependencies.${mod_id}]]
+    modId = "computercraft"
+    type = "optional"
+    versionRange = "[1.117.0,)"
+    ordering = "AFTER"
+    side = "BOTH"

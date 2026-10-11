@@ -513,12 +513,14 @@ public class AutopilotScreen extends Screen {
     }
 
     private void adjustCruiseAltitude(int delta) {
-        schedule.setCruiseAltitude(Math.max(0, Math.min(400, schedule.cruiseAltitude() + delta)));
+        schedule.setCruiseAltitude(Math.max(FlightSchedule.MIN_CRUISE_ALTITUDE,
+                Math.min(FlightSchedule.MAX_CRUISE_ALTITUDE, schedule.cruiseAltitude() + delta)));
         refresh();
     }
 
     private void adjustCruiseSpeed(int delta) {
-        schedule.setCruiseSpeed(Math.max(4, Math.min(80, schedule.cruiseSpeed() + delta)));
+        schedule.setCruiseSpeed(Math.max(FlightSchedule.MIN_CRUISE_SPEED,
+                Math.min(FlightSchedule.MAX_CRUISE_SPEED, schedule.cruiseSpeed() + delta)));
         refresh();
     }
 

@@ -98,7 +98,37 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         VERTICAL_CLIMB, VERTICAL_DESCENT,
         /** Rotorcraft equivalent of the holding pattern: stop and wait for
          *  the pad to clear. */
-        HOVERING
+        HOVERING;
+
+        /**
+         * Is the aircraft off the ground?
+         *
+         * Taxiing counts as on the ground even though the autopilot is very
+         * much running: what this distinguishes is whether a change of
+         * destination means turning around in the air or simply departing
+         * somewhere else when it gets to the runway.
+         */
+        public boolean airborne() {
+            return this == CLIMB || this == CRUISE || this == HOLDING || this == APPROACH
+                    || this == VERTICAL_CLIMB || this == VERTICAL_DESCENT || this == HOVERING;
+        }
+
+        /**
+         * Has this aircraft booked something at the airport it is flying to?
+         *
+         * Holding, approaching, hovering over a pad and descending onto one
+         * all mean a slot or a pad is reserved in that airport's name. Give a
+         * schedule like that a new destination and the booking is never used
+         * and never given back, and everything behind it queues for an
+         * aircraft that left - which is the bug this answers.
+         *
+         * Cruising and climbing have booked nothing yet: clearance is asked
+         * for on arrival, so a reroute before then costs nobody anything.
+         */
+        public boolean holdsDestinationBooking() {
+            return this == HOLDING || this == APPROACH || this == HOVERING
+                    || this == VERTICAL_DESCENT;
+        }
     }
 
     /** How near a player counts as "boarded" for WaitCondition.PLAYER. */
@@ -523,6 +553,50 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         return BlockPos.containing(activeSubLevel.logicalPose().transformPosition(getBlockPos().getCenter()));
     }
 
+    /**
+     * The craft this block is mounted on, asked of the world rather than
+     * remembered from a callback.
+     *
+     * activeSubLevel is only ever assigned by sable$tick and
+     * sable$physicsTick, and both of those return immediately while the
+     * autopilot is IDLE. So on a parked aircraft - which is every aircraft at
+     * the moment somebody tries to start it - the cached value is null, and
+     * it is transient, so it is null again after every reload.
+     *
+     * That was survivable while the only way to engage was a player standing
+     * on the plane, because their position stood in for the craft's. It is
+     * not survivable for redstone or for a computer: both fell back to
+     * getBlockPos(), which on a mounted block is a coordinate in Sable's plot
+     * grid, twenty million blocks from the runway. The refusal that produced
+     * - "not parked on a taxiway or at a gate" - was true of the position it
+     * was given and useless to the player reading it.
+     *
+     * The container knows which plot a chunk belongs to whether or not
+     * anything has ticked, so ask it.
+     */
+    @org.jetbrains.annotations.Nullable
+    private dev.ryanhcode.sable.sublevel.SubLevel mountedSubLevel(ServerLevel serverLevel) {
+        if (activeSubLevel != null && !activeSubLevel.isRemoved()) return activeSubLevel;
+        SubLevelContainer container = SubLevelContainer.getContainer(serverLevel);
+        if (container == null) return null;
+        dev.ryanhcode.sable.sublevel.plot.LevelPlot plot =
+                container.getPlot(new ChunkPos(getBlockPos()));
+        if (plot == null) return null;
+        dev.ryanhcode.sable.sublevel.SubLevel subLevel = plot.getSubLevel();
+        return subLevel == null || subLevel.isRemoved() ? null : subLevel;
+    }
+
+    /**
+     * Where the craft actually is, resolving it from the world if nothing has
+     * ticked yet. The fallback is for a block genuinely sitting loose, where
+     * its own coordinates are the honest answer.
+     */
+    private BlockPos craftPositionOr(ServerLevel serverLevel, BlockPos fallback) {
+        dev.ryanhcode.sable.sublevel.SubLevel subLevel = mountedSubLevel(serverLevel);
+        if (subLevel == null) return fallback;
+        return BlockPos.containing(subLevel.logicalPose().transformPosition(getBlockPos().getCenter()));
+    }
+
     @org.jetbrains.annotations.Nullable
     private ScheduleEntry currentEntry() {
         if (scheduleIndex < 0 || scheduleIndex >= schedule.entries().size()) return null;
@@ -681,15 +755,128 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         setChanged();
     }
 
-    /** Store a route without flying it - see SaveSchedulePayload. */
+    /**
+     * Store a route - see SaveSchedulePayload, and the two peripherals.
+     *
+     * On an idle aircraft this is what it has always been: keep the route,
+     * fly it later. On one already flying it is a reroute, and that is a
+     * different thing with an obligation attached.
+     *
+     * An aircraft that is holding or on approach has booked a runway slot or
+     * a helipad in the name of the airport it is going to. Sending it
+     * somewhere else used to swap the schedule and walk away, leaving that
+     * booking held forever by an aircraft that had left - so everything
+     * behind it queued for a ghost. Giving it back has to happen BEFORE the
+     * new schedule is stored, because which airport is being released is
+     * worked out from the schedule, and after the swap that answer is the
+     * new destination rather than the abandoned one.
+     *
+     * Deliberately not releaseApproach(): that also stops the aircraft
+     * advertising itself as traffic, which is right when it lands and wrong
+     * here. It is still in the air, and everyone else should still be
+     * keeping out of its way.
+     */
     public void setSchedule(FlightSchedule newSchedule) {
+        UUID abandoned = state == FlightState.IDLE ? null : destinationAirportId();
+        boolean rerouting = state != FlightState.IDLE
+                && !java.util.Objects.equals(abandoned, destinationOf(newSchedule));
+
+        if (rerouting && state.holdsDestinationBooking()) {
+            giveBackDestination(abandoned);
+        }
+
         this.schedule = newSchedule;
         this.scheduleIndex = 0;
+
+        if (rerouting) beginRerouteLeg();
         setChanged();
+    }
+
+    /** Where a schedule would send the aircraft if it started now - asked of
+     *  a schedule this block is not flying yet, which is why it cannot go
+     *  through destinationAirportId. */
+    @org.jetbrains.annotations.Nullable
+    private UUID destinationOf(FlightSchedule candidate) {
+        int index = candidate.destinationIndexFrom(0);
+        return index < 0 ? null : candidate.entries().get(index).airportId();
+    }
+
+    /** Hand back the slot and the pad booked at an airport this aircraft is
+     *  no longer going to, while leaving everything the origin owns alone -
+     *  it may still be climbing out of it. */
+    private void giveBackDestination(@org.jetbrains.annotations.Nullable UUID abandoned) {
+        releasePad();
+        if (abandoned == null || planeId == null) return;
+        ServerLevel serverLevel = level instanceof ServerLevel direct ? direct
+                : (activeSubLevel != null && activeSubLevel.getLevel() instanceof ServerLevel parent ? parent : null);
+        if (serverLevel == null) return;
+        AirportRegistry registry = AirportRegistry.get(serverLevel);
+        releaseBothRunways(registry, abandoned);
+        registry.releaseTaxiway(abandoned, planeId);
+    }
+
+    /**
+     * Start the new leg cleanly.
+     *
+     * Everything here describes progress through a leg that is being
+     * abandoned - how far along its waypoints, which way it entered a
+     * holding pattern, how many laps it has flown, whether it passed the VOR
+     * it was routed over. Carried into the new leg, each one is a lie about a
+     * journey that is not happening.
+     *
+     * An aircraft that had committed to landing goes back to cruising, since
+     * the approach it was flying belongs to an airport it is no longer going
+     * to. One that was climbing or cruising simply carries on, now pointed
+     * somewhere else.
+     */
+    private void beginRerouteLeg() {
+        currentWaypointIndex = 0;
+        holdingEntryIndex = -1;
+        holdingLaps = 0;
+        clearedPastHoldShort = false;
+        vorPassage.reset();
+        vorPassageFor = null;
+
+        // CRUISE for both kinds. A rotorcraft's descent onto a pad and a
+        // plane's approach are different manoeuvres, but the state they both
+        // belong back in is the one that means "flying toward a destination
+        // and not yet asking to land".
+        if (state.holdsDestinationBooking()) setState(FlightState.CRUISE);
+        AirportLayout now = destinationAirportId() == null ? null
+                : (level instanceof ServerLevel serverLevel
+                        ? AirportRegistry.get(serverLevel).byId(destinationAirportId()).orElse(null)
+                        : null);
+        message(now == null
+                ? "Rerouted in flight."
+                : "Rerouted in flight - now heading for " + now.displayName() + ".");
     }
 
     public FlightSchedule schedule() {
         return schedule;
+    }
+
+    /** What this aircraft is doing right now. */
+    public FlightState flightState() {
+        return state;
+    }
+
+    /** Flying, taxiing or waiting at a gate - anything but sitting idle. */
+    public boolean isEngaged() {
+        return state != FlightState.IDLE;
+    }
+
+    /**
+     * Where the aircraft actually is in the world.
+     *
+     * Mounted on a craft this is the craft's position, not the block's:
+     * getBlockPos() on a mounted block is a plot-local coordinate, and
+     * handing that out is what once had aircraft reporting themselves a
+     * million blocks from the airport they were sitting at.
+     */
+    public net.minecraft.core.BlockPos craftPosition() {
+        return level instanceof ServerLevel serverLevel
+                ? craftPositionOr(serverLevel, getBlockPos())
+                : craftPositionOr(getBlockPos());
     }
 
     /**
@@ -720,6 +907,10 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      *  it is not on one - a loose block, or a craft nothing has loaded. */
     @org.jetbrains.annotations.Nullable
     public UUID subLevelId() {
+        if (level instanceof ServerLevel serverLevel) {
+            dev.ryanhcode.sable.sublevel.SubLevel subLevel = mountedSubLevel(serverLevel);
+            return subLevel == null ? null : subLevel.getUniqueId();
+        }
         return activeSubLevel == null || activeSubLevel.isRemoved() ? null : activeSubLevel.getUniqueId();
     }
 
@@ -779,7 +970,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         if (state != FlightState.IDLE || !schedule.hasAirportStop()) return;
         this.scheduleIndex = 0;
         this.controllingPlayerId = null;
-        engageCurrentLeg(serverLevel, craftPositionOr(getBlockPos()), null);
+        engageCurrentLeg(serverLevel, craftPositionOr(serverLevel, getBlockPos()), null);
     }
 
     /** Which redstone updates are worth acting on - see RedstoneGate. Not
@@ -816,6 +1007,47 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         engageFromRedstone(serverLevel);
     }
 
+    /**
+     * Start the saved schedule on behalf of a computer, and say why not.
+     *
+     * Distinct from the redstone path in two ways that both come from Lua
+     * being a caller that can be told things. It reports its refusal as a
+     * string rather than silently returning - a script that asked for a
+     * flight deserves to know it is out of fuel - and it goes through the
+     * SAME cooldown gate as redstone, because the expensive part is the
+     * route scan and a lever plus a loop would otherwise get two budgets
+     * between them.
+     *
+     * @return null when the flight started, otherwise why it did not
+     */
+    public String engageFromComputer(ServerLevel serverLevel) {
+        if (state != FlightState.IDLE) return "Already flying - disengage first.";
+        if (schedule.isEmpty()) return "No schedule set.";
+        if (!schedule.hasAirportStop()) {
+            return "Schedule has no airport to land at - VORs are flown over, not stopped at.";
+        }
+        long now = serverLevel.getGameTime();
+        if (!redstone.mayEngage(now)) {
+            long wait = com.skyport.logic.RedstoneGate.ENGAGE_RETRY_TICKS - (now - lastComputerEngage);
+            return "Engage was attempted too recently - try again in "
+                    + Math.max(1, (wait + 19) / 20) + "s.";
+        }
+        redstone.engageAttempted(now);
+        lastComputerEngage = now;
+        engageFromRedstone(serverLevel);
+        if (state != FlightState.IDLE) return null;
+        // The real reason, recorded by whichever check refused it. The
+        // fallback should be unreachable - every refusal records one - but a
+        // sixth check added later without doing so would otherwise return
+        // null and report a flight that never started as a success.
+        return engageRefusal != null ? engageRefusal
+                : "Could not start the flight, and the autopilot did not say why.";
+    }
+
+    /** Only for wording the cooldown refusal above; the gate itself keeps
+     *  the authoritative timestamp. */
+    private long lastComputerEngage;
+
     public void engage(FlightSchedule newSchedule, ServerPlayer player) {
         if (newSchedule.isEmpty()) {
             message(player, "Schedule is empty - add at least one stop first.");
@@ -831,7 +1063,8 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // Prefer the craft's own position when it's assembled - that's the
         // real answer. The player's position is the fallback for a block
         // sitting loose in the world, where there's no craft to ask.
-        engageCurrentLeg(player.serverLevel(), craftPositionOr(player.blockPosition()), player);
+        engageCurrentLeg(player.serverLevel(),
+                craftPositionOr(player.serverLevel(), player.blockPosition()), player);
     }
 
     /**
@@ -841,8 +1074,37 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      *                  the plane's own tracked position on later legs, since
      *                  by then it has flown somewhere the player may not be.
      */
+    /**
+     * Why the last engage attempt did not start a flight.
+     *
+     * Engaging refuses in five different places and only ever said so out
+     * loud - which works for a player stood next to the plane and for nobody
+     * else. A redstone engage had no one to tell, and a computer asking for a
+     * flight got back a guess at the reason rather than the reason, which is
+     * worse than silence: it sent someone to check the fuel on an aircraft
+     * whose fuel was fine.
+     *
+     * Cleared at the start of every attempt, so it always describes the most
+     * recent one and never a stale failure from ten minutes ago.
+     */
+    @org.jetbrains.annotations.Nullable
+    private String engageRefusal;
+
+    /** Record why this engage is being refused, and say it the way this
+     *  method always did. */
+    private void refuse(String reason) {
+        engageRefusal = reason;
+        message(reason);
+    }
+
+    private void refuse(@org.jetbrains.annotations.Nullable ServerPlayer player, String reason) {
+        engageRefusal = reason;
+        message(player, reason);
+    }
+
     private void engageCurrentLeg(ServerLevel serverLevel, BlockPos reference,
                                   @org.jetbrains.annotations.Nullable ServerPlayer player) {
+        engageRefusal = null;
         // Note what this deliberately does NOT use: this block entity's own
         // getBlockPos() and getLevel().
         //
@@ -881,7 +1143,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
         // coal every time the player pressed Engage.
         fuelContainers = null;
         if (!hasPower(serverLevel.getGameTime())) {
-            message(powerMissingReason());
+            refuse(powerMissingReason());
             setState(FlightState.IDLE);
             return;
         }
@@ -912,15 +1174,21 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
             AirportRegistry registry = AirportRegistry.get(serverLevel);
             AirportLayout origin = findGroundOrigin(registry, reference);
             if (origin == null) {
-                message(player, "Can't engage here - not parked on a taxiway or at a gate.");
                 // Nothing marks these positions in the world, so a bare
                 // refusal is a dead end - name somewhere concrete to tow to.
                 NearestGround nearest = findNearestGround(registry, reference);
+                String where = String.format(" (judging from %d, %d)",
+                        reference.getX(), reference.getZ());
                 if (nearest == null) {
-                    message(player, "No airport has any runway, taxiway or gate drawn yet. Draw one at an Airport Station first.");
+                    refuse(player, "Can't engage here - not parked on a taxiway or at a gate" + where
+                            + ". No airport has any runway, taxiway or gate drawn yet."
+                            + " Draw one at an Airport Station first.");
                 } else {
-                    message(player, String.format("Nearest is %s at %d, %d (%.0f blocks away) - tow the plane there.",
-                            nearest.description(), nearest.pos().getX(), nearest.pos().getZ(), nearest.distance()));
+                    refuse(player, String.format(
+                            "Can't engage here - not parked on a taxiway or at a gate%s."
+                                    + " Nearest is %s at %d, %d (%.0f blocks away) - tow the plane there.",
+                            where, nearest.description(),
+                            nearest.pos().getX(), nearest.pos().getZ(), nearest.distance()));
                 }
                 return;
             }
@@ -1119,9 +1387,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * a reload can come first.
      */
     private boolean isMounted(ServerLevel serverLevel) {
-        if (activeSubLevel != null && !activeSubLevel.isRemoved()) return true;
-        SubLevelContainer container = SubLevelContainer.getContainer(serverLevel);
-        return container != null && container.getPlot(new ChunkPos(getBlockPos())) != null;
+        return mountedSubLevel(serverLevel) != null;
     }
 
     /** Runs every server tick this block entity is loaded and ticking. */
@@ -3439,7 +3705,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
 
         String where = scan.blockedNear() == null ? "on this route"
                 : "near " + scan.blockedNear().getX() + ", " + scan.blockedNear().getZ();
-        message("Cruising at Y " + cruiseAltitude() + " runs into terrain at Y "
+        refuse("Cruising at Y " + cruiseAltitude() + " runs into terrain at Y "
                 + scan.blockedAtY() + " " + where
                 + " - set cruise altitude to at least Y " + scan.clearAbove() + ".");
         return false;
@@ -3572,13 +3838,13 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
     private boolean destinationIsUsable(AirportLayout destination) {
         if (craftType().isVertical()) {
             if (!destination.helipads().isEmpty()) return true;
-            message(destination.displayName() + " has no landing pad - "
+            refuse(destination.displayName() + " has no landing pad - "
                     + "draw one on its map before sending a " + craftType().name().toLowerCase(Locale.ROOT)
                     + " there.");
             return false;
         }
         if (positionsOf(destination, Waypoint.Type.RUNWAY).size() >= 2) return true;
-        message(destination.displayName() + " has no runway drawn - "
+        refuse(destination.displayName() + " has no runway drawn - "
                 + "a plane cannot land there.");
         return false;
     }
@@ -3808,7 +4074,7 @@ public class AutopilotBlockEntity extends BlockEntity implements BlockEntitySubL
      * aircraft is flying - "[Skyport] Holding short" is ambiguous the moment
      * there are two of them.
      */
-    private String callsign() {
+    public String callsign() {
         // A name the player typed beats a generated one: "Cargo 1" is what
         // they'll look for on the tower's traffic strip, not SKY-4F2A.
         String named = schedule.craftName();
