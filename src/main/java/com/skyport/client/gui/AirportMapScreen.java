@@ -135,6 +135,25 @@ public class AirportMapScreen extends Screen {
     private final BlockPos stationPos;
     private final AirportLayout layout;
 
+    /**
+     * The traffic view: who is using this airport, drawn over the map.
+     *
+     * An overlay rather than a separate screen. Everything it wants to show
+     * sits on top of the map that is already here - which gate, which pad,
+     * which runway - and a second screen would have meant drawing that map
+     * twice and keeping the two in step.
+     */
+    private boolean trafficView;
+    @org.jetbrains.annotations.Nullable
+    private com.skyport.data.AirportOccupancy occupancy;
+    private long lastOccupancyRequestMs;
+    /** Often enough to feel live, rarely enough that a player leaving the tab
+     *  open is not asking the server a question sixty times a second. */
+    private static final long OCCUPANCY_REFRESH_MS = 1000;
+    /** How close the pointer has to be to a gate or pad to be asking about
+     *  it, in pixels. Generous: these are markers a few pixels across. */
+    private static final int HOVER_RADIUS = 6;
+
     private EditMode mode = EditMode.RUNWAY;
     private int mapX, mapY, mapW, mapH;
     private int[][] terrainColors = new int[0][0];
@@ -222,6 +241,12 @@ public class AirportMapScreen extends Screen {
             toolY += rowH + 2;
         }
         selectTool(Tool.DRAW);
+
+        // Under the tools rather than among them: those are verbs that change
+        // the airport, and this changes what you are looking at.
+        addRenderableWidget(Button.builder(Component.literal("Traffic"), b -> toggleTrafficView())
+                .bounds(mapX - TOOL_BUTTON_WIDTH - 4, toolY + 6, TOOL_BUTTON_WIDTH, rowH)
+                .build());
 
         // --- row 2: undo + holding-pattern height/direction ---
         int undoW = Math.max(52, mapW / 5);
@@ -743,6 +768,11 @@ public class AirportMapScreen extends Screen {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         // The dropdown overlaps the map, so it gets first refusal on clicks.
         if (button == 0 && dropdownClicked(mouseX, mouseY)) return true;
+
+        // Looking, not drawing. Every tool below puts something into the
+        // layout, and a click meant for a gate's traffic must not quietly
+        // add a waypoint to the airport underneath it.
+        if (trafficView && isInsideMap(mouseX, mouseY)) return true;
 
         if (button == 0 && tool == Tool.DELETE && isInsideMap(mouseX, mouseY)) {
             deleteAt(mouseX, mouseY);
@@ -1463,7 +1493,9 @@ public class AirportMapScreen extends Screen {
         // Crosshair on the position the next click would actually land on -
         // including the pull onto a nearby node, so joining up is visible
         // before committing rather than a surprise afterwards.
-        if (isInsideMap(mouseX, mouseY)) {
+        if (trafficView) {
+            renderTraffic(guiGraphics, mouseX, mouseY);
+        } else if (isInsideMap(mouseX, mouseY)) {
             BlockPos raw = screenToWorld(mouseX, mouseY);
             BlockPos hovered = snapToExistingNode(raw);
             boolean snapped = !hovered.equals(raw);
@@ -1669,6 +1701,229 @@ public class AirportMapScreen extends Screen {
             if (e2 >= dy) { err += dy; x0 += sx; }
             if (e2 <= dx) { err += dx; y0 += sy; }
         }
+    }
+
+    // ---- the traffic view ------------------------------------------------
+
+    private void toggleTrafficView() {
+        trafficView = !trafficView;
+        // Ask immediately rather than waiting out the refresh interval, so
+        // the tab does not open onto a second of blank panel.
+        if (trafficView) lastOccupancyRequestMs = 0;
+    }
+
+    /**
+     * Take a snapshot from the server, if it is about the airport on screen.
+     *
+     * A reply can outlive the question: the view asks on a timer, and a
+     * player can close this station and open another before the answer
+     * arrives. Drawing that over the wrong airport would be worse than
+     * drawing nothing.
+     */
+    public void acceptOccupancy(com.skyport.data.AirportOccupancy snapshot) {
+        if (snapshot.airportId().equals(layout.id())) this.occupancy = snapshot;
+    }
+
+    private void renderTraffic(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        long now = System.currentTimeMillis();
+        if (now - lastOccupancyRequestMs > OCCUPANCY_REFRESH_MS) {
+            lastOccupancyRequestMs = now;
+            net.neoforged.neoforge.network.PacketDistributor.sendToServer(
+                    new com.skyport.network.RequestOccupancyPayload(stationPos));
+        }
+
+        com.skyport.data.AirportOccupancy snapshot = occupancy;
+        if (snapshot == null) {
+            guiGraphics.drawString(font, "Asking the tower...", mapX + 4, mapY + 4, 0xFFD9D9D9);
+            return;
+        }
+
+        markStops(guiGraphics, snapshot, layout.gates(), COLOR_GATE);
+        markStops(guiGraphics, snapshot, layout.helipads(), COLOR_HELIPAD);
+        renderTrafficPanel(guiGraphics, snapshot);
+        renderStopTooltip(guiGraphics, snapshot, mouseX, mouseY);
+    }
+
+    /**
+     * A ring round every stop that has somebody on it, and a dimmer one round
+     * every stop that is merely routed to.
+     *
+     * Drawn on the map rather than only listed beside it, because "which of
+     * these is busy" is a question about a place, and the answer is far
+     * quicker to read as a mark on the thing itself than as a name in a list
+     * you then have to find.
+     */
+    private void markStops(GuiGraphics guiGraphics, com.skyport.data.AirportOccupancy snapshot,
+                           Map<String, BlockPos> stops, int colour) {
+        for (Map.Entry<String, BlockPos> stop : stops.entrySet()) {
+            boolean occupied = !occupantsOf(snapshot, stop.getKey()).isEmpty();
+            boolean routed = !expectedAt(snapshot, stop.getKey()).isEmpty();
+            if (!occupied && !routed) continue;
+
+            int x = worldToScreenX(stop.getValue());
+            int y = worldToScreenY(stop.getValue());
+            if (occupied) {
+                drawBorder(guiGraphics, x - 5, y - 5, 11, 11, COLOR_PLAYER);
+                drawBorder(guiGraphics, x - 4, y - 4, 9, 9, COLOR_PLAYER);
+            } else {
+                drawBorder(guiGraphics, x - 5, y - 5, 11, 11, colour);
+            }
+        }
+    }
+
+    /**
+     * The list beside the map: what is claimed, then every gate and pad.
+     *
+     * The claims come first because they are readings rather than
+     * deductions, and because they are the ones that stop other aircraft
+     * moving. The taxiways are deliberately one line: the traffic system
+     * claims them as a set, so naming a particular strip would be inventing
+     * detail the airport does not have.
+     */
+    private void renderTrafficPanel(GuiGraphics guiGraphics, com.skyport.data.AirportOccupancy snapshot) {
+        int panelW = Math.min(132, mapW / 2);
+        int x = mapX + mapW - panelW;
+        int y = mapY;
+        guiGraphics.fill(x, y, mapX + mapW, mapY + mapH, 0xD0101010);
+        drawBorder(guiGraphics, x, y, panelW, mapH, 0xFF2B2B2B);
+
+        int line = y + 3;
+        int left = x + 4;
+        line = panelLine(guiGraphics, left, line, "Taxiways", claimText(snapshot.taxiways()),
+                snapshot.taxiways());
+        line = panelLine(guiGraphics, left, line, "Arrival rwy",
+                claimText(snapshot.arrivalRunway()), snapshot.arrivalRunway());
+        line = panelLine(guiGraphics, left, line, "Departure rwy",
+                claimText(snapshot.departureRunway()), snapshot.departureRunway());
+
+        line += 3;
+        line = stopSection(guiGraphics, snapshot, left, line, "Gates", layout.gates().keySet());
+        line = stopSection(guiGraphics, snapshot, left, line, "Pads", layout.helipads().keySet());
+
+        // The honest footnote. Schedules live on the autopilot block, so an
+        // aeroplane whose chunk is not loaded cannot be read at all - and a
+        // short list presented as a complete one is how somebody concludes a
+        // gate is unused and removes it.
+        if (snapshot.fleetKnown() > snapshot.fleetLoaded() && line < mapY + mapH - 18) {
+            guiGraphics.drawString(font,
+                    (snapshot.fleetKnown() - snapshot.fleetLoaded()) + " asleep,",
+                    left, mapY + mapH - 18, 0xFF8A8A8A, false);
+            guiGraphics.drawString(font, "not counted", left, mapY + mapH - 9, 0xFF8A8A8A, false);
+        }
+    }
+
+    private int panelLine(GuiGraphics guiGraphics, int x, int y, String label, String value,
+                          @org.jetbrains.annotations.Nullable com.skyport.data.AirportOccupancy.Claim claim) {
+        guiGraphics.drawString(font, label, x, y, 0xFF8A8A8A, false);
+        // A clearance whose holder has gone quiet is already free for the
+        // taking, and showing it the same as a busy one would have somebody
+        // waiting for an aeroplane that is not coming back.
+        int colour = claim == null ? 0xFF63D66B : claim.live() ? 0xFFE0812F : 0xFFD64550;
+        guiGraphics.drawString(font, value, x, y + 9, colour, false);
+        return y + 20;
+    }
+
+    private String claimText(@org.jetbrains.annotations.Nullable com.skyport.data.AirportOccupancy.Claim claim) {
+        if (claim == null) return "clear";
+        return claim.live() ? claim.callsign() : claim.callsign() + " (stale)";
+    }
+
+    private int stopSection(GuiGraphics guiGraphics, com.skyport.data.AirportOccupancy snapshot,
+                            int x, int y, String heading, java.util.Collection<String> stops) {
+        if (stops.isEmpty()) return y;
+        if (y > mapY + mapH - 20) return y;
+        guiGraphics.drawString(font, heading, x, y, 0xFFFFFFFF, false);
+        y += 10;
+
+        for (String stop : stops) {
+            if (y > mapY + mapH - 30) {
+                guiGraphics.drawString(font, "...", x, y, 0xFF8A8A8A, false);
+                return y + 9;
+            }
+            List<String> here = occupantsOf(snapshot, stop);
+            List<String> routed = expectedAt(snapshot, stop);
+            guiGraphics.drawString(font, stop, x, y, 0xFFD9D9D9, false);
+            y += 9;
+
+            String detail;
+            int colour;
+            if (!here.isEmpty()) {
+                detail = String.join(", ", here);
+                colour = COLOR_PLAYER;
+            } else if (routed.isEmpty()) {
+                // Worth saying out loud. A gate nothing is routed to looks
+                // exactly like a busy one until somebody counts.
+                detail = "unused";
+                colour = 0xFF6A6A6A;
+            } else {
+                detail = routed.size() + " routed";
+                colour = 0xFF63D66B;
+            }
+            guiGraphics.drawString(font, "  " + detail, x, y, colour, false);
+            y += 11;
+        }
+        return y + 2;
+    }
+
+    /** The stop under the pointer, and everything known about it. */
+    private void renderStopTooltip(GuiGraphics guiGraphics, com.skyport.data.AirportOccupancy snapshot,
+                                   int mouseX, int mouseY) {
+        if (!isInsideMap(mouseX, mouseY)) return;
+
+        String stop = stopNear(layout.gates(), mouseX, mouseY);
+        boolean pad = false;
+        if (stop == null) {
+            stop = stopNear(layout.helipads(), mouseX, mouseY);
+            pad = stop != null;
+        }
+        if (stop == null) return;
+
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.literal(stop + (pad ? "  (helipad)" : "  (gate)")));
+
+        List<String> here = occupantsOf(snapshot, stop);
+        lines.add(Component.literal(here.isEmpty() ? "Nobody here" : "Here: " + String.join(", ", here)));
+
+        // A pad is claimed as well as occupied, and the two can disagree: the
+        // claim is what stops another helicopter landing, so it is worth
+        // showing even when nobody is sitting on the pad yet.
+        if (pad) {
+            com.skyport.data.AirportOccupancy.Claim claim = snapshot.pads().get(stop);
+            if (claim != null) {
+                lines.add(Component.literal("Claimed by " + claimText(claim)));
+            }
+        }
+
+        List<String> routed = expectedAt(snapshot, stop);
+        lines.add(Component.literal(routed.isEmpty()
+                ? "No schedule uses it"
+                : "Routed here: " + String.join(", ", routed)));
+
+        guiGraphics.renderComponentTooltip(font, lines, mouseX, mouseY);
+    }
+
+    @org.jetbrains.annotations.Nullable
+    private String stopNear(Map<String, BlockPos> stops, int mouseX, int mouseY) {
+        String best = null;
+        int bestDistance = HOVER_RADIUS * HOVER_RADIUS + 1;
+        for (Map.Entry<String, BlockPos> stop : stops.entrySet()) {
+            int dx = worldToScreenX(stop.getValue()) - mouseX;
+            int dy = worldToScreenY(stop.getValue()) - mouseY;
+            int distance = dx * dx + dy * dy;
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = stop.getKey();
+            }
+        }
+        return best;
+    }
+
+    private static List<String> occupantsOf(com.skyport.data.AirportOccupancy snapshot, String stop) {
+        return snapshot.occupants().getOrDefault(stop, List.of());
+    }
+
+    private static List<String> expectedAt(com.skyport.data.AirportOccupancy snapshot, String stop) {
+        return snapshot.expected().getOrDefault(stop, List.of());
     }
 
     @Override

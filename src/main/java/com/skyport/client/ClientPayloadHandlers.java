@@ -1,5 +1,7 @@
 package com.skyport.client;
 
+import com.skyport.client.gui.AirportMapScreen;
+import com.skyport.network.AirportOccupancyPayload;
 import com.skyport.client.gui.AirportStationScreen;
 import com.skyport.client.gui.AtcScreen;
 import com.skyport.client.gui.AutopilotScreen;
@@ -69,6 +71,24 @@ public final class ClientPayloadHandlers {
                 Minecraft.getInstance().setScreen(new AutopilotScreen(
                         payload.autopilotPos(), payload.airports(), payload.vors(), payload.schedule(),
                         payload.serverPower())));
+    }
+
+    /**
+     * Hand an occupancy snapshot to the map screen, if that is still what is
+     * open.
+     *
+     * A reply can easily outlive the question. The screen asks on a timer,
+     * and a player can close it, walk to another station and open that one
+     * before the first answer arrives - so the screen checks the airport id
+     * before drawing anything, and a snapshot about somewhere else is
+     * dropped rather than shown over the airport in front of them.
+     */
+    public static void airportOccupancy(AirportOccupancyPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (Minecraft.getInstance().screen instanceof AirportMapScreen map) {
+                map.acceptOccupancy(payload.occupancy());
+            }
+        });
     }
 
     public static void openVor(OpenVorPayload payload, IPayloadContext context) {

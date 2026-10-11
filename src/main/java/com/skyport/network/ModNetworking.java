@@ -1,5 +1,9 @@
 package com.skyport.network;
 
+import java.util.UUID;
+import net.minecraft.server.level.ServerLevel;
+import com.skyport.data.AirportRegistry;
+import com.skyport.data.AirportOccupancy;
 import com.skyport.Skyport;
 import com.skyport.blockentity.AirportStationBlockEntity;
 import com.skyport.blockentity.AutopilotBlockEntity;
@@ -71,6 +75,16 @@ public class ModNetworking {
                 SaveSchedulePayload.TYPE,
                 SaveSchedulePayload.STREAM_CODEC,
                 ModNetworking::handleSaveSchedule);
+
+        registrar.playToServer(
+                RequestOccupancyPayload.TYPE,
+                RequestOccupancyPayload.STREAM_CODEC,
+                ModNetworking::handleRequestOccupancy);
+
+        registrar.playToClient(
+                AirportOccupancyPayload.TYPE,
+                AirportOccupancyPayload.STREAM_CODEC,
+                ModNetworking::handleAirportOccupancy);
 
         registrar.playToServer(
                 WakeAircraftPayload.TYPE,
@@ -323,6 +337,33 @@ public class ModNetworking {
         });
     }
 
+    /**
+     * Read-only, so it does not go through authorised().
+     *
+     * Everything that changes something does, and for good reason. This
+     * changes nothing: it answers a question about traffic that the ATC
+     * block already shows to anybody who walks up to it, and the Create
+     * display board already writes on a wall for the whole server to read. A
+     * locked station is locked against being edited, not against being
+     * looked at - and refusing to say which gate is busy would make the lock
+     * hide information its owner is already broadcasting.
+     */
+    private static void handleRequestOccupancy(RequestOccupancyPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            ServerPlayer player = (ServerPlayer) context.player();
+            if (!(player.level() instanceof ServerLevel serverLevel)) return;
+            if (!(serverLevel.getBlockEntity(payload.stationPos())
+                    instanceof AirportStationBlockEntity station)) {
+                return;
+            }
+            UUID airportId = station.airportId();
+            if (airportId == null) return;
+            AirportRegistry.get(serverLevel).byId(airportId).ifPresent(airport ->
+                    PacketDistributor.sendToPlayer(player, new AirportOccupancyPayload(
+                            AirportOccupancy.of(serverLevel, airport))));
+        });
+    }
+
     private static void handleSaveAirportLayout(SaveAirportLayoutPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             ServerPlayer player = (ServerPlayer) context.player();
@@ -373,6 +414,11 @@ public class ModNetworking {
     private static void handleOpenAtc(OpenAtcPayload payload, IPayloadContext context) {
         if (!onClient()) return;
         ClientPayloadHandlers.openAtc(payload, context);
+    }
+
+    private static void handleAirportOccupancy(AirportOccupancyPayload payload, IPayloadContext context) {
+        if (!onClient()) return;
+        ClientPayloadHandlers.airportOccupancy(payload, context);
     }
 
     private static void handleOpenAutopilot(OpenAutopilotPayload payload, IPayloadContext context) {

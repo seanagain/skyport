@@ -235,6 +235,35 @@ public class AirportRegistry extends SavedData {
     }
 
     /**
+     * Who holds the run of the taxiways here, if anyone.
+     *
+     * One answer for the whole airport, because that is what the claim is -
+     * the taxiways are taken as a set, not a segment at a time. Anything
+     * showing this to a player has to say so rather than implying a
+     * particular strip is busy.
+     */
+    @org.jetbrains.annotations.Nullable
+    public UUID taxiwayHolder(UUID airportId) {
+        return taxiwayClearances.get(airportId);
+    }
+
+    /**
+     * Is this holder still reporting in, or has it gone quiet?
+     *
+     * Every clearance here is a lease rather than a lock - see
+     * clearanceSeen - so one whose holder has stopped confirming it is
+     * already free for the taking even though the map still lists it. A
+     * clearance in that state and one genuinely occupied look identical from
+     * the outside, and they mean opposite things to somebody waiting, so
+     * anything displaying them needs to be able to tell them apart.
+     */
+    public boolean clearanceIsLive(@org.jetbrains.annotations.Nullable UUID planeId, long now) {
+        if (planeId == null) return false;
+        Long seen = clearanceSeen.get(planeId);
+        return seen != null && now - seen <= CLEARANCE_TIMEOUT_TICKS;
+    }
+
+    /**
      * Take the runway and the taxiway together, or neither.
      *
      * Arrivals have to claim both up front, and this is a deadlock fix, not
