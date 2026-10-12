@@ -1,0 +1,23 @@
+// SeaPort: the same system, pointed at ships.
+//
+// Nothing here yet beyond the wiring. The module exists so the shape of the
+// repository is settled before any marine code is written, and so :core has
+// a second consumer to be answerable to - a core with one user is just the
+// first mod with extra steps.
+
+plugins {
+    id 'net.neoforged.moddev'
+}
+
+neoForge {
+    version = neo_version
+
+    parchment {
+        minecraftVersion = parchment_minecraft_version
+        mappingsVersion = parchment_mappings_version
+    }
+}
+
+dependencies {
+    api project(':core')
+}

@@ -6,7 +6,26 @@ pluginManagement {
     }
 }
 
+// One repository, three modules, two mods.
+//
+// Skyport and SeaPort are the same system pointed at different vehicles: the
+// clearance leases, the schedules, the tower roster, the chunk bubble, the
+// locks and the ComputerCraft layer have nothing to do with whether the
+// vehicle flies or floats. Keeping one copy of that means a bug found in one
+// is fixed for both - which matters more than it sounds, because the three
+// worst bugs this project has had all lived in exactly that shared half.
+//
+// :core carries nothing speculative. Code moves into it when the SECOND mod
+// actually needs it, not when it looks reusable - an abstraction guessed at
+// from one example usually fits neither.
+//
+// The two mods ship as separate CurseForge projects and each embeds :core
+// with jarJar, so a player installs one jar and never sees a dependency.
 rootProject.name = 'skyport'
+
+include 'core'
+include 'skyport'
+include 'seaport'
 
 // If Gradle can't find a JDK 21 on your machine automatically, add the
 // "org.gradle.toolchains.foojay-resolver-convention" plugin here (see

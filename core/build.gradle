@@ -1,0 +1,34 @@
+// The shared half, as a library rather than a mod.
+//
+// It compiles against Minecraft and NeoForge because almost everything it
+// holds speaks in their types - BlockPos, CompoundTag, ServerLevel - but it
+// registers nothing, has no mods.toml and never loads on its own. Both mods
+// carry it inside their own jar.
+//
+// No runs block on purpose: there is nothing here to run.
+
+plugins {
+    id 'net.neoforged.moddev'
+}
+
+neoForge {
+    version = neo_version
+
+    parchment {
+        minecraftVersion = parchment_minecraft_version
+        mappingsVersion = parchment_mappings_version
+    }
+}
+
+dependencies {
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    // ModDevGradle wires Minecraft into the main source set only, so the test
+    // source set has to borrow it - the same arrangement the mods use.
+    testImplementation files(sourceSets.main.compileClasspath)
+    testImplementation files(sourceSets.main.output)
+}
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
+}
