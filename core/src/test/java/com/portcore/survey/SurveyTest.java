@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -257,6 +258,66 @@ class SurveyTest {
 
     /** Surveying the places people are before the far corner of a world
      *  somebody visited once. */
+    // ---- which slots a region actually holds -----------------------------
+
+    /** Four bytes a slot: three of offset, one of length. All zero means
+     *  nothing was ever written there. */
+    private static byte[] headerWith(int... presentSlots) {
+        byte[] header = new byte[RegionFiles.HEADER_BYTES];
+        for (int slot : presentSlots) {
+            header[slot * 4 + 2] = 2;      // a non-zero offset
+            header[slot * 4 + 3] = 1;      // one sector long
+        }
+        return header;
+    }
+
+    /**
+     * The measurement that prompted this.
+     *
+     * A region file covers a thousand chunk slots and a world generated
+     * around a spawn point fills about fifty of them. Queueing every slot
+     * meant four thousand disk reads to find forty-nine chunks, with every
+     * one of the rest returning nothing - and the statistics called them
+     * "skipped", which made four thousand futile reads look deliberate.
+     */
+    @Test
+    void onlySlotsHoldingAChunkAreReported() {
+        assertArrayEquals(new int[] { 0, 5, 1023 },
+                RegionFiles.presentSlots(headerWith(0, 5, 1023)));
+    }
+
+    @Test
+    void anEmptyRegionHoldsNothing() {
+        assertEquals(0, RegionFiles.presentSlots(new byte[RegionFiles.HEADER_BYTES]).length);
+    }
+
+    /** A half-written header yields the chunks it can rather than none: one
+     *  truncated file must not cost a server all the others. */
+    @Test
+    void aTruncatedHeaderYieldsWhatItCan() {
+        byte[] truncated = java.util.Arrays.copyOf(headerWith(0, 5, 900), 100 * 4);
+        assertArrayEquals(new int[] { 0, 5 }, RegionFiles.presentSlots(truncated));
+    }
+
+    /** An offset with no length is not a chunk, and treating it as one would
+     *  queue a read that cannot return anything. */
+    @Test
+    void anEntryWithNoLengthIsNotAChunk() {
+        byte[] header = new byte[RegionFiles.HEADER_BYTES];
+        header[2] = 2;
+        assertEquals(0, RegionFiles.presentSlots(header).length);
+    }
+
+    @Test
+    void slotsMapBackOntoWorldChunks() {
+        RegionFiles.Region region = new RegionFiles.Region(1, -1);
+        assertEquals(32, RegionFiles.slotChunkX(region, 0));
+        assertEquals(-32, RegionFiles.slotChunkZ(region, 0));
+        // Slot 33 is one east and one south of the corner.
+        assertEquals(33, RegionFiles.slotChunkX(region, 33));
+        assertEquals(-31, RegionFiles.slotChunkZ(region, 33));
+    }
+
     @Test
     void regionsKnowHowFarTheyAreFromSomewhere() {
         RegionFiles.Region near = new RegionFiles.Region(0, 0);

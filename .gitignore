@@ -18,3 +18,4 @@ run.uidcache
 src/generated/
 
 run-server/
+run-seaport/

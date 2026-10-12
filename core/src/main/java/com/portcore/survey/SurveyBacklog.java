@@ -111,6 +111,19 @@ public final class SurveyBacklog {
         return out;
     }
 
+    /**
+     * Drop work that no longer needs doing.
+     *
+     * A chunk queued for a disk read and then loaded by the game has already
+     * been answered, and answered better - from memory rather than from a
+     * file. Reading it afterwards would spend an I/O to learn the same thing.
+     */
+    public boolean drop(long key) {
+        if (!queued.remove(key)) return false;
+        queue.remove(key);
+        return true;
+    }
+
     public boolean isWaiting(long key) {
         return queued.contains(key);
     }

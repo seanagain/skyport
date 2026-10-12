@@ -39,6 +39,10 @@ neoForge {
     mods {
         "${mod_id}" {
             sourceSet sourceSets.main
+            // See the note in seaport/build.gradle: core is a library rather
+            // than a mod, so it has to be named as part of this one or the
+            // dev run cannot find its classes.
+            sourceSet project(':core').sourceSets.main
         }
     }
 }

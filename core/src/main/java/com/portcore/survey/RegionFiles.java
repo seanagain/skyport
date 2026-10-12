@@ -90,6 +90,59 @@ public final class RegionFiles {
         return new Region(chunkX >> 5, chunkZ >> 5);
     }
 
+    /**
+     * Bytes of header at the front of a region file: 1024 four-byte entries,
+     * one per chunk slot, saying where in the file that chunk lives.
+     */
+    public static final int HEADER_BYTES = 4096;
+
+    /**
+     * Which of a region's 1024 slots actually hold a chunk.
+     *
+     * A region file covers a 32 by 32 block of chunk slots, and almost never
+     * fills it - a world generated around a spawn point might have fifty
+     * chunks in a file with room for a thousand. Queueing every slot and
+     * finding out by reading means a thousand disk accesses to discover
+     * fifty, and on a world with a few hundred region files that is hundreds
+     * of thousands of reads that were never going to return anything.
+     *
+     * The file says so in its first four kilobytes. Each slot has a four-byte
+     * entry - three bytes of offset, one of length - and an entry of zero
+     * means nothing was ever written there. Reading that header is one small
+     * read per region instead of a thousand per region.
+     *
+     * @param header the first {@value #HEADER_BYTES} bytes of the file; a
+     *               shorter array is read as far as it goes, because a
+     *               truncated region file should yield the chunks it can
+     *               rather than none
+     * @return slot indices, where index = localX + localZ * 32
+     */
+    public static int[] presentSlots(byte[] header) {
+        int slots = Math.min(1024, header.length / 4);
+        int[] found = new int[slots];
+        int count = 0;
+        for (int slot = 0; slot < slots; slot++) {
+            int at = slot * 4;
+            // Three bytes of offset. Any non-zero means something is there;
+            // the actual position does not matter to us, only that it exists.
+            int offset = ((header[at] & 0xFF) << 16)
+                    | ((header[at + 1] & 0xFF) << 8)
+                    | (header[at + 2] & 0xFF);
+            int sectors = header[at + 3] & 0xFF;
+            if (offset != 0 && sectors != 0) found[count++] = slot;
+        }
+        return java.util.Arrays.copyOf(found, count);
+    }
+
+    /** The chunk a slot index refers to, within the region it came from. */
+    public static int slotChunkX(Region region, int slot) {
+        return region.firstChunkX() + (slot % CHUNKS_PER_SIDE);
+    }
+
+    public static int slotChunkZ(Region region, int slot) {
+        return region.firstChunkZ() + (slot / CHUNKS_PER_SIDE);
+    }
+
     /** Packs a chunk coordinate into one long, which is how the backlog
      *  queues work without knowing what a chunk is. */
     public static long chunkKey(int chunkX, int chunkZ) {

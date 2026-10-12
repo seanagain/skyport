@@ -46,6 +46,13 @@ neoForge {
     mods {
         "${seaport_mod_id}" {
             sourceSet sourceSets.main
+            // Core is a plain library, not a mod, so nothing puts it on the
+            // run's mod path on its own - depending on it only got its
+            // classes onto the COMPILE path, and the first thing to reach for
+            // one at runtime got a ClassNotFoundException during mod
+            // construction. Naming it here makes the dev run load it as part
+            // of this mod, which is also how it ships.
+            sourceSet project(':core').sourceSets.main
         }
     }
 }
@@ -84,4 +91,17 @@ tasks.named('processResources', ProcessResources).configure {
 
 tasks.named('test', Test) {
     useJUnitPlatform()
+}
+
+// Core ships inside the mod jar rather than beside it: a player installs one
+// file and never sees a dependency, and there is no third CurseForge project
+// to keep in step.
+//
+// Both mods doing this means both jars carry com.portcore - which is fine
+// while only one is installed and needs settling before they ship together.
+// Noted rather than solved, because it is a packaging question with a real
+// answer (jarJar, which version-resolves duplicates) and no good reason to
+// guess at it now.
+tasks.named('jar', Jar) {
+    from project(':core').sourceSets.main.output
 }
