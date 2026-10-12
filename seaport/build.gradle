@@ -1,12 +1,23 @@
-// SeaPort: the same system, pointed at ships.
+// SeaPort: harbours and shipping lanes.
 //
-// Nothing here yet beyond the wiring. The module exists so the shape of the
-// repository is settled before any marine code is written, and so :core has
-// a second consumer to be answerable to - a core with one user is just the
-// first mod with extra steps.
+// Its own id, version and release history - a separate CurseForge project
+// rather than a module of Skyport - so it does not inherit a version number
+// that would announce a brand-new mod as mature.
+//
+// Deliberately thin on dependencies for now. Charting the seabed needs
+// nothing but Minecraft, and the point of the first milestone is to find out
+// whether that survey is safe against a real world before anything that
+// floats depends on it. Create, Sable and Deep Seas arrive when there is a
+// ship to steer.
 
 plugins {
     id 'net.neoforged.moddev'
+}
+
+version = seaport_mod_version
+
+base {
+    archivesName = seaport_mod_id
 }
 
 neoForge {
@@ -16,19 +27,59 @@ neoForge {
         minecraftVersion = parchment_minecraft_version
         mappingsVersion = parchment_mappings_version
     }
+
+    runs {
+        client {
+            client()
+            systemProperty 'neoforge.enabledGameTestNamespaces', seaport_mod_id
+        }
+        server {
+            server()
+            programArgument '--nogui'
+            // Its own directory, for the same reason Skyport's has one: two
+            // servers sharing a run folder fight over the world session lock.
+            gameDirectory = rootProject.file('run-seaport')
+            systemProperty 'neoforge.enabledGameTestNamespaces', seaport_mod_id
+        }
+    }
+
+    mods {
+        "${seaport_mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
 }
 
 dependencies {
+    // The half that does not care whether the vehicle flies or floats.
     api project(':core')
-}
 
-dependencies {
     testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
     // ModDevGradle wires Minecraft into the main source set only, so the test
     // source set borrows it - the same arrangement Skyport uses.
     testImplementation files(sourceSets.main.compileClasspath)
     testImplementation files(sourceSets.main.output)
+}
+
+tasks.named('processResources', ProcessResources).configure {
+    var replaceProperties = [
+            minecraft_version: minecraft_version,
+            minecraft_version_range: minecraft_version_range,
+            neo_version: neo_version,
+            neo_version_range: neo_version_range,
+            loader_version_range: loader_version_range,
+            mod_id: seaport_mod_id,
+            mod_name: seaport_mod_name,
+            mod_license: mod_license,
+            mod_version: seaport_mod_version,
+            mod_authors: mod_authors,
+            mod_description: seaport_mod_description,
+    ]
+    inputs.properties replaceProperties
+    filesMatching(['META-INF/neoforge.mods.toml']) {
+        expand replaceProperties + [project: project]
+    }
 }
 
 tasks.named('test', Test) {
