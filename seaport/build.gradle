@@ -21,3 +21,16 @@ neoForge {
 dependencies {
     api project(':core')
 }
+
+dependencies {
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    // ModDevGradle wires Minecraft into the main source set only, so the test
+    // source set borrows it - the same arrangement Skyport uses.
+    testImplementation files(sourceSets.main.compileClasspath)
+    testImplementation files(sourceSets.main.output)
+}
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
+}
