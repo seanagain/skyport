@@ -45,9 +45,10 @@ public final class SurveyHooks {
      *  server catching up for an hour does not fill its log with it. */
     private static final int PROGRESS_LOG_INTERVAL_TICKS = 200;
 
-    /** Dimensions that had work outstanding last tick, so finishing can be
-     *  reported once rather than every tick for the rest of the session. */
-    private static final java.util.Set<String> WAS_BUSY =
+    /** Dimensions whose completion has been reported, so it is said once
+     *  rather than every tick for the rest of the session. Cleared again if
+     *  more work arrives, so a later batch reports its own finish. */
+    private static final java.util.Set<String> REPORTED =
             java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private SurveyHooks() { }
@@ -96,14 +97,26 @@ public final class SurveyHooks {
             // watching actually cares about. Reporting only while there is
             // work left meant the survey went silent exactly when it
             // succeeded, which reads identically to it having died.
+            String dimension = level.dimension().location().toString();
             boolean busy = surveyor.progress().backlog() > 0;
-            if (busy && level.getGameTime() % PROGRESS_LOG_INTERVAL_TICKS == 0) {
-                SeaPort.LOGGER.info("[survey] {}", surveyor.summary());
-            }
-            if (!busy && WAS_BUSY.remove(level.dimension().location().toString())) {
+
+            if (busy) {
+                // Still working: say so occasionally, and arm the report for
+                // when it finishes.
+                REPORTED.remove(dimension);
+                if (level.getGameTime() % PROGRESS_LOG_INTERVAL_TICKS == 0) {
+                    SeaPort.LOGGER.info("[survey] {}", surveyor.summary());
+                }
+            } else if (REPORTED.add(dimension)) {
+                // Nothing left to do, and this is the first tick to notice.
+                //
+                // Reported whether or not a backlog was ever seen from here,
+                // which the first version of this got wrong: the chunks a
+                // world loads at startup are surveyed from memory while it is
+                // still starting, so by the first tick the queue can already
+                // be empty. That looked exactly like the surveyor never
+                // running, and it was the surveyor having already finished.
                 SeaPort.LOGGER.info("[survey] caught up - {}", surveyor.summary());
-            } else if (busy) {
-                WAS_BUSY.add(level.dimension().location().toString());
             }
         }
     }
