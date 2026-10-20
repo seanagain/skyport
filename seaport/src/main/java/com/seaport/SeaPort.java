@@ -28,6 +28,7 @@ public class SeaPort {
 
     public SeaPort(IEventBus modEventBus, ModContainer modContainer) {
         com.seaport.registry.SeaPortBlocks.register(modEventBus);
+        com.seaport.registry.SeaPortBlockEntities.REGISTER.register(modEventBus);
         com.seaport.registry.SeaPortCreativeTabs.register(modEventBus);
     }
 }

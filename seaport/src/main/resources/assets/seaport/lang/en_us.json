@@ -4,5 +4,7 @@
   "block.seaport.port_station": "Port Station",
   "block.seaport.marine_radar": "Marine Radar",
   "block.seaport.marine_beacon": "Marine Beacon",
-  "block.seaport.marine_autopilot": "Marine Autopilot"
+  "block.seaport.marine_autopilot": "Marine Autopilot",
+
+  "gui.seaport.port_station.title": "Port Station"
 }
