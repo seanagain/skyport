@@ -1,5 +1,5 @@
 {
-  "credit": "Skyport - Autopilot. An instrument box with its face recessed into the top. Nothing stands above y=16: this block is built into a flying craft, and anything proud clips through fuselage plating placed on it. Every face samples the patch of texture that lies where it sits, so case and rim reconstruct one continuous surface; each rim's TOP samples the texture in plan - north rows 0-3, west columns 0-3 - so the brass edging turns the corner onto the top of the block and meets the brass line on the wall below it. Only the sunken floor carries the instrument face.",
+  "credit": "SeaPort - Marine Autopilot. Geometry shared with Skyport's Autopilot. An instrument box with its face recessed into the top. Nothing stands above y=16: this block is built into a flying craft, and anything proud clips through fuselage plating placed on it. Every face samples the patch of texture that lies where it sits, so case and rim reconstruct one continuous surface; each rim's TOP samples the texture in plan - north rows 0-3, west columns 0-3 - so the brass edging turns the corner onto the top of the block and meets the brass line on the wall below it. Only the sunken floor carries the instrument face.",
   "parent": "block/block",
   "textures": {
     "particle": "seaport:block/marine_autopilot_side",

@@ -1,10 +1,10 @@
 {
-  "credit": "Skyport - Air Traffic Control. Plinth, shaft and cabin stacked flush, so the block reaches its own boundary at the base and nothing shows through. The three pieces SHARE the side texture between them rather than each taking a copy: plinth gets rows 12-16, shaft rows 6-12, cabin rows 0-6, full width horizontally on every piece so the brass edging runs unbroken up the block. Give every piece the whole texture instead and the window band repeats three times up the tower.",
+  "credit": "SeaPort - Marine Radar. Geometry shared with Skyport's ATC. Plinth, shaft and cabin stacked flush, so the block reaches its own boundary at the base and nothing shows through. The three pieces SHARE the side texture between them rather than each taking a copy: plinth gets rows 12-16, shaft rows 6-12, cabin rows 0-6, full width horizontally on every piece so the brass edging runs unbroken up the block. Give every piece the whole texture instead and the window band repeats three times up the tower.",
   "parent": "block/block",
   "textures": {
-    "particle": "seaport:block/atc_side",
-    "side": "seaport:block/atc_side",
-    "top": "seaport:block/atc_top"
+    "particle": "seaport:block/marine_radar_side",
+    "side": "seaport:block/marine_radar_side",
+    "top": "seaport:block/marine_radar_top"
   },
   "elements": [
     {
