@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " C ",
+    "IRI",
+    " P "
+  ],
+  "key": {
+    "C": { "item": "minecraft:compass" },
+    "I": { "item": "minecraft:iron_ingot" },
+    "R": { "item": "minecraft:redstone" },
+    "P": { "item": "minecraft:prismarine_shard" }
+  },
+  "result": { "id": "seaport:marine_autopilot", "count": 1 }
+}

@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " C ",
+    "PRP",
+    "III"
+  ],
+  "key": {
+    "C": { "item": "minecraft:compass" },
+    "P": { "item": "minecraft:prismarine_shard" },
+    "R": { "item": "minecraft:redstone" },
+    "I": { "item": "minecraft:iron_ingot" }
+  },
+  "result": { "id": "seaport:port_station", "count": 1 }
+}

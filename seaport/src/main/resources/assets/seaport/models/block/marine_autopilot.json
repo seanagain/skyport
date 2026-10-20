@@ -1,0 +1,68 @@
+{
+  "credit": "Skyport - Autopilot. An instrument box with its face recessed into the top. Nothing stands above y=16: this block is built into a flying craft, and anything proud clips through fuselage plating placed on it. Every face samples the patch of texture that lies where it sits, so case and rim reconstruct one continuous surface; each rim's TOP samples the texture in plan - north rows 0-3, west columns 0-3 - so the brass edging turns the corner onto the top of the block and meets the brass line on the wall below it. Only the sunken floor carries the instrument face.",
+  "parent": "block/block",
+  "textures": {
+    "particle": "seaport:block/marine_autopilot_side",
+    "side": "seaport:block/marine_autopilot_side",
+    "top": "seaport:block/marine_autopilot_top"
+  },
+  "elements": [
+    {
+      "name": "Case",
+      "from": [0, 0, 0],
+      "to": [16, 15, 16],
+      "faces": {
+        "north": { "uv": [0, 1, 16, 16], "texture": "#side", "cullface": "north" },
+        "south": { "uv": [0, 1, 16, 16], "texture": "#side", "cullface": "south" },
+        "west": { "uv": [0, 1, 16, 16], "texture": "#side", "cullface": "west" },
+        "east": { "uv": [0, 1, 16, 16], "texture": "#side", "cullface": "east" },
+        "down": { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "down" },
+        "up": { "uv": [0, 0, 16, 16], "texture": "#top" }
+      }
+    },
+    {
+      "name": "Rim north",
+      "from": [0, 15, 0],
+      "to": [16, 16, 3],
+      "faces": {
+        "north": { "uv": [0, 0, 16, 1], "texture": "#side", "cullface": "north" },
+        "south": { "uv": [5, 3, 11, 6], "texture": "#side" },
+        "west": { "uv": [0, 0, 3, 1], "texture": "#side", "cullface": "west" },
+        "east": { "uv": [13, 0, 16, 1], "texture": "#side", "cullface": "east" },
+        "up": { "uv": [0, 0, 16, 3], "texture": "#side", "cullface": "up" }
+      }
+    },
+    {
+      "name": "Rim south",
+      "from": [0, 15, 13],
+      "to": [16, 16, 16],
+      "faces": {
+        "north": { "uv": [5, 3, 11, 6], "texture": "#side" },
+        "south": { "uv": [0, 0, 16, 1], "texture": "#side", "cullface": "south" },
+        "west": { "uv": [13, 0, 16, 1], "texture": "#side", "cullface": "west" },
+        "east": { "uv": [0, 0, 3, 1], "texture": "#side", "cullface": "east" },
+        "up": { "uv": [0, 13, 16, 16], "texture": "#side", "cullface": "up" }
+      }
+    },
+    {
+      "name": "Rim west",
+      "from": [0, 15, 3],
+      "to": [3, 16, 13],
+      "faces": {
+        "west": { "uv": [3, 0, 13, 1], "texture": "#side", "cullface": "west" },
+        "east": { "uv": [5, 3, 11, 6], "texture": "#side" },
+        "up": { "uv": [0, 3, 3, 13], "texture": "#side", "cullface": "up" }
+      }
+    },
+    {
+      "name": "Rim east",
+      "from": [13, 15, 3],
+      "to": [16, 16, 13],
+      "faces": {
+        "west": { "uv": [5, 3, 11, 6], "texture": "#side" },
+        "east": { "uv": [3, 0, 13, 1], "texture": "#side", "cullface": "east" },
+        "up": { "uv": [13, 3, 16, 13], "texture": "#side", "cullface": "up" }
+      }
+    }
+  ]
+}

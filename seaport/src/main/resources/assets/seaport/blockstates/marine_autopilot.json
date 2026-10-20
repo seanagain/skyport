@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "seaport:block/marine_autopilot" },
+    "facing=east":  { "model": "seaport:block/marine_autopilot", "y": 90 },
+    "facing=south": { "model": "seaport:block/marine_autopilot", "y": 180 },
+    "facing=west":  { "model": "seaport:block/marine_autopilot", "y": 270 }
+  }
+}

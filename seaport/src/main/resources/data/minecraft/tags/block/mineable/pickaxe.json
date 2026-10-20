@@ -1,0 +1,9 @@
+{
+  "replace": false,
+  "values": [
+    "seaport:port_station",
+    "seaport:marine_radar",
+    "seaport:marine_beacon",
+    "seaport:marine_autopilot"
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "seaport:block/marine_beacon" }
+  }
+}
