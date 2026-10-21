@@ -39,8 +39,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class ResourcesTest {
 
     private static final Path ASSETS = Path.of("src/main/resources/assets/seaport");
+    private static final Path BLOCK_SOURCES = Path.of("src/main/java/com/seaport/block");
     private static final Pattern TEXTURE_REFERENCE =
             Pattern.compile("\"seaport:block/([a-z0-9_]+)\"");
+
+    /** A key in a blockstate's "variants" map - a quoted string opening an
+     *  object. Catches "variants" itself, which the caller drops. */
+    private static final Pattern VARIANT_KEY =
+            Pattern.compile("\"([a-z0-9_=,]*)\"\\s*:\\s*\\{");
 
     /** Model files whose "parent" points at another MODEL rather than a
      *  texture - an item model inheriting its block's shape. Those are
@@ -137,6 +143,92 @@ class ResourcesTest {
         Set<String> unused = new TreeSet<>(existingTextures());
         unused.removeAll(referenced);
         assertTrue(unused.isEmpty(), "generated but never referenced: " + unused);
+    }
+
+    /**
+     * A blockstate's variant keys have to describe states the block can
+     * actually be in.
+     *
+     * This is here because it already went wrong, in the same way and for the
+     * same reason as the texture check above: the Marine Autopilot's
+     * blockstate was mirrored from Skyport's and kept its
+     * facing=north/east/south/west variants, but the block class was written
+     * fresh as a bare Block with no properties. So the block had exactly one
+     * state - the empty one - and the empty key is not in that file. Nothing
+     * matched, no model was ever resolved, and it rendered as the
+     * missing-model checkerboard.
+     *
+     * Which looks exactly like a missing TEXTURE, and was mistaken for one
+     * three times running. The texture was never reached.
+     *
+     * The check is deliberately crude - it reads the block's source rather
+     * than booting a registry - but it is mechanical, and both halves of this
+     * mistake are the kind a copied file makes: variants with no property
+     * behind them, and properties with no variant in front of them.
+     */
+    @Test
+    void everyBlockstateVariantNamesAPropertyItsBlockHas() throws IOException {
+        List<String> broken = new ArrayList<>();
+
+        for (Path state : jsonUnder("blockstates")) {
+            String id = state.getFileName().toString().replace(".json", "");
+            Path source = BLOCK_SOURCES.resolve(pascalCase(id) + "Block.java");
+            if (!Files.isRegularFile(source)) {
+                broken.add(id + ": no block class at " + source);
+                continue;
+            }
+            String code = Files.readString(source);
+            boolean declaresProperties = code.contains("createBlockStateDefinition");
+            Set<String> inVariants = variantProperties(Files.readString(state));
+
+            if (inVariants.isEmpty() && declaresProperties) {
+                broken.add(id + ": the block adds properties but the blockstate only has the "
+                        + "empty variant, which no state with properties can match");
+            } else if (!inVariants.isEmpty() && !declaresProperties) {
+                broken.add(id + ": blockstate has variants for " + inVariants
+                        + " but " + source.getFileName() + " declares no properties at all");
+            }
+            for (String property : inVariants) {
+                // BlockStateProperties names its constants in upper case, and
+                // a qualified one contains the plain name - HORIZONTAL_FACING
+                // for "facing". Enough to catch a variant naming a property
+                // the block never adds.
+                if (declaresProperties && !code.contains(property.toUpperCase())) {
+                    broken.add(id + ": blockstate varies on '" + property
+                            + "' but " + source.getFileName() + " never mentions it");
+                }
+            }
+        }
+
+        assertTrue(broken.isEmpty(), "these would render as missing models in game:\n  "
+                + String.join("\n  ", broken));
+    }
+
+    /** The property names a blockstate's variant keys vary on - "facing" out
+     *  of "facing=north", and nothing at all out of the empty key. */
+    private static Set<String> variantProperties(String blockstate) {
+        Set<String> properties = new TreeSet<>();
+        Matcher matcher = VARIANT_KEY.matcher(blockstate);
+        while (matcher.find()) {
+            String key = matcher.group(1);
+            if (key.equals("variants") || key.isEmpty()) continue;
+            for (String pair : key.split(",")) {
+                int equals = pair.indexOf('=');
+                if (equals > 0) properties.add(pair.substring(0, equals).trim());
+            }
+        }
+        return properties;
+    }
+
+    /** marine_autopilot -> MarineAutopilot, which is how the block classes
+     *  are named and so how a blockstate finds the code behind it. */
+    private static String pascalCase(String id) {
+        StringBuilder out = new StringBuilder();
+        for (String word : id.split("_")) {
+            if (word.isEmpty()) continue;
+            out.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
+        }
+        return out.toString();
     }
 
     /** Each block needs a blockstate, or it renders as nothing at all. */
