@@ -61,7 +61,7 @@ public class GenSeaTex {
         ImageIO.write(radarScope(), "png", new File(dir, "marine_radar_top.png"));
         ImageIO.write(radarScope(), "png", new File(dir, "marine_radar.png"));
 
-        ImageIO.write(hullPanel(), "png", new File(dir, "marine_autopilot_side.png"));
+        ImageIO.write(instrumentCase(), "png", new File(dir, "marine_autopilot_side.png"));
         ImageIO.write(helm(), "png", new File(dir, "marine_autopilot_top.png"));
         ImageIO.write(helm(), "png", new File(dir, "marine_autopilot.png"));
 
@@ -105,29 +105,79 @@ public class GenSeaTex {
     // ---- the textures ----------------------------------------------------
 
     /**
-     * Riveted hull plating with a brass rim.
+     * Hull plating inside a brass frame, on ALL FOUR sides.
      *
-     * The top two rows are brass because the station model wraps them onto
-     * the top face as the console's bezel - see the note at the top.
+     * The frame has to go right round, and the first version of this got it
+     * wrong by edging only the top and bottom. The console and instrument
+     * models wrap the texture's outer bands onto their top faces as a bezel -
+     * and not just the horizontal ones. They sample columns 0-3 and 13-16 in
+     * plan for the left and right of the rim, so an edge that is hull grey
+     * there puts a grey stripe across what should be a continuous brass lip,
+     * with the frame visibly breaking at two corners.
+     *
+     * The interior is left plain where the models cut their recesses into it -
+     * see KEEP_CLEAR. Detail inside those patches reads as dirt on a dial.
      */
     static BufferedImage hullPanel() {
         BufferedImage img = blank();
         fill(img, 0, 0, 15, 15, HULL);
-        weather(img, 0, 0, 15, 15, HULL_DARK);
 
-        // Brass edging, top and bottom.
-        fill(img, 0, 0, 15, 1, BRASS);
-        fill(img, 0, 1, 15, 1, BRASS_DARK);
-        fill(img, 0, 14, 15, 15, BRASS_DARK);
-        fill(img, 0, 14, 15, 14, BRASS);
+        brassFrame(img);
 
-        // A plate seam down the middle, with rivets either side of it.
-        fill(img, 7, 2, 8, 13, HULL_DARK);
-        for (int y = 4; y <= 12; y += 4) {
-            img.setRGB(4, y, HULL_LITE);
-            img.setRGB(11, y, HULL_LITE);
+        // Rivets, in the corners of the interior where nothing samples.
+        for (int x : new int[] { 3, 12 }) {
+            for (int y : new int[] { 10, 12 }) img.setRGB(x, y, HULL_LITE);
         }
+        recess(img, 4, 6, 10, 8);        // the console's sunken screen surround
         return img;
+    }
+
+    /**
+     * The autopilot's case: the same frame, a different interior.
+     *
+     * Its model cuts a different recess from the station's - rows 3 to 6
+     * rather than 6 to 8 - so the two cannot share one texture without one
+     * of them showing plating where its instrument should be.
+     */
+    static BufferedImage instrumentCase() {
+        BufferedImage img = blank();
+        fill(img, 0, 0, 15, 15, HULL);
+
+        brassFrame(img);
+        recess(img, 5, 3, 11, 6);        // the instrument face
+
+        // A pair of gauges below the recess, clear of everything sampled.
+        img.setRGB(5, 9, VERDIGRIS);
+        img.setRGB(6, 9, BRASS);
+        img.setRGB(10, 9, VERDIGRIS);
+        img.setRGB(9, 9, BRASS);
+        fill(img, 4, 11, 11, 11, HULL_DARK);
+        return img;
+    }
+
+    /**
+     * Two pixels of brass all the way round, lit from the top left.
+     *
+     * Two rather than one because the models sample three-pixel bands in
+     * plan: one pixel of brass inside a three-pixel strip reads as a grey
+     * lip with a thin line on it rather than as brass.
+     */
+    static void brassFrame(BufferedImage img) {
+        fill(img, 0, 0, 15, 1, BRASS);
+        fill(img, 0, 0, 1, 15, BRASS);
+        fill(img, 0, 14, 15, 15, BRASS_DARK);
+        fill(img, 14, 0, 15, 15, BRASS_DARK);
+        // Row 0 stays the lighter brass across its full width: the rim's
+        // outward face is sampled from it alone, and a darker corner there
+        // shows up as a notch in the lip.
+        fill(img, 0, 0, 15, 0, BRASS);
+    }
+
+    /** A sunken panel the model cuts into, left plain so it reads as a
+     *  recess rather than as plating with something spilled on it. */
+    static void recess(BufferedImage img, int x0, int y0, int x1, int y1) {
+        fill(img, x0, y0, x1, y1, DEEP);
+        fill(img, x0, y0, x1, y0, HULL_DARK);
     }
 
     /** The harbourmaster's chart: paper, a coastline, and a route. */
