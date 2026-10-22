@@ -1,12 +1,22 @@
 package com.seaport.block;
 
+import com.seaport.blockentity.MarineAutopilotBlockEntity;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.EntityBlock;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.DirectionProperty;
+import net.minecraft.world.phys.BlockHitResult;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Placed on a ship, and the thing that sails it.
@@ -16,9 +26,9 @@ import net.minecraft.world.level.block.state.properties.DirectionProperty;
  * the vessel it is mounted on, a course across charted water, and the small
  * corrections that keep it off a sandbar and out of another ship.
  *
- * Inert for now, apart from which way it points.
+ * The block entity holds the orders; nothing sails them yet.
  */
-public class MarineAutopilotBlock extends Block {
+public class MarineAutopilotBlock extends Block implements EntityBlock {
 
     /**
      * Which way the bow is.
@@ -62,5 +72,21 @@ public class MarineAutopilotBlock extends Block {
     @Override
     protected boolean useShapeForLightOcclusion(BlockState state) {
         return true;
+    }
+
+    @Override
+    public @Nullable BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
+        return new MarineAutopilotBlockEntity(pos, state);
+    }
+
+    @Override
+    protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos,
+                                               Player player, BlockHitResult hit) {
+        if (level.isClientSide()) return InteractionResult.SUCCESS;
+        if (level.getBlockEntity(pos) instanceof MarineAutopilotBlockEntity autopilot
+                && player instanceof ServerPlayer serverPlayer) {
+            autopilot.openScreen(serverPlayer);
+        }
+        return InteractionResult.CONSUME;
     }
 }

@@ -72,14 +72,19 @@ public class PortStationScreen extends Screen {
     private static final int DEEP_WATER = 14;
 
     private static final int COLOR_BERTH = 0xFFE0812F;
+    private static final int COLOR_BERTH_PICKED = 0xFFFFB45E;
     private static final int COLOR_BERTH_PENDING = 0xFFE8C34A;
+
+    /** Pixels either side of a berth's centre line. Enough that it reads as
+     *  a vessel lying alongside rather than as a line joining two places. */
+    private static final int BERTH_HALF_WIDTH = 2;
     private static final int COLOR_PLAYER = 0xFFE33A3A;
     private static final int COLOR_STATION = 0xFF4E9E8C;
     private static final int COLOR_NOTICE = 0xFFE0603A;
 
     private enum Tool {
-        DRAW("Draw", "Click one end of the quay edge, then the other."),
-        MOVE("Move", "Drag either end of a berth to somewhere better."),
+        DRAW("Draw", "Click where the bow goes, then where the stern goes."),
+        MOVE("Move", "Drag the bow or the stern to somewhere better."),
         DELETE("Delete", "Click a berth to remove it.");
 
         final String label;
@@ -107,6 +112,7 @@ public class PortStationScreen extends Screen {
 
     private EditBox nameBox;
     private EditBox berthNameBox;
+    private Button flipButton;
     private Button clearanceButton;
     private Button zoomButton;
 
@@ -227,14 +233,21 @@ public class PortStationScreen extends Screen {
         centre.setTooltip(Tooltip.create(Component.literal(
                 "Bring the chart back to the station. Right-drag the chart to pan.")));
 
-        // --- footer: name the selected berth, and leave.
+        // --- footer: name the selected berth, turn it round, and leave.
         int footerY = height - rowH - gap;
         int saveW = 100;
-        berthNameBox = addRenderableWidget(new EditBox(font, mapX, footerY, mapW - saveW - 4, rowH,
-                Component.literal("Berth name")));
+        int flipW = 40;
+        berthNameBox = addRenderableWidget(new EditBox(font, mapX, footerY,
+                mapW - saveW - flipW - 8, rowH, Component.literal("Berth name")));
         berthNameBox.setMaxLength(Wharf.MAX_NAME_LENGTH);
         berthNameBox.setHint(Component.literal("Berth name"));
         berthNameBox.setResponder(this::renameSelected);
+
+        flipButton = addRenderableWidget(Button.builder(Component.literal("Flip"), b -> flipSelected())
+                .bounds(mapX + mapW - saveW - flipW - 4, footerY, flipW, rowH).build());
+        flipButton.setTooltip(Tooltip.create(Component.literal(
+                "Swap the bow and stern of the selected berth, so a ship lies the other way "
+                        + "round. Quicker than redrawing it the right way.")));
 
         addRenderableWidget(Button.builder(Component.literal("Save & Close"), b -> saveAndClose())
                 .bounds(mapX + mapW - saveW, footerY, saveW, rowH).build());
@@ -303,9 +316,20 @@ public class PortStationScreen extends Screen {
 
         boolean hasSelection = selected >= 0 && selected < layout.wharves().size();
         berthNameBox.active = hasSelection;
+        flipButton.active = hasSelection;
         loadingBerthName = true;
         berthNameBox.setValue(hasSelection ? layout.wharves().get(selected).name() : "");
         loadingBerthName = false;
+    }
+
+    /** Turn the selected berth round, so a ship lies bow the other way.
+     *  Which way a vessel points decides which of its sides comes alongside,
+     *  and getting it backwards should be one click to undo rather than a
+     *  redraw. */
+    private void flipSelected() {
+        if (selected < 0 || selected >= layout.wharves().size()) return;
+        Wharf wharf = layout.wharves().get(selected);
+        layout.wharves().set(selected, new Wharf(wharf.name(), wharf.to(), wharf.from()));
     }
 
     private void renameSelected(String typed) {
@@ -386,7 +410,7 @@ public class PortStationScreen extends Screen {
         // next click tried to close the same zero-length line again.
         pendingEnd = null;
         if (!wharf.isUsable()) {
-            say("Too short - a berth needs two different blocks");
+            say("Too short - the bow and stern cannot be the same block");
             return;
         }
         layout.wharves().add(wharf);
@@ -676,15 +700,14 @@ public class PortStationScreen extends Screen {
         drawStationMarker(guiGraphics);
         drawPlayerMarker(guiGraphics);
 
-        // The half-drawn berth, so the line being made is visible before it
-        // is committed rather than appearing all at once on the second click.
+        // The bow that has been placed, waiting for its stern. Deliberately
+        // NOT joined to the cursor: a line that follows the mouse reads as
+        // the berth itself being dragged out, when what is actually on the
+        // chart so far is one point. The berth appears whole on the second
+        // click or not at all.
         if (pendingEnd != null) {
-            int px = worldToScreenX(pendingEnd);
-            int py = worldToScreenY(pendingEnd);
-            guiGraphics.fill(px - 2, py - 2, px + 3, py + 3, COLOR_BERTH_PENDING);
-            if (isInsideMap(mouseX, mouseY)) {
-                drawPixelLine(guiGraphics, px, py, (int) mouseX, (int) mouseY, COLOR_BERTH_PENDING);
-            }
+            drawBow(guiGraphics, worldToScreenX(pendingEnd), worldToScreenY(pendingEnd),
+                    COLOR_BERTH_PENDING);
         }
 
         guiGraphics.disableScissor();
@@ -713,12 +736,21 @@ public class PortStationScreen extends Screen {
     private String hint() {
         if (tool == Tool.DRAW) {
             return pendingEnd == null
-                    ? (layout.wharves().isEmpty() ? "click one end of a quay edge" : "click to start a berth")
-                    : "click the other end";
+                    ? (layout.wharves().isEmpty() ? "click where the bow goes" : "click to start a berth - bow first")
+                    : "now click where the stern goes";
         }
         return tool.hint;
     }
 
+    /**
+     * Berths, drawn as the vessel that will lie along them.
+     *
+     * A solid bar rather than a one-pixel stroke, with the two ends shaped
+     * differently - a point for the bow, a square transom for the stern.
+     * A thin line between two identical dots looks like something joining two
+     * places together, which is the one thing a berth is not: it is a single
+     * edge, with a ship on it, lying a particular way round.
+     */
     private void drawBerths(GuiGraphics guiGraphics) {
         List<Wharf> wharves = layout.wharves();
         for (int i = 0; i < wharves.size(); i++) {
@@ -726,22 +758,57 @@ public class PortStationScreen extends Screen {
             int ax = worldToScreenX(wharf.from()), ay = worldToScreenY(wharf.from());
             int bx = worldToScreenX(wharf.to()), by = worldToScreenY(wharf.to());
             boolean picked = i == selected;
+            int color = picked ? COLOR_BERTH_PICKED : COLOR_BERTH;
 
-            drawPixelLine(guiGraphics, ax, ay, bx, by, COLOR_BERTH);
-            guiGraphics.fill(ax - 2, ay - 2, ax + 3, ay + 3, COLOR_BERTH);
-            guiGraphics.fill(bx - 2, by - 2, bx + 3, by + 3, COLOR_BERTH);
-            if (picked) {
-                drawBorder(guiGraphics, ax - 4, ay - 4, 9, 9, 0xFFFFFFFF);
-                drawBorder(guiGraphics, bx - 4, by - 4, 9, 9, 0xFFFFFFFF);
-            }
+            drawThickLine(guiGraphics, ax, ay, bx, by, BERTH_HALF_WIDTH, color);
+            drawBow(guiGraphics, ax, ay, color);
+            drawStern(guiGraphics, bx, by, color);
 
-            // The name on the selected one only. A busy harbour with every
-            // berth labelled is unreadable at four blocks to the pixel.
+            // Which end is which, and what it is called, on the selected one
+            // only. Every berth labelled makes a busy harbour unreadable at
+            // four blocks to the pixel.
             if (picked) {
-                guiGraphics.drawString(font, wharf.name(), (ax + bx) / 2 + 5, (ay + by) / 2 - 4,
-                        0xFFFFFFFF, false);
+                drawBorder(guiGraphics, ax - 5, ay - 5, 11, 11, 0xFFFFFFFF);
+                drawBorder(guiGraphics, bx - 5, by - 5, 11, 11, 0xFFFFFFFF);
+                guiGraphics.drawString(font, "bow", ax + 7, ay - 4, 0xFFFFFFFF, false);
+                guiGraphics.drawString(font, "stern", bx + 7, by - 4, 0xFFFFFFFF, false);
+                guiGraphics.drawString(font, wharf.name(),
+                        (ax + bx) / 2 + 7, (ay + by) / 2 + 4, 0xFFFFFFFF, false);
             }
         }
+    }
+
+    /** A line with width, built from parallel strokes stepped across the
+     *  perpendicular. Half-pixel steps because whole ones round onto each
+     *  other on a diagonal and leave the bar full of holes. */
+    private static void drawThickLine(GuiGraphics guiGraphics, int x0, int y0, int x1, int y1,
+                                      int half, int color) {
+        double dx = x1 - x0, dy = y1 - y0;
+        double length = Math.hypot(dx, dy);
+        if (length < 1) {
+            guiGraphics.fill(x0 - half, y0 - half, x0 + half + 1, y0 + half + 1, color);
+            return;
+        }
+        double nx = -dy / length, ny = dx / length;
+        for (double offset = -half; offset <= half; offset += 0.5) {
+            int ox = (int) Math.round(nx * offset);
+            int oy = (int) Math.round(ny * offset);
+            drawPixelLine(guiGraphics, x0 + ox, y0 + oy, x1 + ox, y1 + oy, color);
+        }
+    }
+
+    /** The bow: a point. */
+    private static void drawBow(GuiGraphics guiGraphics, int x, int y, int color) {
+        for (int dy = -3; dy <= 3; dy++) {
+            int w = 3 - Math.abs(dy);
+            guiGraphics.fill(x - w, y + dy, x + w + 1, y + dy + 1, color);
+        }
+    }
+
+    /** The stern: a square transom, so the two ends are told apart at a
+     *  glance without reading anything. */
+    private static void drawStern(GuiGraphics guiGraphics, int x, int y, int color) {
+        guiGraphics.fill(x - 3, y - 3, x + 4, y + 4, color);
     }
 
     /** The station itself, so there is something on the chart to relate the

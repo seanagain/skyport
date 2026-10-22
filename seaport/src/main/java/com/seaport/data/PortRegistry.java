@@ -32,6 +32,11 @@ public class PortRegistry extends SavedData {
 
     private final Map<UUID, PortLayout> ports = new HashMap<>();
 
+    /** Channel markers, kept here with the ports because they are the other
+     *  half of the same directory: a schedule names both, and both have to be
+     *  findable without their chunk being loaded. */
+    private final Map<UUID, Beacon> beacons = new HashMap<>();
+
     public static PortRegistry get(ServerLevel level) {
         ServerLevel overworld = level.getServer().overworld();
         return overworld.getDataStorage().computeIfAbsent(FACTORY, DATA_NAME);
@@ -68,11 +73,43 @@ public class PortRegistry extends SavedData {
         if (ports.remove(id) != null) setDirty();
     }
 
+    // ---- channel markers -------------------------------------------------
+
+    public Optional<Beacon> beaconById(UUID id) {
+        return Optional.ofNullable(beacons.get(id));
+    }
+
+    public Collection<Beacon> beacons() {
+        return beacons.values();
+    }
+
+    public Optional<Beacon> beaconNamed(String name) {
+        return beacons.values().stream()
+                .filter(beacon -> beacon.name().equalsIgnoreCase(name))
+                .findFirst();
+    }
+
+    public void putBeacon(Beacon beacon) {
+        beacons.put(beacon.id(), beacon);
+        setDirty();
+    }
+
+    /** Forget a mark - its block has been broken. A schedule still naming it
+     *  routes straight to the next stop instead, which is the same thing the
+     *  router would have done had the mark never been dropped. */
+    public void removeBeacon(UUID id) {
+        if (beacons.remove(id) != null) setDirty();
+    }
+
     @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider registries) {
         ListTag list = new ListTag();
         for (PortLayout port : ports.values()) list.add(port.save());
         tag.put("ports", list);
+
+        ListTag marks = new ListTag();
+        for (Beacon beacon : beacons.values()) marks.add(beacon.save());
+        tag.put("beacons", marks);
         return tag;
     }
 
@@ -86,6 +123,17 @@ public class PortRegistry extends SavedData {
             } catch (RuntimeException unreadable) {
                 // One corrupt port must not stop the world loading. The rest
                 // of the harbours are fine and this one can be rebuilt.
+            }
+        }
+
+        ListTag marks = tag.getList("beacons", Tag.TAG_COMPOUND);
+        for (int i = 0; i < marks.size(); i++) {
+            try {
+                Beacon beacon = Beacon.load(marks.getCompound(i));
+                registry.beacons.put(beacon.id(), beacon);
+            } catch (RuntimeException unreadable) {
+                // Same again: one unreadable mark is not worth a world that
+                // will not load, and a mark is a block you can replace.
             }
         }
         return registry;

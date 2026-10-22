@@ -6,5 +6,7 @@
   "block.seaport.marine_beacon": "Marine Beacon",
   "block.seaport.marine_autopilot": "Marine Autopilot",
 
-  "gui.seaport.port_station.title": "Port Station"
+  "gui.seaport.port_station.title": "Port Station",
+  "gui.seaport.marine_beacon.title": "Channel Marker",
+  "gui.seaport.marine_autopilot.title": "Helm"
 }
